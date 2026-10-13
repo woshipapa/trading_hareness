@@ -2,7 +2,7 @@ import { computed, ref, watch, type Ref } from 'vue';
 import { membershipsApi, type MembershipRow, type MembershipSettings } from '../api/memberships';
 import type { TargetRegistryRow } from '../api/target-registry';
 
-type MembershipEdit = { started_on: string; term_months: number; expires_on: string | null; note: string | null; exempt: boolean };
+type MembershipEdit = { started_on: string; term_months: number; expires_on: string | null; note: string | null; exempt: boolean; alias?: string };
 
 function sortRank(row: MembershipRow, exempt: boolean): number {
   if (exempt) return 3;
@@ -104,7 +104,7 @@ export function useMemberships(selectedTarget: Ref<TargetRegistryRow | null>) {
   async function saveMember(userId: string, value: MembershipEdit) {
     if (!target.value || !eligible.value || !settings.value) return false;
     const chatId = target.value.chat_id;
-    const member = await run('save-member', () => membershipsApi.updateMember(chatId, userId, { started_on: value.started_on, term_months: value.term_months, expires_on: value.expires_on, note: value.note, exempt: value.exempt }));
+    const member = await run('save-member', () => membershipsApi.updateMember(chatId, userId, { started_on: value.started_on, term_months: value.term_months, expires_on: value.expires_on, note: value.note, exempt: value.exempt, ...(value.alias === undefined ? {} : { alias: value.alias }) }));
     if (!member) {
       const failure = error.value;
       await load();

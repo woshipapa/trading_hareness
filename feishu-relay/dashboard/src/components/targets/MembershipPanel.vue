@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { Bell, Edit, Refresh, Search, Setting } from '@element-plus/icons-vue';
 import { targetGroupsContextKey } from '../../dashboard-context';
 import { useMemberships } from '../../composables/useMemberships';
+import { rewrittenAlias } from '../../composables/membershipAlias';
 import type { MembershipRow, MembershipSuggestion } from '../../api/memberships';
 
 const selection = inject(targetGroupsContextKey);
@@ -16,7 +17,8 @@ const settingsForm = reactive({ enabled: false, default_term_months: 1, remind_t
 const editDialog = ref(false);
 const editError = ref('');
 const editing = ref<MembershipRow | null>(null);
-const editForm = reactive({ started_on: '', term_months: 1, fixed: false, expires_on: '', note: '', exempt: false });
+const editForm = reactive({ started_on: '', term_months: 1, fixed: false, expires_on: '', note: '', exempt: false, alias: '' });
+const pickedSuggestion = ref<MembershipSuggestion | null>(null);
 
 const ready = computed(() => Boolean(memberships.target.value) && memberships.eligible.value);
 
@@ -82,7 +84,9 @@ function openEdit(row: MembershipRow) {
     expires_on: row.expires_on,
     note: row.note ?? '',
     exempt: memberships.settings.value?.exempt_user_ids.includes(row.user_id) ?? false,
+    alias: row.alias ?? '',
   });
+  pickedSuggestion.value = null;
   editDialog.value = true;
 }
 
@@ -92,6 +96,17 @@ function applySuggestion(suggestion: MembershipSuggestion) {
   if (suggestion.term_months) editForm.term_months = suggestion.term_months;
   editForm.fixed = Boolean(suggestion.expires_on);
   if (suggestion.expires_on) editForm.expires_on = suggestion.expires_on;
+  pickedSuggestion.value = suggestion;
+}
+
+// Puts the dates in the form into the alias, for the person to read and correct before saving.
+function rewriteAlias() {
+  if (!editing.value) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(editForm.started_on) || (editForm.fixed && !/^\d{4}-\d{2}-\d{2}$/.test(editForm.expires_on ?? ''))) {
+    editError.value = '先填好开始日期（和指定的到期日）再改写备注名';
+    return;
+  }
+  editForm.alias = rewrittenAlias(editing.value, editForm, pickedSuggestion.value);
 }
 
 async function saveEdit() {
@@ -105,10 +120,12 @@ async function saveEdit() {
     return;
   }
   editError.value = '';
-  const edit = { started_on: editForm.started_on, term_months: editForm.term_months, expires_on: editForm.fixed ? editForm.expires_on : null, note: editForm.note || null, exempt: editForm.exempt };
+  const alias = editForm.alias.trim();
+  const aliasChanged = alias !== (editing.value.alias ?? '');
+  const edit = { started_on: editForm.started_on, term_months: editForm.term_months, expires_on: editForm.fixed ? editForm.expires_on : null, note: editForm.note || null, exempt: editForm.exempt, ...(aliasChanged ? { alias } : {}) };
   if (await memberships.saveMember(editing.value.user_id, edit)) {
     editDialog.value = false;
-    ElMessage.success('会员信息已保存');
+    ElMessage.success(aliasChanged ? '会员信息已保存，飞书里的备注名也改了' : '会员信息已保存');
   }
 }
 
@@ -181,12 +198,14 @@ async function remind(row: MembershipRow) {
   <el-dialog v-model="editDialog" title="编辑会员" width="520px" destroy-on-close>
     <el-alert v-if="editError" :title="editError" type="error" :closable="false" show-icon class="section-gap" />
     <el-form :model="editForm" label-position="top">
-      <el-form-item v-if="editing?.alias" :label="`备注名：${editing.alias}`">
-        <el-space v-if="editing.suggestions?.length" wrap>
+      <el-form-item label="备注名（飞书里只有你自己看得到；改了的话，保存时一并写到飞书）">
+        <el-input v-model="editForm.alias" placeholder="没有备注名">
+          <template #append><el-button @click="rewriteAlias">按下面的日期改写</el-button></template>
+        </el-input>
+        <el-space v-if="editing?.suggestions?.length" wrap class="membership-offers">
           <span class="membership-hint">按备注名填：</span>
           <el-button v-for="suggestion in editing.suggestions" :key="suggestion.label" size="small" plain @click="applySuggestion(suggestion)">{{ suggestion.label }}</el-button>
         </el-space>
-        <span v-else class="membership-hint">备注名里没有读出日期或期限</span>
       </el-form-item>
       <el-form-item label="开始日期"><el-date-picker v-model="editForm.started_on" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" class="full-width" /></el-form-item>
       <el-form-item label="期限">
@@ -217,6 +236,7 @@ async function remind(row: MembershipRow) {
 <style scoped>
 .membership-empty { padding: 10px 0 4px; color: #738198; }
 .membership-hint { color: #738198; font-size: 13px; }
+.membership-offers { margin-top: 8px; }
 .membership-settings { display: grid; grid-template-columns: 180px minmax(280px, 1fr) minmax(260px, 1.4fr) auto; gap: 14px; align-items: end; }
 .membership-settings .el-form-item { margin-bottom: 0; }
 .remind-text-field { min-width: 0; }

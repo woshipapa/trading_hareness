@@ -50,6 +50,20 @@ def _aliases(client, user_ids: list[str]) -> dict[str, str]:
 	return found
 
 
+def set_alias(bridge, payload: dict[str, Any]) -> dict[str, Any]:
+	"""Write the name the account gives one person (备注名). Only the account sees it; an empty name clears it.
+
+	Tried 2026-10-14 on one contact: the same value, one character more, the
+	original again; each write answered with a plain success and read back.
+	"""
+	user_id = str(payload.get("user_id", "")).strip()
+	if not user_id.isdigit():
+		raise ValueError("user_id 必须是数字")
+	alias = str(payload.get("alias", "")).strip()
+	checked(require_client(bridge).api("users.PutUserAliasRequest", {"targetId": int(user_id), "name": alias}))
+	return {"status": "ok", "user_id": user_id, "alias": alias}
+
+
 def list_members(bridge, payload: dict[str, Any]) -> dict[str, Any]:
 	chat_id = _chat_id(payload)
 	client = _owned(bridge, chat_id)
@@ -159,4 +173,5 @@ ROUTES = {
 	"/chat-members/applications": applications,
 	"/chat-members/applications/decide": decide_application,
 	"/chat-members/remove": remove_member,
+	"/users/alias": set_alias,
 }

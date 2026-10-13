@@ -67,11 +67,12 @@ function memberRow(row) {
 	return { ...row, started_on: dateText(row.started_on), expires_on: dateText(row.expires_on), reminded_on: dateText(row.reminded_on), alias: row.alias ?? '', expiry_fixed: row.expiry_fixed === true };
 }
 
-const NUMERALS = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+const NUMERALS = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 };
 const count = (text) => NUMERALS[text] ?? Number(text);
-const MONTHS_AHEAD = /^\s*(?:(半年)|(一年|1年)|((?:[一1]个?)?季度?)|([一二两三四五六七八九十]|1[0-2]|[1-9])\s*(?:个月|个|月)|([一二两三四五六])(?![\u4e00-\u9fff]))/;
+const MONTHS_AHEAD = /^\s*(?:(半年)|(一年|1年)|((?:[一1]个?)?季度?)|(十[一二]|[一二两三四五六七八九十]|1[0-2]|[1-9])\s*(?:个月|个|月)|([一二两三四五六])(?![\u4e00-\u9fff]))/;
 const WEEKS_AHEAD = /^\s*([一二两三]|[1-3])\s*周/;
-const MONTHS_BEHIND = /(?:(半年)|(一年|1年)|((?:[一1]个?)?季度?)|([一二两三四五六七八九十])\s*(?:个月|个|月))\s*$/;
+const MONTHS_BEHIND = /(?:(半年)|(一年|1年)|((?:[一1]个?)?季度?)|(十[一二]|[一二两三四五六七八九十])\s*(?:个月|个|月))\s*$/;
+const UNTIL_AHEAD = /^\s*到\s*(\d{3,4})(?![0-9A-Za-z月])/;
 
 function monthsOf(match) {
 	if (!match) return 0;
@@ -100,43 +101,51 @@ function nearestDate(digits, today) {
 	return best?.date ?? null;
 }
 
-// What an alias such as "阿明 108三个月" or "到12月底" says about a membership: a start date, a term, an expiry date.
-// The alias is free text and may carry several products' dates, so these are offers for a person to pick from, never
-// applied by themselves. A two-digit number counts as a date only with a term beside it.
+// What an alias such as "阿明 108三个月", "918到1030" or "到12月底" says about a membership: a start date, a term, an
+// expiry date. The alias is free text and may carry several products' dates, so these are offers for a person to pick
+// from, never applied by themselves. A two-digit number counts as a date only with a term beside it. `span` is where
+// the offer was read in the alias, so that this part can be rewritten when the member renews.
 export function aliasSuggestions(alias, today) {
 	const text = String(alias ?? '');
 	const found = [];
 	const offer = (item) => { if (!found.some((other) => other.label === item.label)) found.push(item); };
 	const short = (date) => date.slice(5);
+	const apart = (date) => Math.abs(new Date(date) - new Date(today));
+	const monthEnd = (month) => [-1, 0, 1].map((shift) => new Date(Date.UTC(Number(today.slice(0, 4)) + shift, month, 0)).toISOString().slice(0, 10)).reduce((best, date) => (apart(date) < apart(best) ? date : best));
 	let dated = false;
 	let used = 0;
-	for (const match of text.matchAll(/到?\s*(1[0-2]|[1-9])\s*月底|(?<![0-9A-Za-z])(\d{2,4})(?![0-9A-Za-z月])/g)) {
-		if (match[1]) {
-			const month = Number(match[1]);
-			const ends = [-1, 0, 1].map((shift) => new Date(Date.UTC(Number(today.slice(0, 4)) + shift, month, 0)).toISOString().slice(0, 10));
-			const expiresOn = ends.reduce((best, date) => (Math.abs(new Date(date) - new Date(today)) < Math.abs(new Date(best) - new Date(today)) ? date : best));
-			offer({ started_on: null, term_months: null, expires_on: expiresOn, label: `到 ${short(expiresOn)}` });
+	for (const match of text.matchAll(/到?\s*(1[0-2]|[1-9])\s*月底|到\s*(\d{3,4})(?![0-9A-Za-z月])|(?<![0-9A-Za-z])(\d{2,4})(?![0-9A-Za-z月])/g)) {
+		if (match.index < used) continue;
+		const end = match.index + match[0].length;
+		if (match[1] || match[2]) {
+			const expiresOn = match[1] ? monthEnd(Number(match[1])) : nearestDate(match[2], today);
+			if (expiresOn) offer({ started_on: null, term_months: null, expires_on: expiresOn, label: `到 ${short(expiresOn)}`, span: [match.index, end] });
+			used = end;
 			continue;
 		}
-		const startedOn = nearestDate(match[2], today);
+		const startedOn = nearestDate(match[3], today);
 		if (!startedOn) continue;
-		const end = match.index + match[0].length;
 		const after = text.slice(end);
-		const ahead = monthsOf(MONTHS_AHEAD.exec(after)) ? MONTHS_AHEAD.exec(after) : null;
+		const until = UNTIL_AHEAD.exec(after);
+		const untilDate = until ? nearestDate(until[1], today) : null;
+		const ahead = !untilDate && monthsOf(MONTHS_AHEAD.exec(after)) ? MONTHS_AHEAD.exec(after) : null;
 		// A term written before the date ("三个月826") counts only if an earlier date has not taken it already.
-		const months = monthsOf(ahead) || monthsOf(MONTHS_BEHIND.exec(text.slice(used, match.index)));
-		const weekMatch = WEEKS_AHEAD.exec(ahead ? after.slice(ahead[0].length) : after);
+		const behind = !untilDate && !ahead ? MONTHS_BEHIND.exec(text.slice(used, match.index)) : null;
+		const months = monthsOf(ahead) || monthsOf(behind);
+		const weekMatch = untilDate ? null : WEEKS_AHEAD.exec(ahead ? after.slice(ahead[0].length) : after);
 		const weeks = count(weekMatch?.[1] ?? 0);
-		if (match[2].length === 2 && !months && !weeks) continue;
-		used = end + (ahead?.[0].length ?? 0) + (weekMatch?.[0].length ?? 0);
+		if (match[3].length === 2 && !months && !weeks && !untilDate) continue;
 		dated = true;
-		const expiresOn = weeks ? addDays(months ? addMonths(startedOn, months) : startedOn, weeks * 7) : null;
-		const term = months && weeks ? ` ${months} 个月加 ${weeks} 周（到 ${short(expiresOn)}）` : months ? ` ${months} 个月` : weeks ? ` ${weeks} 周（到 ${short(expiresOn)}）` : '';
-		offer({ started_on: startedOn, term_months: months || null, expires_on: expiresOn, label: `${short(startedOn)} 起${term}` });
+		const from = monthsOf(behind) ? used + behind.index : match.index;
+		const to = end + (untilDate ? until[0].length : (ahead?.[0].length ?? 0) + (weekMatch?.[0].length ?? 0));
+		const expiresOn = untilDate ?? (weeks ? addDays(months ? addMonths(startedOn, months) : startedOn, weeks * 7) : null);
+		const term = untilDate ? `，到 ${short(untilDate)}` : months && weeks ? ` ${months} 个月加 ${weeks} 周（到 ${short(expiresOn)}）` : months ? ` ${months} 个月` : weeks ? ` ${weeks} 周（到 ${short(expiresOn)}）` : '';
+		offer({ started_on: startedOn, term_months: months || null, expires_on: expiresOn, label: `${short(startedOn)} 起${term}`, span: [from, to] });
+		used = to;
 	}
 	if (!dated) {
-		const months = monthsOf(/(?:(半年)|(一年|1年)|((?:[一1]个?)?季度)|([一二两三四五六七八九十])\s*个月)/.exec(text));
-		if (months) offer({ started_on: null, term_months: months, expires_on: null, label: `${months} 个月` });
+		const match = /(?:(半年)|(一年|1年)|((?:[一1]个?)?季度)|(十[一二]|[一二两三四五六七八九十])\s*个月)/.exec(text);
+		if (match) offer({ started_on: null, term_months: monthsOf(match), expires_on: null, label: `${monthsOf(match)} 个月`, span: [match.index, match.index + match[0].length] });
 	}
 	return found;
 }
@@ -279,6 +288,17 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		if (expiresOn < startedOn) throw new Error('到期日不能早于开始日期');
 		const note = body?.note == null ? null : String(body.note);
 		if (body?.exempt !== undefined && typeof body.exempt !== 'boolean') throw new Error('exempt 必须是布尔值');
+		// A renewal usually changes what the alias in Feishu should say as well. The alias is written first: if Feishu
+		// refuses it, nothing is saved. It belongs to the person, so every group's row for them takes the new one.
+		if (body?.alias != null) {
+			const alias = String(body.alias).trim();
+			const current = (await rows(key)).find((row) => String(row.user_id) === String(userId));
+			if (!current) throw new Error('会员不存在，请先同步成员');
+			if (alias !== current.alias) {
+				await bridgePost('/users/alias', { user_id: String(userId), alias }, 30_000);
+				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET alias=$2 WHERE user_id=$1`, [String(userId), alias]);
+			}
+		}
 		const config = body?.exempt === undefined ? null : await settings(key);
 		const exemptIds = config ? new Set(config.exempt_user_ids) : null;
 		if (exemptIds && body.exempt) exemptIds.add(String(userId));

@@ -82,6 +82,22 @@ class ChatMembersTest(unittest.TestCase):
 			("chatters.PullChattersByIdsRequest", {"chatterIds": ["200", "300"]}),
 		])
 
+	def test_an_alias_is_written_for_one_person_and_an_empty_one_clears_it(self):
+		client = Client()
+		answer = ROUTES["/users/alias"](Bridge(client), {"user_id": "200", "alias": " 阿明 108三个月 "})
+		self.assertEqual(answer, {"status": "ok", "user_id": "200", "alias": "阿明 108三个月"})
+		self.assertEqual(client.calls, [("users.PutUserAliasRequest", {"targetId": 200, "name": "阿明 108三个月"})])
+		ROUTES["/users/alias"](Bridge(client), {"user_id": "200", "alias": ""})
+		self.assertEqual(client.calls[-1], ("users.PutUserAliasRequest", {"targetId": 200, "name": ""}))
+		with self.assertRaises(ValueError):
+			ROUTES["/users/alias"](Bridge(client), {"user_id": "ou_x", "alias": "x"})
+		self.assertEqual(len(client.calls), 2)
+
+	def test_a_refused_alias_write_carries_the_gateways_reason(self):
+		client = Client(pages=[{"sid": "no permission", "payloadType": 2}])
+		with self.assertRaisesRegex(GroupAdminError, "no permission"):
+			ROUTES["/users/alias"](Bridge(client), {"user_id": "200", "alias": "x"})
+
 	def test_member_list_carries_the_alias_the_account_gave_each_person(self):
 		client = Client(pages=[
 			{"chatterJoinTimeSec": {"100": 10, "200": 20, "300": 30}},
