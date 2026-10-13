@@ -38,6 +38,8 @@
 
 ## Due
 
+- [ ] 2026-10-13 19:30 核对当晚盘后自动生成的涨停榜和风险分读数（明早 09:15 的竞价池从 10 月 13 日的风险分读数取昨日涨停股）：`curl 'http://127.0.0.1:18300/api/research/market/limit-up-risk/daily'` 返回的 `reading.trade_date` 应是 2026-10-13。没有的话看盘后流程是否运行，以及 owner 主机是否正常（BACKLOG B031）。
+
 ## Evidence
 
 - 发布记录：`docs/RELEASE_SYNC_47.md` 末尾 “2026-10-12 夜至 10-13 凌晨” 和 “2026-10-13 午间” 两行。
