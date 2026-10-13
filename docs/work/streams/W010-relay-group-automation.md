@@ -5,9 +5,9 @@
 - goal: 在转发看板里完成建同步群、管理目标群成员、源头撤回后同步撤回、降级告警加急、粘贴邀请链接入群，以及把现有目标群纳入看板管理
 - plan: docs/work/plans/relay-group-automation.md
 - branch: integration/relay-auto
-- head: 10d5f55b
-- release: edge 中继 `hotfix-20261013T100002Z-10d5f55bf233-24792`（base：接缝、R、“目标群”栏目）
-- next: 收齐五条功能线的看板一步（create、members、urgent、recall、membership；join 已返回 ae4f174f，评审者已派）。每条线：复跑验收（含看板）→ Codex 评审者（只读，新线程）→ 修 → edge 上跑 bridge 套件 → `--no-ff` 合进集成分支 → 集成分支全验收 → 合进 main → 热更新 → 线上核对 → 告诉用户可以试什么。顺序 join → create → members → membership → urgent → recall
+- head: 141fb2ea
+- release: edge 中继 `hotfix-20261013T130447Z-141fb2ea8305-26916`（已上线：base、R、J、C、M、D；未上线：U、E）
+- next: 收 members 线的补丁（成员列表加 `is_bot`、`is_self`，线程 01a1348e）、urgent 线的四条修正（线程 01a13490）、membership 线的五条修正（线程 01a13494）。members 补丁合并后，给 membership 线续派：合入集成分支、成员同步跳过 `is_bot` 和 `is_self`。然后 urgent、membership 依次：复跑验收 → edge 上 bridge 套件 → 合进集成分支 → main → 热更新 → 线上核对。最后做探测 P0-8、回收八个工作区、汇总 token 开销
 - updated: 2026-10-13
 
 ## Requirements
@@ -35,7 +35,7 @@
 - [x] 1 线上探测 P0-1 至 P0-7 与 `WEB_GATEWAY.md` — 集成分支 6b31c254；输出在 `docs/work/probes/2026-10-13-relay-auto-p0*.out.txt`（P0-8 在 base 合并后做）
 - [x] 2 base 线 — 后端 `codex/relay-auto-base` ae1bb9d6、看板 `codex/relay-auto-base-ui` ed33aac1，合进集成分支 0e20e6f0，合进 main 10d5f55b；
   集成分支上 adapter 289 项、看板 10 项、构建通过，edge 上 bridge 套件 179 项通过；发布 `hotfix-20261013T100002Z-10d5f55bf233-24792`，状态脚本 ALL CHECKS PASSED
-- [ ] 3 六条功能线（join、create、members、urgent、recall，以及 members 之后的 membership）
+- [ ] 3 六条功能线：join、create、members、recall 已合并并上线（集成分支 645531e6，main 141fb2ea；集成分支上 adapter 310 项、看板 21 项、edge 上 bridge 套件 202 项通过）；urgent、membership 在修评审意见
 - [ ] 4 合并、发布、线上验收
 
 ## Log
@@ -98,6 +98,22 @@
 - 2026-10-13 20:00 六条功能线的后端全部返回，各工作区合入集成分支后本会话复跑：join 292、create 297、members 291、urgent 294、recall 294、membership 299 项 adapter 测试通过，
   bridge 本机都通过（70 项跳过）。提交：join 46619efb、create 8410d72d、members 3d956d98、urgent 6ec46a63、recall 685a957e、membership 69269ceb。
   membership 的实现比方案多了一项：设置里有 `exempt_user_ids`（不提醒名单，例如群主本人），因为成员列表里分不出谁是本账号。
+- 2026-10-13 20:40 J、C 合并发布：集成分支 4749fc2c → main 5a25076a → `hotfix-20261013T123830Z-5a25076a4894-10762`。评审：join WARNING 三条（失败原因里可能带出邀请令牌；未入群时
+  预览会因缺省字段报错；预览缺群主）已修（a1f55d5e）；create APPROVED，三条 P2 没改（`chat_infos` 的失败不经 `checked`；两处测试覆盖不足）。
+  线上：重新生成邀请链接、凭链接预览都正常。
+- 2026-10-13 20:45 线上发现共性问题：飞书拒绝一条网关命令时回的是 HTTP 400 加失败外层，客户端先按状态码抛了 `HTTPError`，`checked` 读不到原因，
+  用户看到的是“400 Client Error…”。correction：`WEB_GATEWAY.md` 里“调用返回失败外层”的说法只对探测脚本成立（它没有 `raise_for_status`）。
+  修法在接缝里：`group_admin.require_client` 返回的客户端把这种异常换成带飞书原因的 `GroupAdminError`（base 分支 02824743）。`WEB_GATEWAY.md` 还没改，待改。
+- 2026-10-13 21:00 M 合并发布：集成分支 64a55af6 → main 85a5af5e → `hotfix-20261013T125819Z-85a5af5ee34d-12722`。评审 WARNING 已修（3f75a626）：缺省的 `action` 报 KeyError；
+  URL 里的编号没校验；门禁测试只测了第一条路由。线上：成员列表、进退群记录、入群申请都能读；已在群里再加入时现在显示飞书的原因且不带令牌。
+  线上又发现两点：(1) 成员列表里有机器人（自测群里是本账号和“转发机器人”），接口没区分——已派补丁加 `is_bot`、`is_self`，E 要据此跳过；
+  (2) 看板的 DELETE 不带请求体，分发函数把它交给 JSON 解析而报“请求不是有效 JSON”，移除成员因此不可用——本会话在集成分支上直接修了（f1de3093，带测试）。
+- 2026-10-13 21:06 D 合并发布（连同上面的分发修正）：集成分支 645531e6 → main 141fb2ea → `hotfix-20261013T130447Z-141fb2ea8305-26916`，状态脚本 ALL CHECKS PASSED。
+  评审 WARNING 四条已修（e8b9b2a7）：旁路每条消息起一个线程没有上限（改成有界队列加一个工作线程）；观察到的非文字消息也会参与匹配；`start()` 重复装定时器；看板切换目标群时旧响应覆盖新数据。
+  线上：不带请求体的 DELETE 正常；`/deliveries` 可读（自测群为空）；bridge 每 60 秒收到一次观察名单（启动时第一次因 bridge 未就绪失败，下一轮成功）。
+  还没看到的：真实转发消息被核对上、以及源头撤回后的同步撤回——要等有文字转发流量和一次真实撤回；探测 P0-8（富文本和卡片读回的样子）没做，目前只核对文字。
+- 2026-10-13 21:10 membership（WARNING：同步把形状不对的回答当成空名单会把所有人标成已离群；失败的审查每分钟重试；编辑成员是两次独立写入；另两条简化）和
+  urgent（WARNING 四条 high：发送被拒没检查；取消息编号可能取到别的消息；每小时上限没加锁；设置没校验）都已交回各自线程修。
 
 ## Waiting on the user
 
@@ -130,9 +146,12 @@
   `relay-auto-members`；`relay-auto-urgent`；`relay-auto-recall`；`relay-auto-membership`（只有 adapter）。另有 base 后端的评审者（只读，cwd 是 base 工作区）。
   没返回的线程编号用 `python3 ~/codebase/agent-skills/own/codex-flow/scripts/codex-trace.py --list` 按 cwd 找。
   结束标志：各调用返回、各工作区 `git status --short` 为空。之后：见 `next`。
-- [ ] 2026-10-13 20:05 六条功能线的看板一步并行在跑（各用自己的实现线程续派；工作区都已合入集成分支 0e20e6f0）：
+- [x] 2026-10-13 20:05 六条线的看板一步 → 全部返回（中途三个调用断线，续派后完成），见 Log。原说明：六条功能线的看板一步并行在跑（各用自己的实现线程续派；工作区都已合入集成分支 0e20e6f0）：
   join 01a1348b（已返回 ae4f174f，评审者已派，cwd 是 join 工作区）、create 01a1348d、members 01a1348e、urgent 01a13490、recall 01a13492、membership 01a13494。
   结束标志：各调用返回、工作区干净。之后：见 `next`。都挂在会话 eac0e1fc 上；接手者按各工作区的提交和 `git status` 判断做到哪。
+- [ ] 2026-10-13 21:10 三个 Codex 调用在跑（都挂在会话 eac0e1fc 上）：members 补丁（线程 01a1348e，工作区 `n8n-relay-auto-members`）；urgent 的四条修正（线程 01a13490）；
+  membership 的五条修正（线程 01a13494）。Codex 的调用有时会提前返回空内容或上一轮的结果，而会话其实还在干活：以工作区的提交和 `git status` 为准，
+  不要因为返回为空就重发。结束标志：各工作区有新提交且干净。之后：见 `next`。
 
 ## Due
 
@@ -152,12 +171,14 @@
 
 ## Resume here
 
-集成分支 `integration/relay-auto` 的工作区在 `/Users/papa/codebase/.codex-wt/n8n-relay-auto-int`；base 线是分支 `codex/relay-auto-base`，
-工作区 `/Users/papa/codebase/.codex-wt/n8n-relay-auto-base`（处置 merge，目标集成分支）。
-已开始派工。集成分支 `integration/relay-auto`（6b31c254）有自己的工作区，用来提交、合并和跑验收；base 线的工作区已建，
-第一步（bridge）在 Codex 手里（见 Running）。base 线还有第二步（adapter）和第三步（看板），三步都做完、双重评审通过后合进集成分支，
-再做探测 P0-8，然后从集成分支拉五条功能线并行派。
-先跑 `bash ~/codebase/agent-skills/own/codex-flow/scripts/lsworktrees.sh . --target integration/relay-auto` 看各工作区的状态。
-mkworktree 用主检出的 HEAD 作基点：建好功能线的工作区后要在里面 `git merge --ff-only integration/relay-auto`，评审的 diff 用
-`integration/relay-auto...HEAD`。本机跑不到导入 `bridge.py` 的测试，每条线合并前要在 edge 上跑完整 bridge 套件。
-不要再跑 P0-1 和 P0-c 脚本。合并进 main、发布都要用户同意；结束时回收工作区并报告 token 开销。
+线上是 `hotfix-20261013T130447Z-141fb2ea8305-26916`（main 141fb2ea，未推送）：base、R、J、C、M、D 已上线；U、E 没上线，在修评审意见（见 Running）。
+集成分支 `integration/relay-auto` 的工作区在 `/Users/papa/codebase/.codex-wt/n8n-relay-auto-int`，各线工作区在同目录的 `n8n-relay-auto-<slug>`
+（base、base-ui、join、create、members、urgent、recall、membership），都还没回收。
+接手先跑：`bash ~/codebase/agent-skills/own/codex-flow/scripts/lsworktrees.sh . --target integration/relay-auto` 和
+`bash scripts/release-sync-status.sh --skip-owner --edge-source-sha 141fb2ea`。
+每条线上线的做法（已经用了四次）：线的分支 `--no-ff` 合进集成分支 → 在集成分支工作区跑 adapter、bridge、看板三套和 `git diff --check main...HEAD`
+→ `bash feishu-relay/scripts/edge/test-bridge-on-edge.sh` → 主检出里 `git merge --no-ff integration/relay-auto` → `bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply`
+→ 等 WebSocket 重连 → 用 `127.0.0.1:18300` 的接口核对 → 状态脚本。
+还欠的：`WEB_GATEWAY.md` 改正“失败外层”的说法；探测 P0-8；发布表补四行（J+C、M、D 以及之后的）；E 的方案审查第三轮（可选）；回收工作区；汇总 token 开销；
+B 类后续：启动时目标群识别失败不重试、`chat_infos` 的失败不带飞书原因、create 线的两处测试覆盖。
+“中继自测群”（7696053062053530578，目标群 `wh_4c9095abdb79bb9ab648e8db`）可随意用来验收；不要再跑 P0-1 和 P0-c 脚本。
