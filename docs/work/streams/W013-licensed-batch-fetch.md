@@ -4,7 +4,7 @@
 - holder: Claude Code 会话 93ba6e1d（主会话），2026-10-13
 - goal: 以后从本机批量读授权接口都走同一个工具，默认按 2026-10-13 量出来的并发跑，上游会拒绝的设置工具自己拒绝，交易时段不跑；规矩写在 agent 会读到的地方
 - plan: docs/work/plans/licensed-batch-fetch.md
-- next: 等 Codex 交回工具和测试（工作区 `/Users/papa/codebase/.codex-wt/n8n-licensed-batch-fetch`，分支 `codex/licensed-batch-fetch`），在工作区跑验收（`pytest scripts -q`、`node scripts/shared-peer/deploy-code-only.test.mjs`、`python3 scripts/generate_scripts_catalog.py --check`、`git diff --check`）并读 diff，送只读评审，通过后合并进 main 并回收工作区
+- next: Codex 的实现还在收尾（工作区里文件都已写出、测试在跑）；它交回就由主会话跑验收并读 diff，直接合并（用户让主会话接手，不再等 Codex 的评审）。它若卡住不回，主会话在工作区里接着做完：缺的只可能是测试和提交
 - updated: 2026-10-13
 
 ## Requirements
