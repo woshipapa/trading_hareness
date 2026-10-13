@@ -12,7 +12,8 @@
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
 | [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | building | Claude Code 会话 93ba6e1d（主会话，负责验收与派工），2026-10-13 | 等 Codex 交回“两处修正＋第 3、4 步”，在工作区复跑发布路径测试并读 diff，通过后派第 5 步（t1_settlement 的公共函数） | 2026-10-13 |
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | proposed | Claude Code 会话 93ba6e1d，2026-10-13 | 10 月 13 日 15:10 收盘后取指数和宽基 ETF 的历史分钟线（约 4,500 次请求），存下当天全天的雷达序列，然后写研究登记并派给 Codex 研究任务 | 2026-10-13 |
-| [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | planned | none | 用 10 月 13 日首个影子交易日的实测更新方案（四个前置修复、完整性门槛、盘中一致性容差的取值），交 Codex 审查，然后请用户批准 | 2026-10-13 |
+| [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | planned | 主会话 93ba6e1d 派出的接手 agent（只做到“方案审完、待批准”），2026-10-13 | 用 10 月 13 日首个影子交易日的实测更新方案（四个前置修复、完整性门槛、盘中一致性容差的取值），交 Codex 审查，然后请用户批准 | 2026-10-13 |
+| [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | building | Claude Code 会话 eac0e1fc，2026-10-13 | 写 `feishu-relay/adapter/source-tags.mjs` 和 `webhook-targets.mjs` 及其测试，接进 `index.mjs` 的路由创建和三个目标群接口 | 2026-10-13 |
 
 ## 等用户处理
 
@@ -29,6 +30,7 @@
 ## 正在运行
 
 - W006 2026-10-13 13:20 Codex 实现者在做“两处修正＋第 3、4 步”（线程见 Log，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 0304f176 之后有三个提交（修正、第 3 步、第 4 步；修正 e1aa10d3 已有）且 `git status --short` 为空。之后：复跑验收、读 diff、勾掉 Steps、派第 5 步。该任务挂在主会话上，主会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从最后一个完成的步骤接着派。
+- W008 2026-10-13 13:50 主会话派出的接手 agent 在做：查清四个前置问题（只读）、把方案改到第 3 版、送 Codex 审查（最多三轮）、更新本记录并提交。结束标志：它交回最终方案和待用户批准的问题，本记录的 Plan 一节写了各轮审查结果。之后：主会话把方案转给用户请批准。该 agent 挂在主会话上，主会话结束它就停：接手者看本记录的 Log 和方案文件的修订说明，从没做完的那一步继续。
 
 ## 待办清单
 
