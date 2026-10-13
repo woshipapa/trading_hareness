@@ -1,7 +1,37 @@
 # Owner releases: one image, everything else hot
 
 Workstream W012. Written 2026-10-13 (Asia/Shanghai). Revision 2, same day, after the plan audit (eleven
-objections, all accepted; the list is at the end).
+objections, all accepted; the list is at the end). Revision 3, 2026-10-14: cut into two parts, at the user's
+word ("可以搞一个按你的设计去压缩的") and because the second audit round (eleven more objections) showed the
+tree release to be the heavy part.
+
+## Revision 3: two parts
+
+**Part A (written 2026-10-14 by the main session, branch `codex/owner-hot-a`).** The classifier and the tools'
+verdicts only; nothing on the host changes.
+
+- Kinds: `runtime`, `migration`, `skip`, `full`, `image`, `unclassified`. `full` stays for the host's own tree
+  (`deploy/shared-peer/*` and the scripts the host runs); it is what part B replaces with `tree`.
+  `tunnel-image` is not split off yet: the tunnel's Dockerfile and entrypoint are under `deploy/shared-peer/`
+  and stay `full`.
+- An unknown path is `unclassified`: refused with "add its rule", nothing is built. Every tracked file has a
+  rule (354 fell to `full` before; 23 are `full` and 3 `image` now), and a test keeps it so.
+- A script's kind comes from `scripts/CATALOG.md`'s "Runs on" column (`47owner` is the host's tree, everything
+  else is skipped), read from the commits. This replaces the explicit list of the design table below: the
+  catalog is already mandatory for every script. A test ties every script a host systemd unit runs to
+  `47owner`; it found the catalog wrong for `backfill-full-market-daily.sh`.
+- `migration`: a migration already travelled in the overlay (`deploy-code-only.sh` ships the whole
+  `quant-service/migrations`); the gate was missing. `schema-gate.sh` is the gate of `deploy-full-release.sh`
+  moved out unchanged; the code-only release runs it when its diff holds a migration. The second question of
+  the gate in the design below (the rendered compose flags) belongs to part B, where compose changes ship hot.
+- A test reads `Dockerfile.peer`'s COPY lines: nothing the image copies is `full` or `unclassified`.
+- Not in part A: the memory guard before a build, `release owner image` as a name, the decision record (it
+  comes with part B, when decision 0003's rule for compose and scripts actually changes).
+
+**Part B (later, after part A has been used for a while).** The tree release (`tree` kind,
+`switch-owner-tree.sh`), the compose flag check of the schema gate, the env snapshot and restore, the memory
+guard, the decision record. The design below is its plan; the second audit round's objections (in the record's
+log) are to be worked in before it starts.
 
 ## Goal
 
