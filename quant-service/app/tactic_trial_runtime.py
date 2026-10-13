@@ -183,12 +183,14 @@ def settle(database: Any, as_of: date, *, apply: bool = True) -> dict[str, Any]:
     for bar in bars:
         bars_by_key.setdefault((str(bar["symbol"]), bar["pick_day"]), []).append(bar)
     written = []
+    documents = []
     for reading in pending:
         pick_day = date.fromisoformat(reading["trade_date"])
         document = _settle_reading(reading, {row["symbol"]: bars_by_key.get((row["symbol"], pick_day), []) for row in reading.get("rows", [])})
+        documents.append(document)
         if apply:
             written.append(derived_daily_readings.store(database, SETTLED_CAPABILITY, [document]))
-    return _research({"status": "completed", "as_of": as_of.isoformat(), "days": [{"trade_date": item["trade_date"], "complete": item["complete"]} for item in pending], "stored": written})
+    return _research({"status": "completed", "as_of": as_of.isoformat(), "days": [{"trade_date": item["trade_date"], "complete": item["complete"]} for item in documents], "stored": written})
 
 
 def _settled_days(close: Sequence[Mapping[str, Any]], auction: Sequence[Mapping[str, Any]], settled: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
