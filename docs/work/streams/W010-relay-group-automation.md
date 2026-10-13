@@ -7,7 +7,7 @@
 - branch: integration/relay-auto
 - head: 6b31c254
 - release: none
-- next: base 线第 2a 步返回后：在 base 工作区里复跑验收命令、读 `git diff integration/relay-auto...HEAD`，通过后用线程 01a13455 续派 2b（`adapter/index.mjs` 和 `adapter/group-relay.mjs` 的接线及其测试），再派第三步（看板）；三步都完成后做双重评审，合进集成分支
+- next: base 线第 2b 步返回后：在 base 工作区里复跑验收命令、读 `git diff integration/relay-auto...HEAD -- feishu-relay/adapter/index.mjs feishu-relay/adapter/group-relay.mjs`，通过后用线程 01a13455 派第三步（看板）；三步都完成后做双重评审（Codex 评审者用新线程、只读），在 edge 上跑 bridge 套件，合进集成分支，再合进 main 并热更新 edge（用户已要求做完一项上线一项）
 - updated: 2026-10-13
 
 ## Requirements
@@ -78,6 +78,9 @@
 - 2026-10-13 18:50 用户要求完成一项就上线一项。从集成分支直接发布会和别的会话从 main 发的中继热更新互相覆盖，所以做法是：
   每条线过了评审就把集成分支 `--no-ff` 合进 main 再从主检出发热更新。没做完的功能在看板上的空面板不显示内容。
   当时线上是 `hotfix-20261013T070041Z-49b44b1da5e4-5527`，W010 还没有可见的功能上线。
+- 2026-10-13 19:00 base 线第 2a 步返回（4b5ddb97）：本会话复跑 adapter 286 项通过、bridge 本机 179 项（70 项跳过）。读 diff 的三条意见随 2b 交回：
+  [claude] `resolve()` 先清空表再插入，漏扫一次就会丢行；[claude] `list()` 给已不存在的目标群造了一行；[claude] 监听者失败会让写入失败。
+  另：`readJsonBody` 默认上限 18 MiB，接线时给功能路由包一层 64 KiB。2a 的开销并在线程 01a13455 的累计里。
 
 ## Waiting on the user
 
@@ -97,10 +100,13 @@
   会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从没做完的地方接着派（方案和 `WEB_GATEWAY.md` 都在工作区里）。
 - [x] 2026-10-13 18:05 E 的审查第一轮 → 18:25 返回 5 条（1 条 high、4 条 medium），全部采纳，方案 r6（7fd… 见 git log 的 `notes: W010 plan r6`）。原说明：Codex 审查方案 r5 里功能 E 那一节（审查线程 01a1342e，只读）。结束标志：返回 `SOUND` 或问题清单。之后：裁决、改方案，
   把 r5 的方案文件带进集成分支和 base 工作区，再用线程 01a13455 续派 base 第二步（adapter 接缝、R，以及 E 的三处接缝和上面两条意见）。
-- [ ] 2026-10-13 18:30 两个 Codex 调用在跑：(1) base 线第 2a 步（实现线程 01a13455，cwd 是 base 工作区）：第一步的两条修正加 adapter 的模块
+- [x] 2026-10-13 18:30 2a 和 E 第二轮审查 → 都已返回（见 Log）。原说明：两个 Codex 调用在跑：(1) base 线第 2a 步（实现线程 01a13455，cwd 是 base 工作区）：第一步的两条修正加 adapter 的模块
   （`ledger.query`、`feature-routes.mjs`、`target-registry.mjs`、六个空壳、`webhookTargets.sendText`、两个 Dockerfile、测试），不碰 `index.mjs` 和 `group-relay.mjs`；
   (2) E 的审查第二轮（审查线程 01a1342e，只读）。结束标志：各自的调用返回。之后：对 (1) 复跑验收、读 diff，再续派 2b（`index.mjs`、`group-relay.mjs` 接线）和第三步（看板）；
   对 (2) 裁决并改方案。两个调用都挂在会话 eac0e1fc 上。
+- [ ] 2026-10-13 19:05 Codex 实现者在做 base 线第 2b 步（线程 01a13455，cwd 是 base 工作区）：2a 的三条修正，加 `adapter/index.mjs` 和
+  `adapter/group-relay.mjs` 的接线及测试。结束标志：调用返回、工作区干净。之后：复跑验收、读 diff（重点看 `index.mjs`、`group-relay.mjs` 只动了报告里列的地方），
+  再派第三步（看板：`targets` 栏目、`TargetGroupsView`、`TargetRegistryPanel`、其余面板空壳、`JoinByLinkPanel` 的位置）。
 
 ## Due
 

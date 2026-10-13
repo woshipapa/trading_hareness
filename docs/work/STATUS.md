@@ -14,7 +14,7 @@
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | planned | Claude Code 会话 93ba6e1d，2026-10-13 | 等 owner 恢复、B031 查明原因、用户同意取数（见 Waiting on the user）后，在非交易时段跑 `/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（一条命令顺序取 11 个代码，带参数就不存雷达；可断点续取），另用 `curl` 把全天雷达存成 `state/research/vshape_20261013/radar/radar_2026-10-13.full.json`（13:27 那份 `radar_2026-10-13.json` 是早先输出的依据，留着）；`fetch.log` 出现 FINISHED 后核对 11 个文件各约 750 行，写研究登记，派 Codex | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | building | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 等 Codex 交回派工 3（P4：当日汇总不读正文并报告当天是否达标），跑验收并读 diff；这是 `codex/tdx-shadow-measure` 分支的最后一步，通过后做双重评审（主会话读 `git diff 9d75b5d9...HEAD`，另起只读的 Codex 评审者），评审通过后请用户同意合并 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
-| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | building | Claude Code 会话 eac0e1fc，2026-10-13 | base 线第 2a 步返回后：在 base 工作区里复跑验收命令、读 `git diff integration/relay-auto...HEAD`，通过后用线程 01a13455 续派 2b（`adapter/index.mjs` 和 `adapter/group-relay.mjs` 的接线及其测试），再派第三步（看板）；三步都完成后做双重评审，合进集成分支 | 2026-10-13 |
+| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | building | Claude Code 会话 eac0e1fc，2026-10-13 | base 线第 2b 步返回后：在 base 工作区里复跑验收命令、读 `git diff integration/relay-auto...HEAD -- feishu-relay/adapter/index.mjs feishu-relay/adapter/group-relay.mjs`，通过后用线程 01a13455 派第三步（看板）；三步都完成后做双重评审（Codex 评审者用新线程、只读），在 edge 上跑 bridge 套件，合进集成分支，再合进 main 并热更新 edge（用户已要求做完一项上线一项） | 2026-10-13 |
 
 ## 等用户处理
 
@@ -36,7 +36,7 @@
 
 - W006 2026-10-13 16:46 Codex 实现者在做“第 7' 步＋第 8 步”（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 d23d52d1 之后有两个提交且 `git status --short` 为空。之后：复跑验收；读交回里贴的“二、战法”和“六、卖点”两节文字；勾掉 Steps；派第 9 步。
 - W008 2026-10-13 16:46 Codex 实现者在做派工 3（P4），同一线程 01a13426-d823-78b1-9f68-2907eb221981，工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-shadow-measure`。结束标志：分支在 3252f8dd 之后有一个提交且 `git status --short` 为空。之后：跑验收、读 diff，然后对整个分支做双重评审（`codex-flow` 第 5 步）。挂在主会话 93ba6e1d 上，判断死活和续派的办法同 W006 的 Resume here。
-- W010 2026-10-13 18:30 两个 Codex 调用在跑：(1) base 线第 2a 步（实现线程 01a13455，cwd 是 base 工作区）：第一步的两条修正加 adapter 的模块
+- W010 2026-10-13 19:05 Codex 实现者在做 base 线第 2b 步（线程 01a13455，cwd 是 base 工作区）：2a 的三条修正，加 `adapter/index.mjs` 和
 
 ## 待办清单
 
