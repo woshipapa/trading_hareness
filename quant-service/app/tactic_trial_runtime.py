@@ -121,6 +121,24 @@ def refresh_close(database: Any, trade_date: date, *, apply: bool = True) -> dic
     return _research({"status": "completed", "trade_date": trade_date.isoformat(), "rows": len(reading["rows"]), **stored})
 
 
+def _build_auction_reading(
+    trade_date: date, desk_rows: Sequence[Mapping[str, Any]], previous_close: Mapping[str, Any] | None,
+    decided_at: str, source: str,
+) -> dict[str, Any]:
+    previous_by_symbol = {row["symbol"]: row for row in (previous_close or {}).get("rows", [])}
+    rows = []
+    for desk_row in desk_rows:
+        previous_row = previous_by_symbol.get(desk_row["symbol"])
+        row = build_auction_row(desk_row, desk_rows, previous_row)
+        row["reference_close"] = previous_row.get("close") if previous_row else None
+        rows.append(row)
+    evaluated = evaluate_conditions(rows, {"flags": [], "unknown": []}, "auction")
+    evaluated["day"]["prev"] = (previous_close or {}).get("day")
+    return _research({"trade_date": trade_date.isoformat(), "slot": "auction", "version": VERSION,
+        "decided_at": decided_at, "day": evaluated["day"], "rows": evaluated["rows"],
+        "complete": True, "source": source})
+
+
 def refresh_auction(database: Any, trade_date: date, *, apply: bool = True) -> dict[str, Any]:
     with database.transaction() as connection:
         existing = tactic_trial_repository.read_capability(connection, AUCTION_CAPABILITY, trade_date, trade_date)
@@ -133,19 +151,12 @@ def refresh_auction(database: Any, trade_date: date, *, apply: bool = True) -> d
         previous = _prior_sessions(connection, trade_date, 1)
         close_readings = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, previous[0], previous[-1]) if previous else []
         previous_reading = close_readings[-1] if close_readings else None
-        previous_by_symbol = {row["symbol"]: row for row in (previous_reading or {}).get("rows", [])} if previous_reading and previous_reading.get("complete") else {}
-        rows = []
-        for desk_row in desk_rows:
-            row = build_auction_row(desk_row, desk_rows, previous_by_symbol.get(desk_row["symbol"]))
-            row["reference_close"] = (previous_by_symbol.get(desk_row["symbol"]) or {}).get("close")
-            rows.append(row)
-        evaluated = evaluate_conditions(rows, {"flags": [], "unknown": []}, "auction")
-        evaluated["day"]["prev"] = (previous_reading or {}).get("day")
-        reading = _research({"trade_date": trade_date.isoformat(), "slot": "auction", "version": VERSION,
-            "decided_at": desk[-1].get("decided_at"), "day": evaluated["day"], "rows": evaluated["rows"],
-            "complete": True, "source": "auction_open_desk_daily"})
+        previous_reading = previous_reading if previous_reading and previous_reading.get("complete") else None
+        reading = _build_auction_reading(
+            trade_date, desk_rows, previous_reading, desk[-1]["scheduled_at"], "auction_open_desk_daily",
+        )
     stored = derived_daily_readings.store(database, AUCTION_CAPABILITY, [reading]) if apply else {"stored": 0, "unchanged": 0}
-    return _research({"status": "completed", "trade_date": trade_date.isoformat(), "rows": len(rows), **stored})
+    return _research({"status": "completed", "trade_date": trade_date.isoformat(), "rows": len(reading["rows"]), **stored})
 
 
 def _settled_complete(result: Mapping[str, Any]) -> bool:
@@ -350,13 +361,11 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
                         "sealed_from_open": previous_row.get("sealed_from_open")})
                 if not desk_rows:
                     continue
-                previous_by_symbol = {row["symbol"]: row for row in previous_close["rows"]}
-                rows = [build_auction_row(item, desk_rows, previous_by_symbol[item["symbol"]]) for item in desk_rows]
-                evaluated = evaluate_conditions(rows, {"flags": [], "unknown": []}, "auction")
-                evaluated["day"]["prev"] = previous_close.get("day")
-                reading = _research({"trade_date": day.isoformat(), "slot": "auction", "version": VERSION,
-                    "decided_at": datetime.combine(day, time(9, 25), CN_TZ).isoformat(), "day": evaluated["day"], "rows": evaluated["rows"],
-                    "complete": True, "replayed": True, "source": "bars+auction_list"})
+                reading = _build_auction_reading(
+                    day, desk_rows, previous_close, datetime.combine(day, time(9, 25), CN_TZ).isoformat(),
+                    "bars+auction_list",
+                )
+                reading["replayed"] = True
                 documents.append(reading)
         symbol_days = [(row["symbol"], date.fromisoformat(reading["trade_date"])) for reading in documents for row in reading.get("rows", [])]
         exit_bars = _read(database, tactic_trial_repository.read_exit_bars, symbol_days)
