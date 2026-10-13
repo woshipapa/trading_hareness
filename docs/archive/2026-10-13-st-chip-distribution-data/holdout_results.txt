@@ -1,0 +1,562 @@
+PERIOD=holdout rows=903618 days=174 holdout_reads=1
+TABLE event half_life feature outcome estimate t days stocks
+TABLE limit_up 20 profit next_seal 0.013964986 1.3603 128 14700
+TABLE limit_up 20 profit next_streak 0.14188318 4.901 128 14700
+TABLE limit_up 20 profit overnight1 0.0044508017 4.5457 126 14525
+TABLE limit_up 20 profit ret1 0.0023033551 1.4032 126 14525
+TABLE limit_up 20 profit ret_2_3 0.0016696376 0.71258 123 14222
+TABLE limit_up 20 profit o2o -0.0028822098 -1.5818 124 14369
+TABLE limit_up 20 profit big_loss 0.048753052 5.6129 128 14702
+TABLE limit_up 20 over010 next_seal 0.039452596 4.7216 174 14700
+TABLE limit_up 20 over010 next_streak 0.20988589 8.4604 174 14700
+TABLE limit_up 20 over010 overnight1 0.0050677924 5.6276 173 14525
+TABLE limit_up 20 over010 ret1 0.0053429981 4.3706 173 14525
+TABLE limit_up 20 over010 ret_2_3 0.0028967188 1.6168 171 14222
+TABLE limit_up 20 over010 o2o 7.9247721e-05 0.058902 172 14369
+TABLE limit_up 20 over010 big_loss 0.039689357 5.6076 174 14702
+TABLE limit_up 20 over1030 next_seal 0.010453364 1.0852 174 14700
+TABLE limit_up 20 over1030 next_streak 0.095950452 3.4042 174 14700
+TABLE limit_up 20 over1030 overnight1 0.0032463106 3.3845 173 14525
+TABLE limit_up 20 over1030 ret1 0.0027956096 1.9617 173 14525
+TABLE limit_up 20 over1030 ret_2_3 0.0034064013 1.7433 171 14222
+TABLE limit_up 20 over1030 o2o 0.00049371583 0.28665 172 14369
+TABLE limit_up 20 over1030 big_loss 0.046526312 6.3635 174 14702
+TABLE limit_up 20 overhead30 next_seal 0.031719851 3.8748 174 14700
+TABLE limit_up 20 overhead30 next_streak 0.18566234 7.6215 174 14700
+TABLE limit_up 20 overhead30 overnight1 0.0044693664 5.0477 173 14525
+TABLE limit_up 20 overhead30 ret1 0.0048326123 3.624 173 14525
+TABLE limit_up 20 overhead30 ret_2_3 0.0029778515 1.5413 171 14222
+TABLE limit_up 20 overhead30 o2o 0.00049039142 0.33527 172 14369
+TABLE limit_up 20 overhead30 big_loss 0.047196151 6.3697 174 14702
+TABLE limit_up 20 concentration next_seal -0.0084865686 -1.0117 174 14700
+TABLE limit_up 20 concentration next_streak -0.0066191792 -0.25646 174 14700
+TABLE limit_up 20 concentration overnight1 0.0011635503 1.2623 173 14525
+TABLE limit_up 20 concentration ret1 -0.00093900669 -0.72918 173 14525
+TABLE limit_up 20 concentration ret_2_3 0.0026956445 1.1382 171 14222
+TABLE limit_up 20 concentration o2o 0.00083467553 0.5849 172 14369
+TABLE limit_up 20 concentration big_loss 0.0035276419 0.50459 174 14702
+TABLE limit_up 20 avg_cost_dist next_seal 0.017960078 2.0746 174 14700
+TABLE limit_up 20 avg_cost_dist next_streak 0.1798145 6.6298 174 14700
+TABLE limit_up 20 avg_cost_dist overnight1 0.0038992038 4.2523 173 14525
+TABLE limit_up 20 avg_cost_dist ret1 0.0036777608 2.5219 173 14525
+TABLE limit_up 20 avg_cost_dist ret_2_3 0.00076127426 0.35647 171 14222
+TABLE limit_up 20 avg_cost_dist o2o -0.001808232 -1.0679 172 14369
+TABLE limit_up 20 avg_cost_dist big_loss 0.054856478 6.7824 174 14702
+TABLE limit_up 20 q95_rel next_seal -0.011934981 -1.3614 174 14700
+TABLE limit_up 20 q95_rel next_streak -0.14366966 -5.5561 174 14700
+TABLE limit_up 20 q95_rel overnight1 -0.0040167263 -4.1913 173 14525
+TABLE limit_up 20 q95_rel ret1 -0.003388179 -2.5713 173 14525
+TABLE limit_up 20 q95_rel ret_2_3 -0.002838287 -1.3055 171 14222
+TABLE limit_up 20 q95_rel o2o 0.0010477213 0.69802 172 14369
+TABLE limit_up 20 q95_rel big_loss -0.043566464 -5.7496 174 14702
+TABLE limit_up 60 profit next_seal 0.0030444094 0.29739 128 14700
+TABLE limit_up 60 profit next_streak 0.10857596 3.6787 128 14700
+TABLE limit_up 60 profit overnight1 0.0039013304 3.7708 126 14525
+TABLE limit_up 60 profit ret1 0.0015068962 0.92311 126 14525
+TABLE limit_up 60 profit ret_2_3 0.0029621448 1.2633 123 14222
+TABLE limit_up 60 profit o2o -0.0024667835 -1.3001 124 14369
+TABLE limit_up 60 profit big_loss 0.049177778 5.8056 128 14702
+TABLE limit_up 60 over010 next_seal 0.046199974 5.9258 174 14700
+TABLE limit_up 60 over010 next_streak 0.21198566 9.1226 174 14700
+TABLE limit_up 60 over010 overnight1 0.0050800071 5.7309 173 14525
+TABLE limit_up 60 over010 ret1 0.0066274187 5.7058 173 14525
+TABLE limit_up 60 over010 ret_2_3 0.0018877057 0.98832 171 14222
+TABLE limit_up 60 over010 o2o 0.001687469 1.31 172 14369
+TABLE limit_up 60 over010 big_loss 0.034361402 4.6496 174 14702
+TABLE limit_up 60 over1030 next_seal 0.010712334 1.2182 174 14700
+TABLE limit_up 60 over1030 next_streak 0.095571143 3.6382 174 14700
+TABLE limit_up 60 over1030 overnight1 0.0039380301 3.7701 173 14525
+TABLE limit_up 60 over1030 ret1 0.0031806071 2.3896 173 14525
+TABLE limit_up 60 over1030 ret_2_3 0.0053191369 2.7474 171 14222
+TABLE limit_up 60 over1030 o2o 0.0010057832 0.62402 172 14369
+TABLE limit_up 60 over1030 big_loss 0.044309472 6.5247 174 14702
+TABLE limit_up 60 overhead30 next_seal 0.029523986 3.787 174 14700
+TABLE limit_up 60 overhead30 next_streak 0.17264435 7.3206 174 14700
+TABLE limit_up 60 overhead30 overnight1 0.0043333114 4.712 173 14525
+TABLE limit_up 60 overhead30 ret1 0.0047070745 3.6944 173 14525
+TABLE limit_up 60 overhead30 ret_2_3 0.004068083 2.0782 171 14222
+TABLE limit_up 60 overhead30 o2o 0.0013711533 0.92431 172 14369
+TABLE limit_up 60 overhead30 big_loss 0.047668017 6.5355 174 14702
+TABLE limit_up 60 concentration next_seal -0.0057986799 -0.6816 174 14700
+TABLE limit_up 60 concentration next_streak 0.01427827 0.55237 174 14700
+TABLE limit_up 60 concentration overnight1 0.0011473352 1.4288 173 14525
+TABLE limit_up 60 concentration ret1 -0.001191466 -0.94871 173 14525
+TABLE limit_up 60 concentration ret_2_3 0.001260513 0.64011 171 14222
+TABLE limit_up 60 concentration o2o -0.00027703595 -0.20889 172 14369
+TABLE limit_up 60 concentration big_loss 0.007913097 1.2915 174 14702
+TABLE limit_up 60 avg_cost_dist next_seal 0.011471895 1.2964 174 14700
+TABLE limit_up 60 avg_cost_dist next_streak 0.1497343 5.453 174 14700
+TABLE limit_up 60 avg_cost_dist overnight1 0.0035609451 3.8604 173 14525
+TABLE limit_up 60 avg_cost_dist ret1 0.0035450612 2.4709 173 14525
+TABLE limit_up 60 avg_cost_dist ret_2_3 0.00099215416 0.47649 171 14222
+TABLE limit_up 60 avg_cost_dist o2o -0.0012055031 -0.71912 172 14369
+TABLE limit_up 60 avg_cost_dist big_loss 0.052213107 6.4891 174 14702
+TABLE limit_up 60 q95_rel next_seal -0.0066759056 -0.77329 174 14700
+TABLE limit_up 60 q95_rel next_streak -0.11943415 -4.5369 174 14700
+TABLE limit_up 60 q95_rel overnight1 -0.0029589284 -3.3579 173 14525
+TABLE limit_up 60 q95_rel ret1 -0.0022792707 -1.7509 173 14525
+TABLE limit_up 60 q95_rel ret_2_3 -0.0019882487 -0.88689 171 14222
+TABLE limit_up 60 q95_rel o2o 0.0010442579 0.71009 172 14369
+TABLE limit_up 60 q95_rel big_loss -0.047029341 -6.4559 174 14702
+TABLE up5_nonseal 20 profit next_seal 0.0061370843 2.5092 161 41240
+TABLE up5_nonseal 20 profit next_streak 0.0061370843 2.5092 161 41240
+TABLE up5_nonseal 20 profit overnight1 -0.0018624324 -3.3289 160 41029
+TABLE up5_nonseal 20 profit ret1 -0.00062926876 -0.53498 160 41029
+TABLE up5_nonseal 20 profit ret_2_3 0.000437917 0.22333 156 40285
+TABLE up5_nonseal 20 profit o2o -0.00033756717 -0.26978 158 40538
+TABLE up5_nonseal 20 profit big_loss 0.036383217 5.0255 161 41243
+TABLE up5_nonseal 20 over010 next_seal 0.0060393045 2.7867 174 41240
+TABLE up5_nonseal 20 over010 next_streak 0.0060393045 2.7867 174 41240
+TABLE up5_nonseal 20 over010 overnight1 -0.0011184155 -2.5428 173 41029
+TABLE up5_nonseal 20 over010 ret1 0.00073498483 0.80765 173 41029
+TABLE up5_nonseal 20 over010 ret_2_3 0.00092407202 0.54254 169 40285
+TABLE up5_nonseal 20 over010 o2o 0.00036252504 0.39689 171 40538
+TABLE up5_nonseal 20 over010 big_loss 0.035288594 6.1035 174 41243
+TABLE up5_nonseal 20 over1030 next_seal 0.012656341 5.1117 174 41240
+TABLE up5_nonseal 20 over1030 next_streak 0.012656341 5.1117 174 41240
+TABLE up5_nonseal 20 over1030 overnight1 -0.00068166926 -1.3621 173 41029
+TABLE up5_nonseal 20 over1030 ret1 0.0020815637 1.9457 173 41029
+TABLE up5_nonseal 20 over1030 ret_2_3 0.0017996401 0.95063 169 40285
+TABLE up5_nonseal 20 over1030 o2o 0.0018764315 1.6399 171 40538
+TABLE up5_nonseal 20 over1030 big_loss 0.024357696 3.7758 174 41243
+TABLE up5_nonseal 20 overhead30 next_seal 0.0072940906 3.4492 174 41240
+TABLE up5_nonseal 20 overhead30 next_streak 0.0072940906 3.4492 174 41240
+TABLE up5_nonseal 20 overhead30 overnight1 -0.0014698266 -2.9689 173 41029
+TABLE up5_nonseal 20 overhead30 ret1 0.00032365481 0.32693 173 41029
+TABLE up5_nonseal 20 overhead30 ret_2_3 0.00086434185 0.46708 169 40285
+TABLE up5_nonseal 20 overhead30 o2o 0.00037151096 0.35779 171 40538
+TABLE up5_nonseal 20 overhead30 big_loss 0.038680777 6.1083 174 41243
+TABLE up5_nonseal 20 concentration next_seal -0.0097142187 -4.1215 174 41240
+TABLE up5_nonseal 20 concentration next_streak -0.0097142187 -4.1215 174 41240
+TABLE up5_nonseal 20 concentration overnight1 0.00084164128 1.9096 173 41029
+TABLE up5_nonseal 20 concentration ret1 7.9965012e-05 0.072743 173 41029
+TABLE up5_nonseal 20 concentration ret_2_3 0.00043658382 0.26938 169 40285
+TABLE up5_nonseal 20 concentration o2o 7.5522316e-05 0.066284 171 40538
+TABLE up5_nonseal 20 concentration big_loss -0.045311416 -6.9676 174 41243
+TABLE up5_nonseal 20 avg_cost_dist next_seal 0.0084588565 3.0459 174 41240
+TABLE up5_nonseal 20 avg_cost_dist next_streak 0.0084588565 3.0459 174 41240
+TABLE up5_nonseal 20 avg_cost_dist overnight1 -0.0024919917 -4.9408 173 41029
+TABLE up5_nonseal 20 avg_cost_dist ret1 -0.00021060828 -0.17719 173 41029
+TABLE up5_nonseal 20 avg_cost_dist ret_2_3 -0.0008728772 -0.43763 169 40285
+TABLE up5_nonseal 20 avg_cost_dist o2o 0.0001858505 0.14444 171 40538
+TABLE up5_nonseal 20 avg_cost_dist big_loss 0.051004178 7.1826 174 41243
+TABLE up5_nonseal 20 q95_rel next_seal -0.0063248466 -2.6133 174 41240
+TABLE up5_nonseal 20 q95_rel next_streak -0.0063248466 -2.6133 174 41240
+TABLE up5_nonseal 20 q95_rel overnight1 0.0013415813 2.7993 173 41029
+TABLE up5_nonseal 20 q95_rel ret1 -5.3026597e-06 -0.0044555 173 41029
+TABLE up5_nonseal 20 q95_rel ret_2_3 -0.00048522865 -0.25684 169 40285
+TABLE up5_nonseal 20 q95_rel o2o -0.00053533038 -0.45772 171 40538
+TABLE up5_nonseal 20 q95_rel big_loss -0.027222388 -4.0039 174 41243
+TABLE up5_nonseal 60 profit next_seal 0.0083999947 3.3021 161 41240
+TABLE up5_nonseal 60 profit next_streak 0.0083999947 3.3021 161 41240
+TABLE up5_nonseal 60 profit overnight1 -0.0013155974 -2.6208 160 41029
+TABLE up5_nonseal 60 profit ret1 0.00039293427 0.33004 160 41029
+TABLE up5_nonseal 60 profit ret_2_3 0.00053798876 0.27072 156 40285
+TABLE up5_nonseal 60 profit o2o 0.00071262447 0.56605 158 40538
+TABLE up5_nonseal 60 profit big_loss 0.042383525 5.7936 161 41243
+TABLE up5_nonseal 60 over010 next_seal 0.010224013 4.3926 174 41240
+TABLE up5_nonseal 60 over010 next_streak 0.010224013 4.3926 174 41240
+TABLE up5_nonseal 60 over010 overnight1 -0.00054137639 -1.2224 173 41029
+TABLE up5_nonseal 60 over010 ret1 0.00215182 2.1449 173 41029
+TABLE up5_nonseal 60 over010 ret_2_3 0.0022309112 1.3195 169 40285
+TABLE up5_nonseal 60 over010 o2o 0.0015675124 1.6574 171 40538
+TABLE up5_nonseal 60 over010 big_loss 0.032947183 5.4085 174 41243
+TABLE up5_nonseal 60 over1030 next_seal 0.014310301 5.6759 174 41240
+TABLE up5_nonseal 60 over1030 next_streak 0.014310301 5.6759 174 41240
+TABLE up5_nonseal 60 over1030 overnight1 -0.00011091247 -0.23471 173 41029
+TABLE up5_nonseal 60 over1030 ret1 0.0028310874 2.7391 173 41029
+TABLE up5_nonseal 60 over1030 ret_2_3 0.0020326615 1.037 169 40285
+TABLE up5_nonseal 60 over1030 o2o 0.0023550681 2.1062 171 40538
+TABLE up5_nonseal 60 over1030 big_loss 0.026163992 3.9428 174 41243
+TABLE up5_nonseal 60 overhead30 next_seal 0.011458298 5.1212 174 41240
+TABLE up5_nonseal 60 overhead30 next_streak 0.011458298 5.1212 174 41240
+TABLE up5_nonseal 60 overhead30 overnight1 -0.00047289894 -0.98748 173 41029
+TABLE up5_nonseal 60 overhead30 ret1 0.0016996808 1.7076 173 41029
+TABLE up5_nonseal 60 overhead30 ret_2_3 0.0014047837 0.73261 169 40285
+TABLE up5_nonseal 60 overhead30 o2o 0.0011237795 1.0712 171 40538
+TABLE up5_nonseal 60 overhead30 big_loss 0.042863877 6.7982 174 41243
+TABLE up5_nonseal 60 concentration next_seal -0.0071737539 -3.0686 174 41240
+TABLE up5_nonseal 60 concentration next_streak -0.0071737539 -3.0686 174 41240
+TABLE up5_nonseal 60 concentration overnight1 0.00078870886 2.0275 173 41029
+TABLE up5_nonseal 60 concentration ret1 -0.00015834178 -0.153 173 41029
+TABLE up5_nonseal 60 concentration ret_2_3 0.00060949505 0.39086 169 40285
+TABLE up5_nonseal 60 concentration o2o -3.2998665e-05 -0.02956 171 40538
+TABLE up5_nonseal 60 concentration big_loss -0.038813705 -6.4773 174 41243
+TABLE up5_nonseal 60 avg_cost_dist next_seal 0.0098604221 3.9288 174 41240
+TABLE up5_nonseal 60 avg_cost_dist next_streak 0.0098604221 3.9288 174 41240
+TABLE up5_nonseal 60 avg_cost_dist overnight1 -0.0017566189 -3.5202 173 41029
+TABLE up5_nonseal 60 avg_cost_dist ret1 -6.9717576e-05 -0.060578 173 41029
+TABLE up5_nonseal 60 avg_cost_dist ret_2_3 -0.00055462516 -0.27959 169 40285
+TABLE up5_nonseal 60 avg_cost_dist o2o 0.00049331616 0.40036 171 40538
+TABLE up5_nonseal 60 avg_cost_dist big_loss 0.054793369 7.5618 174 41243
+TABLE up5_nonseal 60 q95_rel next_seal -0.0074215459 -3.2436 174 41240
+TABLE up5_nonseal 60 q95_rel next_streak -0.0074215459 -3.2436 174 41240
+TABLE up5_nonseal 60 q95_rel overnight1 0.0010177576 2.3287 173 41029
+TABLE up5_nonseal 60 q95_rel ret1 -0.0007058992 -0.62345 173 41029
+TABLE up5_nonseal 60 q95_rel ret_2_3 -0.0012678016 -0.66279 169 40285
+TABLE up5_nonseal 60 q95_rel o2o -0.0013299299 -1.1573 171 40538
+TABLE up5_nonseal 60 q95_rel big_loss -0.028297763 -4.1885 174 41243
+TABLE breakout 20 profit next_seal -0.0033743919 -0.46803 108 23839
+TABLE breakout 20 profit next_streak -0.0033743919 -0.46803 108 23839
+TABLE breakout 20 profit overnight1 3.6273564e-05 0.042283 104 23586
+TABLE breakout 20 profit ret1 0.0011621368 0.56453 104 23586
+TABLE breakout 20 profit ret_2_3 -0.0033981748 -1.2418 96 23027
+TABLE breakout 20 profit o2o 0.00084643658 0.41353 100 23349
+TABLE breakout 20 profit big_loss 0.003521033 0.22736 108 23839
+TABLE breakout 20 over010 next_seal 0.0080835205 2.173 347 23839
+TABLE breakout 20 over010 next_streak 0.0080835205 2.173 347 23839
+TABLE breakout 20 over010 overnight1 -0.00025649401 -0.57045 343 23586
+TABLE breakout 20 over010 ret1 0.0013148255 1.2053 343 23586
+TABLE breakout 20 over010 ret_2_3 0.0012143844 0.8078 335 23027
+TABLE breakout 20 over010 o2o 0.00091106247 0.82193 339 23349
+TABLE breakout 20 over010 big_loss 0.017479627 2.139 347 23839
+TABLE breakout 20 over1030 next_seal 0.008886464 2.1476 326 23839
+TABLE breakout 20 over1030 next_streak 0.008886464 2.1476 326 23839
+TABLE breakout 20 over1030 overnight1 9.9319808e-05 0.17522 322 23586
+TABLE breakout 20 over1030 ret1 0.0022048105 1.636 322 23586
+TABLE breakout 20 over1030 ret_2_3 0.0061687893 3.1765 314 23027
+TABLE breakout 20 over1030 o2o 0.0037022923 2.7871 318 23349
+TABLE breakout 20 over1030 big_loss 0.016556558 1.7645 326 23839
+TABLE breakout 20 overhead30 next_seal 0.0068341024 1.8593 347 23839
+TABLE breakout 20 overhead30 next_streak 0.0068341024 1.8593 347 23839
+TABLE breakout 20 overhead30 overnight1 -0.0001712305 -0.38299 343 23586
+TABLE breakout 20 overhead30 ret1 0.00079120092 0.72349 343 23586
+TABLE breakout 20 overhead30 ret_2_3 0.0018962192 1.2407 335 23027
+TABLE breakout 20 overhead30 o2o 0.00058799416 0.52777 339 23349
+TABLE breakout 20 overhead30 big_loss 0.019571265 2.4038 347 23839
+TABLE breakout 20 concentration next_seal -0.017670642 -5.2296 347 23839
+TABLE breakout 20 concentration next_streak -0.017670642 -5.2296 347 23839
+TABLE breakout 20 concentration overnight1 0.0016528185 3.3727 343 23586
+TABLE breakout 20 concentration ret1 0.00015730268 0.12791 343 23586
+TABLE breakout 20 concentration ret_2_3 0.0017357205 1.0478 335 23027
+TABLE breakout 20 concentration o2o -0.00051648482 -0.38922 339 23349
+TABLE breakout 20 concentration big_loss -0.082192622 -10.561 347 23839
+TABLE breakout 20 avg_cost_dist next_seal 0.017871279 4.594 347 23839
+TABLE breakout 20 avg_cost_dist next_streak 0.017871279 4.594 347 23839
+TABLE breakout 20 avg_cost_dist overnight1 -0.0024431664 -4.9297 343 23586
+TABLE breakout 20 avg_cost_dist ret1 0.00036809181 0.32252 343 23586
+TABLE breakout 20 avg_cost_dist ret_2_3 -0.0015909148 -1.0209 335 23027
+TABLE breakout 20 avg_cost_dist o2o 0.0017414741 1.5132 339 23349
+TABLE breakout 20 avg_cost_dist big_loss 0.081138572 11.266 347 23839
+TABLE breakout 20 q95_rel next_seal -0.0049889992 -1.4374 347 23839
+TABLE breakout 20 q95_rel next_streak -0.0049889992 -1.4374 347 23839
+TABLE breakout 20 q95_rel overnight1 0.0016542591 4.0769 343 23586
+TABLE breakout 20 q95_rel ret1 0.00025726718 0.24168 343 23586
+TABLE breakout 20 q95_rel ret_2_3 0.00053403751 0.37601 335 23027
+TABLE breakout 20 q95_rel o2o -0.00085256914 -0.80064 339 23349
+TABLE breakout 20 q95_rel big_loss -0.030168271 -4.1465 347 23839
+TABLE breakout 60 profit next_seal -0.004339329 -0.59045 108 23839
+TABLE breakout 60 profit next_streak -0.004339329 -0.59045 108 23839
+TABLE breakout 60 profit overnight1 9.0105914e-05 0.099526 104 23586
+TABLE breakout 60 profit ret1 0.0013481107 0.66456 104 23586
+TABLE breakout 60 profit ret_2_3 -0.0010355066 -0.41093 96 23027
+TABLE breakout 60 profit o2o 0.001165347 0.57215 100 23349
+TABLE breakout 60 profit big_loss 0.0069526152 0.45405 108 23839
+TABLE breakout 60 over010 next_seal 0.0068897776 1.8588 347 23839
+TABLE breakout 60 over010 next_streak 0.0068897776 1.8588 347 23839
+TABLE breakout 60 over010 overnight1 -9.2893666e-05 -0.20493 343 23586
+TABLE breakout 60 over010 ret1 0.0012511591 1.1547 343 23586
+TABLE breakout 60 over010 ret_2_3 0.0021338708 1.4202 335 23027
+TABLE breakout 60 over010 o2o 0.00087107715 0.79047 339 23349
+TABLE breakout 60 over010 big_loss 0.016691803 2.0357 347 23839
+TABLE breakout 60 over1030 next_seal 0.008886464 2.1476 326 23839
+TABLE breakout 60 over1030 next_streak 0.008886464 2.1476 326 23839
+TABLE breakout 60 over1030 overnight1 7.4254514e-05 0.13111 322 23586
+TABLE breakout 60 over1030 ret1 0.0022004934 1.6329 322 23586
+TABLE breakout 60 over1030 ret_2_3 0.0061848283 3.1876 314 23027
+TABLE breakout 60 over1030 o2o 0.0036892198 2.7771 318 23349
+TABLE breakout 60 over1030 big_loss 0.016556558 1.7645 326 23839
+TABLE breakout 60 overhead30 next_seal 0.0065337762 1.7544 347 23839
+TABLE breakout 60 overhead30 next_streak 0.0065337762 1.7544 347 23839
+TABLE breakout 60 overhead30 overnight1 -0.00015750637 -0.34381 343 23586
+TABLE breakout 60 overhead30 ret1 0.00082164859 0.76347 343 23586
+TABLE breakout 60 overhead30 ret_2_3 0.002691784 1.7971 335 23027
+TABLE breakout 60 overhead30 o2o 0.00062818655 0.56922 339 23349
+TABLE breakout 60 overhead30 big_loss 0.020448902 2.5137 347 23839
+TABLE breakout 60 concentration next_seal -0.01569101 -4.529 347 23839
+TABLE breakout 60 concentration next_streak -0.01569101 -4.529 347 23839
+TABLE breakout 60 concentration overnight1 0.0015363735 3.0506 343 23586
+TABLE breakout 60 concentration ret1 0.00069565782 0.61029 343 23586
+TABLE breakout 60 concentration ret_2_3 0.0027342137 1.6332 335 23027
+TABLE breakout 60 concentration o2o 0.00063527345 0.50748 339 23349
+TABLE breakout 60 concentration big_loss -0.078782339 -11.043 347 23839
+TABLE breakout 60 avg_cost_dist next_seal 0.015700828 4.0607 347 23839
+TABLE breakout 60 avg_cost_dist next_streak 0.015700828 4.0607 347 23839
+TABLE breakout 60 avg_cost_dist overnight1 -0.0018915098 -3.957 343 23586
+TABLE breakout 60 avg_cost_dist ret1 -0.00030513919 -0.27531 343 23586
+TABLE breakout 60 avg_cost_dist ret_2_3 -9.8445508e-05 -0.064354 335 23027
+TABLE breakout 60 avg_cost_dist o2o 0.00084857515 0.73742 339 23349
+TABLE breakout 60 avg_cost_dist big_loss 0.07593886 11.328 347 23839
+TABLE breakout 60 q95_rel next_seal -0.0066369103 -1.8075 347 23839
+TABLE breakout 60 q95_rel next_streak -0.0066369103 -1.8075 347 23839
+TABLE breakout 60 q95_rel overnight1 0.00073711128 1.641 343 23586
+TABLE breakout 60 q95_rel ret1 0.00020667073 0.1886 343 23586
+TABLE breakout 60 q95_rel ret_2_3 -0.0017248035 -1.1869 335 23027
+TABLE breakout 60 q95_rel o2o -0.00025385731 -0.22913 339 23349
+TABLE breakout 60 q95_rel big_loss -0.041986814 -5.894 347 23839
+CLAIMS period=holdout
+overhead event=上方无套牢盘/涨停 hl=20 y=next_seal est=0.031719851 t=3.8748 days=174 stocks=14700
+overhead event=上方无套牢盘/涨停 hl=20 y=next_streak est=0.18566234 t=7.6215 days=174 stocks=14700
+overhead event=上方无套牢盘/涨停 hl=20 y=overnight1 est=0.0044693664 t=5.0477 days=173 stocks=14525
+overhead event=上方无套牢盘/涨停 hl=20 y=ret1 est=0.0048326123 t=3.624 days=173 stocks=14525
+overhead event=上方无套牢盘/涨停 hl=20 y=ret_2_3 est=0.0029778515 t=1.5413 days=171 stocks=14222
+overhead event=上方无套牢盘/涨停 hl=20 y=o2o est=0.00049039142 t=0.33527 days=172 stocks=14369
+overhead event=上方无套牢盘/涨停 hl=60 y=next_seal est=0.029523986 t=3.787 days=174 stocks=14700
+overhead event=上方无套牢盘/涨停 hl=60 y=next_streak est=0.17264435 t=7.3206 days=174 stocks=14700
+overhead event=上方无套牢盘/涨停 hl=60 y=overnight1 est=0.0043333114 t=4.712 days=173 stocks=14525
+overhead event=上方无套牢盘/涨停 hl=60 y=ret1 est=0.0047070745 t=3.6944 days=173 stocks=14525
+overhead event=上方无套牢盘/涨停 hl=60 y=ret_2_3 est=0.004068083 t=2.0782 days=171 stocks=14222
+overhead event=上方无套牢盘/涨停 hl=60 y=o2o est=0.0013711533 t=0.92431 days=172 stocks=14369
+overhead event=上方无套牢盘/大涨未封 hl=20 y=next_seal est=0.0072940906 t=3.4492 days=174 stocks=41240
+overhead event=上方无套牢盘/大涨未封 hl=20 y=next_streak est=0.0072940906 t=3.4492 days=174 stocks=41240
+overhead event=上方无套牢盘/大涨未封 hl=20 y=overnight1 est=-0.0014698266 t=-2.9689 days=173 stocks=41029
+overhead event=上方无套牢盘/大涨未封 hl=20 y=ret1 est=0.00032365481 t=0.32693 days=173 stocks=41029
+overhead event=上方无套牢盘/大涨未封 hl=20 y=ret_2_3 est=0.00086434185 t=0.46708 days=169 stocks=40285
+overhead event=上方无套牢盘/大涨未封 hl=20 y=o2o est=0.00037151096 t=0.35779 days=171 stocks=40538
+overhead event=上方无套牢盘/大涨未封 hl=60 y=next_seal est=0.011458298 t=5.1212 days=174 stocks=41240
+overhead event=上方无套牢盘/大涨未封 hl=60 y=next_streak est=0.011458298 t=5.1212 days=174 stocks=41240
+overhead event=上方无套牢盘/大涨未封 hl=60 y=overnight1 est=-0.00047289894 t=-0.98748 days=173 stocks=41029
+overhead event=上方无套牢盘/大涨未封 hl=60 y=ret1 est=0.0016996808 t=1.7076 days=173 stocks=41029
+overhead event=上方无套牢盘/大涨未封 hl=60 y=ret_2_3 est=0.0014047837 t=0.73261 days=169 stocks=40285
+overhead event=上方无套牢盘/大涨未封 hl=60 y=o2o est=0.0011237795 t=1.0712 days=171 stocks=40538
+overhead event=上方无套牢盘/突破 hl=20 y=next_seal est=0.0068341024 t=1.8593 days=347 stocks=23839
+overhead event=上方无套牢盘/突破 hl=20 y=next_streak est=0.0068341024 t=1.8593 days=347 stocks=23839
+overhead event=上方无套牢盘/突破 hl=20 y=overnight1 est=-0.0001712305 t=-0.38299 days=343 stocks=23586
+overhead event=上方无套牢盘/突破 hl=20 y=ret1 est=0.00079120092 t=0.72349 days=343 stocks=23586
+overhead event=上方无套牢盘/突破 hl=20 y=ret_2_3 est=0.0018962192 t=1.2407 days=335 stocks=23027
+overhead event=上方无套牢盘/突破 hl=20 y=o2o est=0.00058799416 t=0.52777 days=339 stocks=23349
+overhead event=上方无套牢盘/突破 hl=60 y=next_seal est=0.0065337762 t=1.7544 days=347 stocks=23839
+overhead event=上方无套牢盘/突破 hl=60 y=next_streak est=0.0065337762 t=1.7544 days=347 stocks=23839
+overhead event=上方无套牢盘/突破 hl=60 y=overnight1 est=-0.00015750637 t=-0.34381 days=343 stocks=23586
+overhead event=上方无套牢盘/突破 hl=60 y=ret1 est=0.00082164859 t=0.76347 days=343 stocks=23586
+overhead event=上方无套牢盘/突破 hl=60 y=ret_2_3 est=0.002691784 t=1.7971 days=335 stocks=23027
+overhead event=上方无套牢盘/突破 hl=60 y=o2o est=0.00062818655 t=0.56922 days=339 stocks=23349
+through_zone hl=20 y=next_seal est=0.03957279 t=3.5181 days=174 stocks=14702 outside=6270
+through_zone hl=20 y=next_streak est=0.26729923 t=6.0124 days=174 stocks=14702 outside=6270
+through_zone hl=20 y=overnight1 est=0.0069061353 t=5.7041 days=173 stocks=14702 outside=6270
+through_zone hl=20 y=ret1 est=0.0063489298 t=3.6701 days=173 stocks=14702 outside=6270
+through_zone hl=20 y=ret_2_3 est=0.0039404808 t=1.46 days=171 stocks=14702 outside=6270
+through_zone hl=20 y=o2o est=-0.0003730213 t=-0.18699 days=172 stocks=14702 outside=6270
+through_zone hl=20 y=big_loss est=0.050854102 t=5.5264 days=174 stocks=14702 outside=6270
+through_zone hl=60 y=next_seal est=0.038256655 t=3.3243 days=174 stocks=14702 outside=5899
+through_zone hl=60 y=next_streak est=0.27739184 t=5.6575 days=174 stocks=14702 outside=5899
+through_zone hl=60 y=overnight1 est=0.0076141327 t=5.923 days=173 stocks=14702 outside=5899
+through_zone hl=60 y=ret1 est=0.0076897877 t=4.104 days=173 stocks=14702 outside=5899
+through_zone hl=60 y=ret_2_3 est=0.0027504811 t=0.93682 days=171 stocks=14702 outside=5899
+through_zone hl=60 y=o2o est=0.0005351952 t=0.2473 days=172 stocks=14702 outside=5899
+through_zone hl=60 y=big_loss est=0.054025136 t=5.3407 days=174 stocks=14702 outside=5899
+profit_volume event=获利盘兑现/涨停 hl=20 y=next_seal est=0.056823629 t=6.5518 days=174 stocks=14700
+profit_volume event=获利盘兑现/涨停 hl=20 y=next_streak est=0.13083747 t=5.026 days=174 stocks=14700
+profit_volume event=获利盘兑现/涨停 hl=20 y=overnight1 est=0.0076760277 t=8.075 days=173 stocks=14525
+profit_volume event=获利盘兑现/涨停 hl=20 y=ret1 est=0.0036494996 t=2.6886 days=173 stocks=14525
+profit_volume event=获利盘兑现/涨停 hl=20 y=ret_2_3 est=0.0019995662 t=1.0017 days=171 stocks=14222
+profit_volume event=获利盘兑现/涨停 hl=20 y=o2o est=0.00045154876 t=0.33665 days=172 stocks=14369
+profit_volume event=获利盘兑现/涨停 hl=20 y=big_loss est=-0.044265098 t=-5.8076 days=174 stocks=14702
+profit_volume event=获利盘兑现/涨停 hl=60 y=next_seal est=0.059419176 t=7.138 days=174 stocks=14700
+profit_volume event=获利盘兑现/涨停 hl=60 y=next_streak est=0.1377873 t=5.4019 days=174 stocks=14700
+profit_volume event=获利盘兑现/涨停 hl=60 y=overnight1 est=0.0074316768 t=7.864 days=173 stocks=14525
+profit_volume event=获利盘兑现/涨停 hl=60 y=ret1 est=0.0038383659 t=2.9975 days=173 stocks=14525
+profit_volume event=获利盘兑现/涨停 hl=60 y=ret_2_3 est=0.0016544985 t=0.84325 days=171 stocks=14222
+profit_volume event=获利盘兑现/涨停 hl=60 y=o2o est=0.00041809699 t=0.32656 days=172 stocks=14369
+profit_volume event=获利盘兑现/涨停 hl=60 y=big_loss est=-0.049512329 t=-6.8214 days=174 stocks=14702
+profit_volume event=获利盘兑现/大涨未封 hl=20 y=next_seal est=-0.0016084463 t=-0.72683 days=174 stocks=41240
+profit_volume event=获利盘兑现/大涨未封 hl=20 y=next_streak est=-0.0016084463 t=-0.72683 days=174 stocks=41240
+profit_volume event=获利盘兑现/大涨未封 hl=20 y=overnight1 est=0.0030106867 t=6.081 days=173 stocks=41029
+profit_volume event=获利盘兑现/大涨未封 hl=20 y=ret1 est=0.00098211275 t=0.97418 days=173 stocks=41029
+profit_volume event=获利盘兑现/大涨未封 hl=20 y=ret_2_3 est=0.00026053192 t=0.14798 days=169 stocks=40285
+profit_volume event=获利盘兑现/大涨未封 hl=20 y=o2o est=0.00050864233 t=0.51384 days=171 stocks=40538
+profit_volume event=获利盘兑现/大涨未封 hl=20 y=big_loss est=-0.029171534 t=-4.7217 days=174 stocks=41243
+profit_volume event=获利盘兑现/大涨未封 hl=60 y=next_seal est=-0.0026321604 t=-1.1502 days=174 stocks=41240
+profit_volume event=获利盘兑现/大涨未封 hl=60 y=next_streak est=-0.0026321604 t=-1.1502 days=174 stocks=41240
+profit_volume event=获利盘兑现/大涨未封 hl=60 y=overnight1 est=0.0028026187 t=6.1649 days=173 stocks=41029
+profit_volume event=获利盘兑现/大涨未封 hl=60 y=ret1 est=0.0012530937 t=1.2901 days=173 stocks=41029
+profit_volume event=获利盘兑现/大涨未封 hl=60 y=ret_2_3 est=-2.2047075e-05 t=-0.012903 days=169 stocks=40285
+profit_volume event=获利盘兑现/大涨未封 hl=60 y=o2o est=0.00075407712 t=0.77527 days=171 stocks=40538
+profit_volume event=获利盘兑现/大涨未封 hl=60 y=big_loss est=-0.035706697 t=-6.0665 days=174 stocks=41243
+profit_volume event=获利盘兑现/突破 hl=20 y=next_seal est=-0.0096715402 t=-2.6719 days=346 stocks=23839
+profit_volume event=获利盘兑现/突破 hl=20 y=next_streak est=-0.0096715402 t=-2.6719 days=346 stocks=23839
+profit_volume event=获利盘兑现/突破 hl=20 y=overnight1 est=0.002868625 t=6.6337 days=342 stocks=23586
+profit_volume event=获利盘兑现/突破 hl=20 y=ret1 est=0.00033808905 t=0.33304 days=342 stocks=23586
+profit_volume event=获利盘兑现/突破 hl=20 y=ret_2_3 est=0.00057006983 t=0.41673 days=334 stocks=23027
+profit_volume event=获利盘兑现/突破 hl=20 y=o2o est=-0.00057281169 t=-0.55099 days=338 stocks=23349
+profit_volume event=获利盘兑现/突破 hl=20 y=big_loss est=-0.029130839 t=-4.1074 days=346 stocks=23839
+profit_volume event=获利盘兑现/突破 hl=60 y=next_seal est=-0.010431223 t=-2.88 days=346 stocks=23839
+profit_volume event=获利盘兑现/突破 hl=60 y=next_streak est=-0.010431223 t=-2.88 days=346 stocks=23839
+profit_volume event=获利盘兑现/突破 hl=60 y=overnight1 est=0.0027684536 t=6.8573 days=342 stocks=23586
+profit_volume event=获利盘兑现/突破 hl=60 y=ret1 est=0.00050330969 t=0.47542 days=342 stocks=23586
+profit_volume event=获利盘兑现/突破 hl=60 y=ret_2_3 est=0.00094125432 t=0.69109 days=334 stocks=23027
+profit_volume event=获利盘兑现/突破 hl=60 y=o2o est=-6.9008761e-05 t=-0.064945 days=338 stocks=23349
+profit_volume event=获利盘兑现/突破 hl=60 y=big_loss est=-0.033095502 t=-4.5997 days=346 stocks=23839
+concentration event=集中后突破 hl=20 y=next_seal est=-0.017670642 t=-5.2296 days=347 stocks=23839
+concentration event=集中后突破 hl=20 y=next_streak est=-0.017670642 t=-5.2296 days=347 stocks=23839
+concentration event=集中后突破 hl=20 y=overnight1 est=0.0016528185 t=3.3727 days=343 stocks=23586
+concentration event=集中后突破 hl=20 y=ret1 est=0.00015730268 t=0.12791 days=343 stocks=23586
+concentration event=集中后突破 hl=20 y=ret_2_3 est=0.0017357205 t=1.0478 days=335 stocks=23027
+concentration event=集中后突破 hl=20 y=o2o est=-0.00051648482 t=-0.38922 days=339 stocks=23349
+concentration event=集中后突破 hl=20 y=big_loss est=-0.082192622 t=-10.561 days=347 stocks=23839
+concentration event=集中后突破 hl=60 y=next_seal est=-0.01569101 t=-4.529 days=347 stocks=23839
+concentration event=集中后突破 hl=60 y=next_streak est=-0.01569101 t=-4.529 days=347 stocks=23839
+concentration event=集中后突破 hl=60 y=overnight1 est=0.0015363735 t=3.0506 days=343 stocks=23586
+concentration event=集中后突破 hl=60 y=ret1 est=0.00069565782 t=0.61029 days=343 stocks=23586
+concentration event=集中后突破 hl=60 y=ret_2_3 est=0.0027342137 t=1.6332 days=335 stocks=23027
+concentration event=集中后突破 hl=60 y=o2o est=0.00063527345 t=0.50748 days=339 stocks=23349
+concentration event=集中后突破 hl=60 y=big_loss est=-0.078782339 t=-11.043 days=347 stocks=23839
+concentration event=集中/涨停 hl=20 y=next_seal est=-0.0084865686 t=-1.0117 days=174 stocks=14700
+concentration event=集中/涨停 hl=20 y=next_streak est=-0.0066191792 t=-0.25646 days=174 stocks=14700
+concentration event=集中/涨停 hl=20 y=overnight1 est=0.0011635503 t=1.2623 days=173 stocks=14525
+concentration event=集中/涨停 hl=20 y=ret1 est=-0.00093900669 t=-0.72918 days=173 stocks=14525
+concentration event=集中/涨停 hl=20 y=ret_2_3 est=0.0026956445 t=1.1382 days=171 stocks=14222
+concentration event=集中/涨停 hl=20 y=o2o est=0.00083467553 t=0.5849 days=172 stocks=14369
+concentration event=集中/涨停 hl=20 y=big_loss est=0.0035276419 t=0.50459 days=174 stocks=14702
+concentration event=集中/涨停 hl=60 y=next_seal est=-0.0057986799 t=-0.6816 days=174 stocks=14700
+concentration event=集中/涨停 hl=60 y=next_streak est=0.01427827 t=0.55237 days=174 stocks=14700
+concentration event=集中/涨停 hl=60 y=overnight1 est=0.0011473352 t=1.4288 days=173 stocks=14525
+concentration event=集中/涨停 hl=60 y=ret1 est=-0.001191466 t=-0.94871 days=173 stocks=14525
+concentration event=集中/涨停 hl=60 y=ret_2_3 est=0.001260513 t=0.64011 days=171 stocks=14222
+concentration event=集中/涨停 hl=60 y=o2o est=-0.00027703595 t=-0.20889 days=172 stocks=14369
+concentration event=集中/涨停 hl=60 y=big_loss est=0.007913097 t=1.2915 days=174 stocks=14702
+STRATIFIED_LIMIT_UP definition=high>low or streak buckets; estimates are preregistered direction
+STRATIFIED hl=20 cell=not_one_word rule=through_zone y=next_seal est=0.013880467 t=1.3225 days=174 stocks=13829
+STRATIFIED hl=20 cell=not_one_word rule=through_zone y=overnight1 est=0.0037536296 t=3.3243 days=173 stocks=13669
+STRATIFIED hl=20 cell=not_one_word rule=through_zone y=ret1 est=0.0029494887 t=1.7144 days=173 stocks=13669
+STRATIFIED hl=20 cell=not_one_word rule=through_zone y=ret_2_3 est=0.0021325573 t=0.75438 days=171 stocks=13398
+STRATIFIED hl=20 cell=not_one_word rule=through_zone y=o2o est=-0.002883269 t=-1.5045 days=172 stocks=13528
+STRATIFIED hl=20 cell=not_one_word rule=through_zone y=big_loss est=0.054134312 t=5.4549 days=174 stocks=13830
+STRATIFIED hl=20 cell=not_one_word rule=overhead y=next_seal est=0.015145995 t=2.0171 days=174 stocks=13770
+STRATIFIED hl=20 cell=not_one_word rule=overhead y=overnight1 est=0.0020295187 t=2.2896 days=173 stocks=13614
+STRATIFIED hl=20 cell=not_one_word rule=overhead y=ret1 est=0.0023882095 t=1.805 days=173 stocks=13614
+STRATIFIED hl=20 cell=not_one_word rule=overhead y=ret_2_3 est=0.0018769036 t=0.97265 days=171 stocks=13346
+STRATIFIED hl=20 cell=not_one_word rule=overhead y=o2o est=-0.00092435371 t=-0.6513 days=172 stocks=13475
+STRATIFIED hl=20 cell=not_one_word rule=overhead y=big_loss est=0.053595013 t=6.835 days=174 stocks=13771
+STRATIFIED hl=20 cell=not_one_word rule=profit_volume y=next_seal est=0.020965489 t=2.5543 days=174 stocks=13770
+STRATIFIED hl=20 cell=not_one_word rule=profit_volume y=overnight1 est=0.0037475167 t=4.4607 days=173 stocks=13614
+STRATIFIED hl=20 cell=not_one_word rule=profit_volume y=ret1 est=0.00039502648 t=0.29197 days=173 stocks=13614
+STRATIFIED hl=20 cell=not_one_word rule=profit_volume y=ret_2_3 est=-0.0005754469 t=-0.29806 days=171 stocks=13346
+STRATIFIED hl=20 cell=not_one_word rule=profit_volume y=o2o est=-0.00065728529 t=-0.4497 days=172 stocks=13475
+STRATIFIED hl=20 cell=not_one_word rule=profit_volume y=big_loss est=-0.043511802 t=-5.4506 days=174 stocks=13771
+STRATIFIED hl=20 cell=streak1 rule=through_zone y=next_seal est=-0.0073249508 t=-0.67229 days=173 stocks=11763
+STRATIFIED hl=20 cell=streak1 rule=through_zone y=overnight1 est=0.0022353756 t=1.7581 days=172 stocks=11627
+STRATIFIED hl=20 cell=streak1 rule=through_zone y=ret1 est=0.0018594814 t=0.95463 days=172 stocks=11627
+STRATIFIED hl=20 cell=streak1 rule=through_zone y=ret_2_3 est=-0.00052971977 t=-0.17008 days=170 stocks=11410
+STRATIFIED hl=20 cell=streak1 rule=through_zone y=o2o est=-0.0031163771 t=-1.4777 days=171 stocks=11510
+STRATIFIED hl=20 cell=streak1 rule=through_zone y=big_loss est=0.04956991 t=4.4054 days=173 stocks=11764
+STRATIFIED hl=20 cell=streak1 rule=overhead y=next_seal est=0.0028245195 t=0.34092 days=174 stocks=11709
+STRATIFIED hl=20 cell=streak1 rule=overhead y=overnight1 est=0.0020608827 t=2.015 days=173 stocks=11577
+STRATIFIED hl=20 cell=streak1 rule=overhead y=ret1 est=0.0027391019 t=1.8921 days=173 stocks=11577
+STRATIFIED hl=20 cell=streak1 rule=overhead y=ret_2_3 est=0.0018133194 t=0.89516 days=171 stocks=11363
+STRATIFIED hl=20 cell=streak1 rule=overhead y=o2o est=-0.0012010708 t=-0.81075 days=172 stocks=11462
+STRATIFIED hl=20 cell=streak1 rule=overhead y=big_loss est=0.04587978 t=5.4111 days=174 stocks=11710
+STRATIFIED hl=20 cell=streak1 rule=profit_volume y=next_seal est=0.04434792 t=5.1374 days=174 stocks=11709
+STRATIFIED hl=20 cell=streak1 rule=profit_volume y=overnight1 est=0.0045517136 t=4.653 days=173 stocks=11577
+STRATIFIED hl=20 cell=streak1 rule=profit_volume y=ret1 est=0.0012449277 t=0.8745 days=173 stocks=11577
+STRATIFIED hl=20 cell=streak1 rule=profit_volume y=ret_2_3 est=-0.0009899384 t=-0.45238 days=171 stocks=11363
+STRATIFIED hl=20 cell=streak1 rule=profit_volume y=o2o est=0.00015953819 t=0.10543 days=172 stocks=11462
+STRATIFIED hl=20 cell=streak1 rule=profit_volume y=big_loss est=-0.035187297 t=-4.2434 days=174 stocks=11710
+STRATIFIED hl=20 cell=streak2 rule=through_zone y=next_seal est=0.022503982 t=0.68316 days=148 stocks=1917
+STRATIFIED hl=20 cell=streak2 rule=through_zone y=overnight1 est=0.0089248976 t=2.7306 days=146 stocks=1894
+STRATIFIED hl=20 cell=streak2 rule=through_zone y=ret1 est=0.0072086927 t=1.6308 days=146 stocks=1894
+STRATIFIED hl=20 cell=streak2 rule=through_zone y=ret_2_3 est=0.0019783882 t=0.31465 days=142 stocks=1846
+STRATIFIED hl=20 cell=streak2 rule=through_zone y=o2o est=0.0030746586 t=0.58573 days=144 stocks=1874
+STRATIFIED hl=20 cell=streak2 rule=through_zone y=big_loss est=0.0079368286 t=0.34863 days=148 stocks=1917
+STRATIFIED hl=20 cell=streak2 rule=overhead y=next_seal est=0.020923072 t=0.7993 days=168 stocks=1912
+STRATIFIED hl=20 cell=streak2 rule=overhead y=overnight1 est=0.0044314254 t=1.6568 days=167 stocks=1889
+STRATIFIED hl=20 cell=streak2 rule=overhead y=ret1 est=0.0054147829 t=1.4685 days=167 stocks=1889
+STRATIFIED hl=20 cell=streak2 rule=overhead y=ret_2_3 est=0.0032064627 t=0.58119 days=162 stocks=1841
+STRATIFIED hl=20 cell=streak2 rule=overhead y=o2o est=0.0043920577 t=0.94164 days=165 stocks=1869
+STRATIFIED hl=20 cell=streak2 rule=overhead y=big_loss est=0.015300516 t=0.80329 days=168 stocks=1912
+STRATIFIED hl=20 cell=streak2 rule=profit_volume y=next_seal est=0.08252618 t=3.2523 days=173 stocks=1912
+STRATIFIED hl=20 cell=streak2 rule=profit_volume y=overnight1 est=0.020761607 t=7.983 days=172 stocks=1889
+STRATIFIED hl=20 cell=streak2 rule=profit_volume y=ret1 est=0.011172054 t=3.1982 days=172 stocks=1889
+STRATIFIED hl=20 cell=streak2 rule=profit_volume y=ret_2_3 est=0.0049120921 t=1.1205 days=168 stocks=1841
+STRATIFIED hl=20 cell=streak2 rule=profit_volume y=o2o est=-0.0004293113 t=-0.10201 days=170 stocks=1869
+STRATIFIED hl=20 cell=streak2 rule=profit_volume y=big_loss est=-0.049038636 t=-3.0013 days=173 stocks=1912
+STRATIFIED hl=20 cell=streak3plus rule=through_zone y=next_seal est=0.023276915 t=0.50281 days=111 stocks=1079
+STRATIFIED hl=20 cell=streak3plus rule=through_zone y=overnight1 est=0.015141217 t=3.3563 days=110 stocks=1059
+STRATIFIED hl=20 cell=streak3plus rule=through_zone y=ret1 est=0.015450555 t=2.9393 days=110 stocks=1059
+STRATIFIED hl=20 cell=streak3plus rule=through_zone y=ret_2_3 est=0.017832858 t=1.8637 days=106 stocks=1018
+STRATIFIED hl=20 cell=streak3plus rule=through_zone y=o2o est=0.0032746703 t=0.42795 days=108 stocks=1038
+STRATIFIED hl=20 cell=streak3plus rule=through_zone y=big_loss est=0.047001055 t=1.73 days=111 stocks=1080
+STRATIFIED hl=20 cell=streak3plus rule=overhead y=next_seal est=0.013963786 t=0.32878 days=131 stocks=1079
+STRATIFIED hl=20 cell=streak3plus rule=overhead y=overnight1 est=0.009843793 t=2.4286 days=129 stocks=1059
+STRATIFIED hl=20 cell=streak3plus rule=overhead y=ret1 est=0.0096157619 t=1.9294 days=129 stocks=1059
+STRATIFIED hl=20 cell=streak3plus rule=overhead y=ret_2_3 est=0.012970919 t=1.5708 days=125 stocks=1018
+STRATIFIED hl=20 cell=streak3plus rule=overhead y=o2o est=0.0026887934 t=0.41625 days=127 stocks=1038
+STRATIFIED hl=20 cell=streak3plus rule=overhead y=big_loss est=0.044057656 t=1.7138 days=131 stocks=1080
+STRATIFIED hl=20 cell=streak3plus rule=profit_volume y=next_seal est=0.11838675 t=3.6098 days=166 stocks=1079
+STRATIFIED hl=20 cell=streak3plus rule=profit_volume y=overnight1 est=0.014209726 t=3.8697 days=165 stocks=1059
+STRATIFIED hl=20 cell=streak3plus rule=profit_volume y=ret1 est=0.01433151 t=2.945 days=165 stocks=1059
+STRATIFIED hl=20 cell=streak3plus rule=profit_volume y=ret_2_3 est=0.016094256 t=2.0017 days=162 stocks=1018
+STRATIFIED hl=20 cell=streak3plus rule=profit_volume y=o2o est=0.0065740662 t=1.0105 days=164 stocks=1038
+STRATIFIED hl=20 cell=streak3plus rule=profit_volume y=big_loss est=-0.1174199 t=-4.7936 days=166 stocks=1080
+STRATIFIED hl=60 cell=not_one_word rule=through_zone y=next_seal est=0.015159109 t=1.4361 days=174 stocks=13829
+STRATIFIED hl=60 cell=not_one_word rule=through_zone y=overnight1 est=0.0044717806 t=3.8233 days=173 stocks=13669
+STRATIFIED hl=60 cell=not_one_word rule=through_zone y=ret1 est=0.0045509929 t=2.4464 days=173 stocks=13669
+STRATIFIED hl=60 cell=not_one_word rule=through_zone y=ret_2_3 est=0.0020498004 t=0.63132 days=171 stocks=13398
+STRATIFIED hl=60 cell=not_one_word rule=through_zone y=o2o est=-0.0017473689 t=-0.84419 days=172 stocks=13528
+STRATIFIED hl=60 cell=not_one_word rule=through_zone y=big_loss est=0.058771734 t=5.4084 days=174 stocks=13830
+STRATIFIED hl=60 cell=not_one_word rule=overhead y=next_seal est=0.014270098 t=1.8744 days=174 stocks=13770
+STRATIFIED hl=60 cell=not_one_word rule=overhead y=overnight1 est=0.0024849096 t=2.7703 days=173 stocks=13614
+STRATIFIED hl=60 cell=not_one_word rule=overhead y=ret1 est=0.0024923558 t=1.9682 days=173 stocks=13614
+STRATIFIED hl=60 cell=not_one_word rule=overhead y=ret_2_3 est=0.0034334766 t=1.7591 days=171 stocks=13346
+STRATIFIED hl=60 cell=not_one_word rule=overhead y=o2o est=-0.00019546123 t=-0.13437 days=172 stocks=13475
+STRATIFIED hl=60 cell=not_one_word rule=overhead y=big_loss est=0.051956857 t=6.9116 days=174 stocks=13771
+STRATIFIED hl=60 cell=not_one_word rule=profit_volume y=next_seal est=0.024735608 t=3.2716 days=174 stocks=13770
+STRATIFIED hl=60 cell=not_one_word rule=profit_volume y=overnight1 est=0.0038987597 t=4.7712 days=173 stocks=13614
+STRATIFIED hl=60 cell=not_one_word rule=profit_volume y=ret1 est=0.00035685135 t=0.27948 days=173 stocks=13614
+STRATIFIED hl=60 cell=not_one_word rule=profit_volume y=ret_2_3 est=-0.00078845993 t=-0.39817 days=171 stocks=13346
+STRATIFIED hl=60 cell=not_one_word rule=profit_volume y=o2o est=-0.0007607943 t=-0.54864 days=172 stocks=13475
+STRATIFIED hl=60 cell=not_one_word rule=profit_volume y=big_loss est=-0.043367597 t=-5.7976 days=174 stocks=13771
+STRATIFIED hl=60 cell=streak1 rule=through_zone y=next_seal est=-0.0060782789 t=-0.5599 days=172 stocks=11763
+STRATIFIED hl=60 cell=streak1 rule=through_zone y=overnight1 est=0.0033386431 t=2.6969 days=171 stocks=11627
+STRATIFIED hl=60 cell=streak1 rule=through_zone y=ret1 est=0.002470473 t=1.1885 days=171 stocks=11627
+STRATIFIED hl=60 cell=streak1 rule=through_zone y=ret_2_3 est=-0.0035645514 t=-1.1788 days=168 stocks=11410
+STRATIFIED hl=60 cell=streak1 rule=through_zone y=o2o est=-0.0034383276 t=-1.5725 days=170 stocks=11510
+STRATIFIED hl=60 cell=streak1 rule=through_zone y=big_loss est=0.060448467 t=4.7309 days=172 stocks=11764
+STRATIFIED hl=60 cell=streak1 rule=overhead y=next_seal est=0.001081724 t=0.13013 days=174 stocks=11709
+STRATIFIED hl=60 cell=streak1 rule=overhead y=overnight1 est=0.0017002058 t=1.7356 days=173 stocks=11577
+STRATIFIED hl=60 cell=streak1 rule=overhead y=ret1 est=0.0020663235 t=1.4541 days=173 stocks=11577
+STRATIFIED hl=60 cell=streak1 rule=overhead y=ret_2_3 est=0.0019714065 t=0.95131 days=171 stocks=11363
+STRATIFIED hl=60 cell=streak1 rule=overhead y=o2o est=-0.00067909421 t=-0.45359 days=172 stocks=11462
+STRATIFIED hl=60 cell=streak1 rule=overhead y=big_loss est=0.049272494 t=5.8653 days=174 stocks=11710
+STRATIFIED hl=60 cell=streak1 rule=profit_volume y=next_seal est=0.049966397 t=6.1887 days=174 stocks=11709
+STRATIFIED hl=60 cell=streak1 rule=profit_volume y=overnight1 est=0.005428011 t=6.1458 days=173 stocks=11577
+STRATIFIED hl=60 cell=streak1 rule=profit_volume y=ret1 est=0.0020176028 t=1.4615 days=173 stocks=11577
+STRATIFIED hl=60 cell=streak1 rule=profit_volume y=ret_2_3 est=8.4560018e-05 t=0.038968 days=171 stocks=11363
+STRATIFIED hl=60 cell=streak1 rule=profit_volume y=o2o est=0.00036015423 t=0.24383 days=172 stocks=11462
+STRATIFIED hl=60 cell=streak1 rule=profit_volume y=big_loss est=-0.042318538 t=-5.1978 days=174 stocks=11710
+STRATIFIED hl=60 cell=streak2 rule=through_zone y=next_seal est=-0.015225539 t=-0.50913 days=149 stocks=1917
+STRATIFIED hl=60 cell=streak2 rule=through_zone y=overnight1 est=0.0046116467 t=1.38 days=149 stocks=1894
+STRATIFIED hl=60 cell=streak2 rule=through_zone y=ret1 est=0.0050335835 t=1.207 days=149 stocks=1894
+STRATIFIED hl=60 cell=streak2 rule=through_zone y=ret_2_3 est=-0.0034855595 t=-0.53885 days=144 stocks=1846
+STRATIFIED hl=60 cell=streak2 rule=through_zone y=o2o est=-0.00045158476 t=-0.08684 days=147 stocks=1874
+STRATIFIED hl=60 cell=streak2 rule=through_zone y=big_loss est=0.018938453 t=0.92191 days=149 stocks=1917
+STRATIFIED hl=60 cell=streak2 rule=overhead y=next_seal est=0.030479696 t=1.18 days=168 stocks=1912
+STRATIFIED hl=60 cell=streak2 rule=overhead y=overnight1 est=0.004567955 t=1.7773 days=167 stocks=1889
+STRATIFIED hl=60 cell=streak2 rule=overhead y=ret1 est=0.0064504111 t=1.7968 days=167 stocks=1889
+STRATIFIED hl=60 cell=streak2 rule=overhead y=ret_2_3 est=0.0077915198 t=1.5183 days=162 stocks=1841
+STRATIFIED hl=60 cell=streak2 rule=overhead y=o2o est=0.0069643013 t=1.4801 days=165 stocks=1869
+STRATIFIED hl=60 cell=streak2 rule=overhead y=big_loss est=0.012630963 t=0.71849 days=168 stocks=1912
+STRATIFIED hl=60 cell=streak2 rule=profit_volume y=next_seal est=0.094055233 t=3.8716 days=173 stocks=1912
+STRATIFIED hl=60 cell=streak2 rule=profit_volume y=overnight1 est=0.019189396 t=6.8359 days=172 stocks=1889
+STRATIFIED hl=60 cell=streak2 rule=profit_volume y=ret1 est=0.01177107 t=3.3421 days=172 stocks=1889
+STRATIFIED hl=60 cell=streak2 rule=profit_volume y=ret_2_3 est=0.0038485514 t=0.83501 days=168 stocks=1841
+STRATIFIED hl=60 cell=streak2 rule=profit_volume y=o2o est=-0.00058165512 t=-0.13698 days=170 stocks=1869
+STRATIFIED hl=60 cell=streak2 rule=profit_volume y=big_loss est=-0.05663192 t=-3.3267 days=173 stocks=1912
+STRATIFIED hl=60 cell=streak3plus rule=through_zone y=next_seal est=0.02216739 t=0.50204 days=115 stocks=1079
+STRATIFIED hl=60 cell=streak3plus rule=through_zone y=overnight1 est=0.014895942 t=3.2279 days=114 stocks=1059
+STRATIFIED hl=60 cell=streak3plus rule=through_zone y=ret1 est=0.015091895 t=2.8935 days=114 stocks=1059
+STRATIFIED hl=60 cell=streak3plus rule=through_zone y=ret_2_3 est=0.021320849 t=2.213 days=110 stocks=1018
+STRATIFIED hl=60 cell=streak3plus rule=through_zone y=o2o est=0.0076532289 t=1.0801 days=112 stocks=1038
+STRATIFIED hl=60 cell=streak3plus rule=through_zone y=big_loss est=0.060455639 t=2.2593 days=115 stocks=1080
+STRATIFIED hl=60 cell=streak3plus rule=overhead y=next_seal est=0.025426284 t=0.59374 days=131 stocks=1079
+STRATIFIED hl=60 cell=streak3plus rule=overhead y=overnight1 est=0.0098375731 t=2.4238 days=129 stocks=1059
+STRATIFIED hl=60 cell=streak3plus rule=overhead y=ret1 est=0.01169404 t=2.3091 days=129 stocks=1059
+STRATIFIED hl=60 cell=streak3plus rule=overhead y=ret_2_3 est=0.010427266 t=1.2343 days=125 stocks=1018
+STRATIFIED hl=60 cell=streak3plus rule=overhead y=o2o est=0.0059227537 t=0.91339 days=127 stocks=1038
+STRATIFIED hl=60 cell=streak3plus rule=overhead y=big_loss est=0.046474959 t=1.7991 days=131 stocks=1080
+STRATIFIED hl=60 cell=streak3plus rule=profit_volume y=next_seal est=0.12122907 t=3.6863 days=166 stocks=1079
+STRATIFIED hl=60 cell=streak3plus rule=profit_volume y=overnight1 est=0.014948369 t=4.045 days=165 stocks=1059
+STRATIFIED hl=60 cell=streak3plus rule=profit_volume y=ret1 est=0.013932747 t=2.8557 days=165 stocks=1059
+STRATIFIED hl=60 cell=streak3plus rule=profit_volume y=ret_2_3 est=0.016032396 t=1.9931 days=162 stocks=1018
+STRATIFIED hl=60 cell=streak3plus rule=profit_volume y=o2o est=0.0061236825 t=0.93909 days=164 stocks=1038
+STRATIFIED hl=60 cell=streak3plus rule=profit_volume y=big_loss est=-0.1174199 t=-4.7936 days=166 stocks=1080

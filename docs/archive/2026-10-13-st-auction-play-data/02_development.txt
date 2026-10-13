@@ -1,0 +1,171 @@
+data_rows=58397 list_rows_with_panel=58399 prev_limit_up_in_list=13292
+development_days=387 threshold_amount_to_turnover_q75=0.21684634
+board_median_gap=1:0.02349870,2:0.05431310,3:0.08602102,4:0.09654471,5:0.09848485,6:0.09842940,7:0.09968586,8:0.09982789,9:0.09984399,10:0.09996215,11:0.03912320,12:0.10000000,13:0.10000000,14:0.10001977
+
+BASELINE CELLS (yesterday limit-up stocks in list)
+gap=<−2% boards=1 auction/T_turnover median=0.00510476 mean=0.01012496; auction/float_cap median=0.00131821 mean=0.00190949; rank median=54.0 n=739
+gap=<−2% boards=1 seal_again estimate=0.04462719 t=4.535 days=304 stock_days=739
+gap=<−2% boards=1 open_to_close estimate=0.00896365 t=3.456 days=304 stock_days=739
+gap=<−2% boards=1 o2o estimate=0.00045948 t=0.155 days=304 stock_days=739
+gap=<−2% boards=1 holder_next_close estimate=-0.00356017 t=-1.255 days=304 stock_days=739
+gap=<−2% boards=2 auction/T_turnover median=0.00735420 mean=0.02837721; auction/float_cap median=0.00224887 mean=0.00381843; rank median=40.5 n=240
+gap=<−2% boards=2 seal_again estimate=0.05653153 t=3.584 days=148 stock_days=240
+gap=<−2% boards=2 open_to_close estimate=0.00886237 t=1.932 days=148 stock_days=240
+gap=<−2% boards=2 o2o estimate=-0.00895985 t=-1.777 days=148 stock_days=240
+gap=<−2% boards=2 holder_next_close estimate=-0.01470632 t=-2.804 days=148 stock_days=240
+gap=<−2% boards=3 auction/T_turnover median=0.00760250 mean=0.03084600; auction/float_cap median=0.00308554 mean=0.00407960; rank median=38.0 n=91
+gap=<−2% boards=3 seal_again estimate=0.15096618 t=3.858 days=69 stock_days=91
+gap=<−2% boards=3 open_to_close estimate=0.01764011 t=2.251 days=69 stock_days=91
+gap=<−2% boards=3 o2o estimate=-0.00275436 t=-0.275 days=69 stock_days=91
+gap=<−2% boards=3 holder_next_close estimate=-0.01456567 t=-1.632 days=69 stock_days=91
+gap=<−2% boards=4+ auction/T_turnover median=0.00854982 mean=0.04712555; auction/float_cap median=0.00412641 mean=0.00633824; rank median=32.0 n=115
+gap=<−2% boards=4+ seal_again estimate=0.11768293 t=3.737 days=82 stock_days=115
+gap=<−2% boards=4+ open_to_close estimate=0.00556686 t=0.747 days=82 stock_days=115
+gap=<−2% boards=4+ o2o estimate=-0.02448771 t=-2.649 days=82 stock_days=115
+gap=<−2% boards=4+ holder_next_close estimate=-0.03094760 t=-3.904 days=82 stock_days=115
+gap=−2–0% boards=1 auction/T_turnover median=0.00803717 mean=0.01522857; auction/float_cap median=0.00141419 mean=0.00211623; rank median=53.0 n=1212
+gap=−2–0% boards=1 seal_again estimate=0.06218217 t=7.266 days=348 stock_days=1212
+gap=−2–0% boards=1 open_to_close estimate=0.00576357 t=3.379 days=348 stock_days=1212
+gap=−2–0% boards=1 o2o estimate=0.00061694 t=0.316 days=348 stock_days=1212
+gap=−2–0% boards=1 holder_next_close estimate=-0.00142212 t=-0.784 days=348 stock_days=1212
+gap=−2–0% boards=2 auction/T_turnover median=0.01026930 mean=0.09745992; auction/float_cap median=0.00304691 mean=0.01002868; rank median=34.0 n=202
+gap=−2–0% boards=2 seal_again estimate=0.13333333 t=5.113 days=140 stock_days=202
+gap=−2–0% boards=2 open_to_close estimate=0.00984414 t=1.780 days=140 stock_days=202
+gap=−2–0% boards=2 o2o estimate=-0.00219972 t=-0.353 days=140 stock_days=202
+gap=−2–0% boards=2 holder_next_close estimate=-0.00427939 t=-0.762 days=140 stock_days=202
+gap=−2–0% boards=3 auction/T_turnover median=0.01780062 mean=0.36064657; auction/float_cap median=0.00525689 mean=0.01346569; rank median=22.0 n=56
+gap=−2–0% boards=3 seal_again estimate=0.19148936 t=3.301 days=47 stock_days=56
+gap=−2–0% boards=3 open_to_close estimate=-0.01031014 t=-1.056 days=47 stock_days=56
+gap=−2–0% boards=3 o2o estimate=-0.03188602 t=-2.676 days=47 stock_days=56
+gap=−2–0% boards=3 holder_next_close estimate=-0.03002702 t=-3.129 days=47 stock_days=56
+gap=−2–0% boards=4+ auction/T_turnover median=0.01519264 mean=0.17335494; auction/float_cap median=0.00590467 mean=0.00914388; rank median=24.0 n=45
+gap=−2–0% boards=4+ seal_again estimate=0.21666667 t=3.340 days=40 stock_days=45
+gap=−2–0% boards=4+ open_to_close estimate=0.01295956 t=1.158 days=40 stock_days=45
+gap=−2–0% boards=4+ o2o estimate=-0.00945957 t=-0.586 days=40 stock_days=45
+gap=−2–0% boards=4+ holder_next_close estimate=-0.01409671 t=-1.060 days=40 stock_days=45
+gap=0–2% boards=1 auction/T_turnover median=0.01265809 mean=0.02635858; auction/float_cap median=0.00203825 mean=0.00313520; rank median=45.0 n=2399
+gap=0–2% boards=1 seal_again estimate=0.10364306 t=10.943 days=381 stock_days=2399
+gap=0–2% boards=1 open_to_close estimate=0.00652678 t=4.273 days=381 stock_days=2399
+gap=0–2% boards=1 o2o estimate=-0.00103361 t=-0.508 days=381 stock_days=2399
+gap=0–2% boards=1 holder_next_close estimate=-0.00250848 t=-1.470 days=381 stock_days=2399
+gap=0–2% boards=2 auction/T_turnover median=0.01724355 mean=0.08310719; auction/float_cap median=0.00403913 mean=0.00616385; rank median=30.0 n=330
+gap=0–2% boards=2 seal_again estimate=0.19193720 t=7.857 days=214 stock_days=330
+gap=0–2% boards=2 open_to_close estimate=0.01058921 t=2.521 days=214 stock_days=330
+gap=0–2% boards=2 o2o estimate=-0.00127027 t=-0.267 days=214 stock_days=330
+gap=0–2% boards=2 holder_next_close estimate=-0.00068236 t=-0.151 days=214 stock_days=330
+gap=0–2% boards=3 auction/T_turnover median=0.02048314 mean=0.13877016; auction/float_cap median=0.00630514 mean=0.00855471; rank median=26.0 n=92
+gap=0–2% boards=3 seal_again estimate=0.27450980 t=5.762 days=85 stock_days=92
+gap=0–2% boards=3 open_to_close estimate=0.00944270 t=1.142 days=85 stock_days=92
+gap=0–2% boards=3 o2o estimate=-0.00424922 t=-0.395 days=85 stock_days=92
+gap=0–2% boards=3 holder_next_close estimate=-0.00765456 t=-0.888 days=85 stock_days=92
+gap=0–2% boards=4+ auction/T_turnover median=0.02322967 mean=0.46517887; auction/float_cap median=0.00764770 mean=0.01398625; rank median=19.0 n=98
+gap=0–2% boards=4+ seal_again estimate=0.35077519 t=6.952 days=86 stock_days=98
+gap=0–2% boards=4+ open_to_close estimate=0.01096654 t=1.297 days=86 stock_days=98
+gap=0–2% boards=4+ o2o estimate=-0.01185539 t=-1.008 days=86 stock_days=98
+gap=0–2% boards=4+ holder_next_close estimate=-0.01660272 t=-1.833 days=86 stock_days=98
+gap=2–5% boards=1 auction/T_turnover median=0.02502895 mean=0.04819723; auction/float_cap median=0.00380976 mean=0.00523010; rank median=35.0 n=1998
+gap=2–5% boards=1 seal_again estimate=0.20357555 t=17.091 days=370 stock_days=1998
+gap=2–5% boards=1 open_to_close estimate=0.00607881 t=3.320 days=370 stock_days=1998
+gap=2–5% boards=1 o2o estimate=-0.00183810 t=-0.843 days=370 stock_days=1998
+gap=2–5% boards=1 holder_next_close estimate=0.00231070 t=1.157 days=370 stock_days=1998
+gap=2–5% boards=2 auction/T_turnover median=0.03455736 mean=0.15344741; auction/float_cap median=0.00776398 mean=0.01063157; rank median=21.0 n=286
+gap=2–5% boards=2 seal_again estimate=0.31234234 t=10.161 days=185 stock_days=286
+gap=2–5% boards=2 open_to_close estimate=0.00398800 t=0.889 days=185 stock_days=286
+gap=2–5% boards=2 o2o estimate=-0.00888742 t=-1.516 days=185 stock_days=286
+gap=2–5% boards=2 holder_next_close estimate=-0.00841394 t=-1.634 days=185 stock_days=286
+gap=2–5% boards=3 auction/T_turnover median=0.03762245 mean=0.31263091; auction/float_cap median=0.01077956 mean=0.01561277; rank median=20.0 n=110
+gap=2–5% boards=3 seal_again estimate=0.46146953 t=9.258 days=93 stock_days=110
+gap=2–5% boards=3 open_to_close estimate=0.00623565 t=0.766 days=93 stock_days=110
+gap=2–5% boards=3 o2o estimate=-0.00751196 t=-0.732 days=93 stock_days=110
+gap=2–5% boards=3 holder_next_close estimate=0.00417647 t=0.538 days=93 stock_days=110
+gap=2–5% boards=4+ auction/T_turnover median=0.04461748 mean=0.34674994; auction/float_cap median=0.01256179 mean=0.01835462; rank median=16.0 n=83
+gap=2–5% boards=4+ seal_again estimate=0.46428571 t=7.905 days=70 stock_days=83
+gap=2–5% boards=4+ open_to_close estimate=0.00096675 t=0.121 days=70 stock_days=83
+gap=2–5% boards=4+ o2o estimate=-0.02339802 t=-1.964 days=70 stock_days=83
+gap=2–5% boards=4+ holder_next_close estimate=-0.01519598 t=-1.517 days=70 stock_days=83
+gap=5–9% boards=1 auction/T_turnover median=0.06075517 mean=0.10377023; auction/float_cap median=0.00831192 mean=0.01076991; rank median=25.0 n=1204
+gap=5–9% boards=1 seal_again estimate=0.36455130 t=19.208 days=334 stock_days=1204
+gap=5–9% boards=1 open_to_close estimate=0.00601528 t=2.393 days=334 stock_days=1204
+gap=5–9% boards=1 o2o estimate=-0.00443789 t=-1.476 days=334 stock_days=1204
+gap=5–9% boards=1 holder_next_close estimate=0.00128511 t=0.455 days=334 stock_days=1204
+gap=5–9% boards=2 auction/T_turnover median=0.08112543 mean=0.26842980; auction/float_cap median=0.01337001 mean=0.01695437; rank median=18.0 n=246
+gap=5–9% boards=2 seal_again estimate=0.42485828 t=12.097 days=168 stock_days=246
+gap=5–9% boards=2 open_to_close estimate=0.01441022 t=2.584 days=168 stock_days=246
+gap=5–9% boards=2 o2o estimate=0.00199540 t=0.295 days=168 stock_days=246
+gap=5–9% boards=2 holder_next_close estimate=0.00788253 t=1.306 days=168 stock_days=246
+gap=5–9% boards=3 auction/T_turnover median=0.09783157 mean=0.90648660; auction/float_cap median=0.01812137 mean=0.02421913; rank median=13.0 n=94
+gap=5–9% boards=3 seal_again estimate=0.57201646 t=10.399 days=81 stock_days=94
+gap=5–9% boards=3 open_to_close estimate=-0.00803440 t=-0.997 days=81 stock_days=94
+gap=5–9% boards=3 o2o estimate=-0.02277561 t=-1.976 days=81 stock_days=94
+gap=5–9% boards=3 holder_next_close estimate=-0.00283987 t=-0.300 days=81 stock_days=94
+gap=5–9% boards=4+ auction/T_turnover median=0.08975255 mean=0.70574716; auction/float_cap median=0.02251094 mean=0.02855135; rank median=13.5 n=96
+gap=5–9% boards=4+ seal_again estimate=0.55982906 t=10.681 days=78 stock_days=96
+gap=5–9% boards=4+ open_to_close estimate=0.01411713 t=1.567 days=78 stock_days=96
+gap=5–9% boards=4+ o2o estimate=0.00747263 t=0.574 days=78 stock_days=96
+gap=5–9% boards=4+ holder_next_close estimate=0.01496308 t=1.537 days=78 stock_days=96
+gap=≥9% boards=1 auction/T_turnover median=0.63505292 mean=2.17057675; auction/float_cap median=0.06201940 mean=0.15590020; rank median=10.0 n=1711
+gap=≥9% boards=1 seal_again estimate=0.73606091 t=48.800 days=376 stock_days=1711
+gap=≥9% boards=1 open_to_close estimate=-0.00331636 t=-1.400 days=376 stock_days=1711
+gap=≥9% boards=1 o2o estimate=-0.00012205 t=-0.035 days=376 stock_days=1711
+gap=≥9% boards=1 holder_next_close estimate=0.02817430 t=9.174 days=376 stock_days=1711
+gap=≥9% boards=2 auction/T_turnover median=1.54484758 mean=21.90124690; auction/float_cap median=0.08839055 mean=0.22095754; rank median=8.0 n=911
+gap=≥9% boards=2 seal_again estimate=0.79145083 t=44.733 days=324 stock_days=911
+gap=≥9% boards=2 open_to_close estimate=-0.00183854 t=-0.656 days=324 stock_days=911
+gap=≥9% boards=2 o2o estimate=0.00503838 t=1.140 days=324 stock_days=911
+gap=≥9% boards=2 holder_next_close estimate=0.03410434 t=9.452 days=324 stock_days=911
+gap=≥9% boards=3 auction/T_turnover median=2.98893219 mean=38.20498263; auction/float_cap median=0.11538827 mean=0.27031296; rank median=6.0 n=433
+gap=≥9% boards=3 seal_again estimate=0.84555195 t=40.737 days=220 stock_days=433
+gap=≥9% boards=3 open_to_close estimate=-0.00840135 t=-1.962 days=220 stock_days=433
+gap=≥9% boards=3 o2o estimate=-0.00438409 t=-0.635 days=220 stock_days=433
+gap=≥9% boards=3 holder_next_close estimate=0.03294618 t=6.544 days=220 stock_days=433
+gap=≥9% boards=4+ auction/T_turnover median=4.55966561 mean=51.43235206; auction/float_cap median=0.14572408 mean=0.34521554; rank median=6.0 n=501
+gap=≥9% boards=4+ seal_again estimate=0.80505790 t=35.020 days=216 stock_days=501
+gap=≥9% boards=4+ open_to_close estimate=-0.00415129 t=-0.950 days=216 stock_days=501
+gap=≥9% boards=4+ o2o estimate=0.00204075 t=0.286 days=216 stock_days=501
+gap=≥9% boards=4+ holder_next_close estimate=0.03347063 t=5.999 days=216 stock_days=501
+
+RULE RESULTS (development; day-clustered)
+boom definition=amount_to_turnover >= 0.21684634 and gap in [0.02,0.07)
+RULE boom n=215 days=158
+  all seal_again estimate=0.38660338 t=10.694 days=158 stock_days=215
+  all open_to_close estimate=0.00635212 t=1.269 days=158 stock_days=215
+  all o2o estimate=-0.00871285 t=-1.368 days=158 stock_days=215
+  all holder_next_close estimate=-0.00830733 t=-1.552 days=158 stock_days=215
+  within_cell seal_again diff_estimate=-0.00712822 t=-0.159 days=113 cells=132
+  within_cell intraday1 diff_estimate=-0.00517489 t=-0.923 days=113 cells=132
+  within_cell o2o diff_estimate=-0.00659879 t=-0.955 days=113 cells=132
+  within_cell ret1 diff_estimate=-0.01407501 t=-2.067 days=113 cells=132
+RULE under_expectation n=2011 days=379
+  all seal_again estimate=0.26622365 t=20.510 days=379 stock_days=2011
+  all open_to_close estimate=0.00775541 t=3.299 days=379 stock_days=2011
+  all o2o estimate=-0.00943433 t=-2.920 days=379 stock_days=2011
+  all holder_next_close estimate=-0.00733957 t=-2.793 days=379 stock_days=2011
+  within_cell seal_again diff_estimate=-0.16137906 t=-1.624 days=38 cells=40
+  within_cell intraday1 diff_estimate=-0.00617199 t=-0.553 days=38 cells=40
+  within_cell o2o diff_estimate=-0.03098849 t=-2.257 days=38 cells=40
+  within_cell ret1 diff_estimate=-0.02825715 t=-1.640 days=38 cells=40
+RULE top10 n=2640 days=387
+  all seal_again estimate=0.73851360 t=67.622 days=387 stock_days=2640
+  all open_to_close estimate=-0.00151487 t=-0.958 days=387 stock_days=2640
+  all o2o estimate=0.00302171 t=1.109 days=387 stock_days=2640
+  all holder_next_close estimate=0.03085215 t=13.811 days=387 stock_days=2640
+  within_cell seal_again diff_estimate=0.17478967 t=7.656 days=336 cells=635
+  within_cell intraday1 diff_estimate=-0.00239023 t=-0.824 days=336 cells=634
+  within_cell o2o diff_estimate=0.01097505 t=2.717 days=335 cells=633
+  within_cell ret1 diff_estimate=0.01664574 t=4.548 days=336 cells=634
+
+UNTESTABLE REGISTERED RULES
+抢筹：未验证的 09:25 主力净买入字段；p13-p15 是收盘后 limit-list 复制字段，不能使用。
+一字薄厚：未验证买卖盘量字段；位置6-11、16 无可靠映射，不能使用。
+
+NON-PREVIOUS-LIMIT-UP LIST STOCKS
+development_n=45105 days=387
+top10 seal_again estimate=0.78926163 t=50.802 days=346 stock_days=1053
+top10 open_to_close estimate=-0.00344302 t=-1.761 days=346 stock_days=1053
+top10 o2o estimate=0.00443050 t=1.561 days=346 stock_days=1053
+top10 holder_next_close estimate=0.02973495 t=10.967 days=346 stock_days=1053
+rank>10 seal_again estimate=0.09520134 t=30.672 days=387 stock_days=44052
+rank>10 open_to_close estimate=0.00348531 t=3.764 days=387 stock_days=44052
+rank>10 o2o estimate=0.00065420 t=0.533 days=387 stock_days=44052
+rank>10 holder_next_close estimate=-0.00009165 t=-0.085 days=387 stock_days=44052
+within_day o2o top10-minus-rest estimate=0.00461584 t=1.685 days=346 cells=346

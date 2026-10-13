@@ -1,0 +1,193 @@
+COMMAND period=holdout panel=/Users/papa/codebase/n8n/state/research/shortterm_tactics_20261013/data/daily_panel.parquet
+PERIOD holdout start=2026-01-01 end=2026-09-18 rows=884,824 days=174
+TRADABILITY outcomes_with_all=852,540 o2o_excluded_next_open_limit=1,274 next_down_limit=3,226
+
+=== H1 N=20 breakout ===
+EVENT stock_days=20692 days=170 adj_vs_raw_changed=515
+GROUP vr_bin
+ARM vr1-2 stock_days=9722 days=169 overnight1=+0.147%,t=+2.14 ret1=+0.313%,t=+2.15 ret_2_3=+0.217%,t=+0.92 o2o=+0.124%,t=+0.65
+ARM vr2-4 stock_days=7490 days=168 overnight1=-0.120%,t=-1.88 ret1=+0.041%,t=+0.30 ret_2_3=-0.230%,t=-1.17 o2o=-0.147%,t=-1.05
+ARM vr<1 stock_days=1546 days=151 overnight1=+2.223%,t=+8.51 ret1=+1.742%,t=+5.38 ret_2_3=+0.721%,t=+1.78 o2o=-0.272%,t=-0.89
+ARM vr>=4 stock_days=1906 days=166 overnight1=-0.467%,t=-3.95 ret1=-0.151%,t=-0.72 ret_2_3=-0.113%,t=-0.43 o2o=-0.149%,t=-0.76
+DIFF vr_bin high-low days=165 overnight1=-0.586%,t=-4.75 ret1=-0.416%,t=-1.99 ret_2_3=-0.205%,t=-0.78 o2o=-0.144%,t=-0.74
+GROUP vr_third_20
+ARM 0.0 stock_days=2640 days=165 overnight1=+1.072%,t=+8.63 ret1=+1.058%,t=+5.15 ret_2_3=+0.489%,t=+1.96 o2o=+0.108%,t=+0.50
+ARM 1.0 stock_days=5712 days=169 overnight1=+0.171%,t=+1.27 ret1=+0.341%,t=+1.84 ret_2_3=+0.196%,t=+0.91 o2o=+0.105%,t=+0.60
+ARM 2.0 stock_days=12340 days=169 overnight1=-0.118%,t=-1.79 ret1=+0.056%,t=+0.40 ret_2_3=-0.054%,t=-0.24 o2o=-0.068%,t=-0.41
+DIFF vr_third_20 high-low days=165 overnight1=-1.194%,t=-9.30 ret1=-1.046%,t=-5.34 ret_2_3=-0.527%,t=-1.84 o2o=-0.200%,t=-1.04
+GROUP limit_up_close
+ARM False stock_days=17490 days=168 overnight1=-0.432%,t=-8.28 ret1=-0.194%,t=-1.67 ret_2_3=+0.004%,t=+0.02 o2o=-0.012%,t=-0.09
+ARM True stock_days=3202 days=170 overnight1=+1.870%,t=+15.32 ret1=+1.683%,t=+9.02 ret_2_3=+0.107%,t=+0.43 o2o=-0.254%,t=-1.14
+DIFF limit_up_close high-low days=168 overnight1=+2.269%,t=+19.03 ret1=+1.778%,t=+11.90 ret_2_3=+0.051%,t=+0.26 o2o=-0.400%,t=-2.50
+GROUP range_bin_20
+ARM high stock_days=7170 days=169 overnight1=+0.019%,t=+0.26 ret1=+0.210%,t=+1.27 ret_2_3=-0.011%,t=-0.05 o2o=-0.132%,t=-0.70
+ARM low stock_days=6484 days=168 overnight1=+0.779%,t=+4.33 ret1=+0.974%,t=+4.51 ret_2_3=+0.146%,t=+0.70 o2o=+0.270%,t=+1.43
+ARM mid stock_days=7038 days=169 overnight1=-0.141%,t=-2.24 ret1=+0.042%,t=+0.30 ret_2_3=-0.029%,t=-0.16 o2o=+0.038%,t=+0.23
+DIFF range_bin_20 high-low days=169 overnight1=-0.160%,t=-2.35 ret1=-0.168%,t=-1.51 ret_2_3=-0.018%,t=-0.12 o2o=+0.169%,t=+1.45
+GROUP upper_bin_20
+ARM high stock_days=6822 days=168 overnight1=-0.522%,t=-8.18 ret1=-0.203%,t=-1.43 ret_2_3=-0.070%,t=-0.34 o2o=+0.019%,t=+0.12
+ARM low stock_days=6526 days=170 overnight1=+1.022%,t=+10.98 ret1=+0.943%,t=+5.94 ret_2_3=+0.006%,t=+0.03 o2o=-0.166%,t=-0.89
+ARM mid stock_days=7344 days=167 overnight1=-0.337%,t=-7.03 ret1=-0.186%,t=-1.47 ret_2_3=+0.002%,t=+0.01 o2o=-0.052%,t=-0.41
+DIFF upper_bin_20 high-low days=167 overnight1=+0.172%,t=+3.35 ret1=+0.032%,t=+0.29 ret_2_3=+0.107%,t=+0.65 o2o=-0.049%,t=-0.42
+GROUP limit_up_close high-minus-low
+DIFF limit_up_close false->true days=168 overnight1=+2.269%,t=+19.03 ret1=+1.778%,t=+11.90 ret_2_3=+0.051%,t=+0.26 o2o=-0.400%,t=-2.50
+=== H2 platform ===
+ARM narrow stock_days=3205 days=147 overnight1=-0.066%,t=-1.01 ret1=+0.062%,t=+0.43 ret_2_3=+0.007%,t=+0.04 o2o=-0.027%,t=-0.22
+ARM not_narrow stock_days=17487 days=170 overnight1=+0.113%,t=+1.71 ret1=+0.296%,t=+2.02 ret_2_3=+0.058%,t=+0.31 o2o=+0.046%,t=+0.26
+DIFF narrow-vs-not_narrow days=147 overnight1=-0.123%,t=-1.81 ret1=-0.145%,t=-0.93 ret_2_3=-0.048%,t=-0.24 o2o=-0.005%,t=-0.03
+=== H5 shrink5 inside vr>=2 ===
+ARM shrink5 stock_days=1635 days=166 overnight1=-0.106%,t=-0.86 ret1=+0.339%,t=+1.54 ret_2_3=+0.054%,t=+0.20 o2o=+0.273%,t=+1.12
+ARM no_shrink5 stock_days=7761 days=168 overnight1=-0.203%,t=-3.06 ret1=-0.064%,t=-0.47 ret_2_3=-0.241%,t=-1.23 o2o=-0.231%,t=-1.60
+DIFF shrink5-vs-no_shrink5 days=166 overnight1=+0.108%,t=+0.90 ret1=+0.378%,t=+1.78 ret_2_3=+0.294%,t=+1.20 o2o=+0.456%,t=+1.92
+=== H3 failure at level ===
+FAIL stock_days=89348 days=171
+ARM vr1-2 stock_days=52227 days=171 overnight1=-0.149%,t=-3.21 ret1=+0.064%,t=+0.57 ret_2_3=+0.247%,t=+1.21 o2o=+0.092%,t=+0.82
+ARM vr2-4 stock_days=14061 days=168 overnight1=-0.493%,t=-8.19 ret1=-0.193%,t=-1.52 ret_2_3=-0.219%,t=-1.22 o2o=-0.045%,t=-0.36
+ARM vr<1 stock_days=20793 days=168 overnight1=-0.050%,t=-1.06 ret1=+0.138%,t=+1.09 ret_2_3=+0.418%,t=+1.88 o2o=+0.122%,t=+0.95
+ARM vr>=4 stock_days=2060 days=168 overnight1=-1.323%,t=-11.91 ret1=-0.579%,t=-2.91 ret_2_3=-0.497%,t=-1.94 o2o=-0.197%,t=-0.98
+DIFF vr_bin high-low days=168 overnight1=-1.174%,t=-12.15 ret1=-0.648%,t=-3.34 ret_2_3=-0.579%,t=-2.80 o2o=-0.284%,t=-1.48
+ARM 0.0 stock_days=33802 days=171 overnight1=-0.084%,t=-1.97 ret1=+0.172%,t=+1.44 ret_2_3=+0.412%,t=+1.81 o2o=+0.153%,t=+1.30
+ARM 1.0 stock_days=30955 days=169 overnight1=-0.174%,t=-3.56 ret1=+0.041%,t=+0.35 ret_2_3=+0.037%,t=+0.21 o2o=+0.077%,t=+0.68
+ARM 2.0 stock_days=24591 days=169 overnight1=-0.520%,t=-8.94 ret1=-0.206%,t=-1.73 ret_2_3=-0.047%,t=-0.22 o2o=-0.033%,t=-0.27
+DIFF vr_third_20 high-low days=169 overnight1=-0.442%,t=-10.68 ret1=-0.323%,t=-3.76 ret_2_3=-0.316%,t=-3.05 o2o=-0.144%,t=-1.58
+ARM high stock_days=39028 days=171 overnight1=-0.328%,t=-5.89 ret1=+0.013%,t=+0.09 ret_2_3=+0.351%,t=+1.40 o2o=+0.095%,t=+0.68
+ARM low stock_days=13682 days=169 overnight1=-0.204%,t=-4.20 ret1=-0.024%,t=-0.23 ret_2_3=-0.159%,t=-0.81 o2o=-0.007%,t=-0.07
+ARM mid stock_days=36638 days=169 overnight1=-0.148%,t=-4.15 ret1=+0.005%,t=+0.06 ret_2_3=+0.070%,t=+0.52 o2o=+0.036%,t=+0.41
+DIFF upper_bin_20 high-low days=169 overnight1=+0.181%,t=+5.67 ret1=-0.010%,t=-0.11 ret_2_3=-0.139%,t=-0.89 o2o=-0.051%,t=-0.52
+
+=== H1 N=60 breakout ===
+EVENT stock_days=9165 days=169 adj_vs_raw_changed=495
+GROUP vr_bin
+ARM vr1-2 stock_days=3817 days=165 overnight1=+0.167%,t=+2.17 ret1=+0.346%,t=+1.96 ret_2_3=-0.365%,t=-1.24 o2o=-0.110%,t=-0.54
+ARM vr2-4 stock_days=3460 days=167 overnight1=+0.026%,t=+0.25 ret1=+0.221%,t=+1.10 ret_2_3=-0.331%,t=-1.20 o2o=-0.181%,t=-0.93
+ARM vr<1 stock_days=497 days=139 overnight1=+2.991%,t=+8.87 ret1=+2.400%,t=+5.53 ret_2_3=+1.200%,t=+2.15 o2o=+0.091%,t=+0.21
+ARM vr>=4 stock_days=1365 days=161 overnight1=+0.130%,t=+0.71 ret1=+0.311%,t=+1.13 ret_2_3=-0.188%,t=-0.49 o2o=-0.167%,t=-0.57
+DIFF vr_bin high-low days=158 overnight1=-0.066%,t=-0.34 ret1=-0.136%,t=-0.42 ret_2_3=+0.149%,t=+0.38 o2o=-0.106%,t=-0.30
+GROUP vr_third_60
+ARM 0.0 stock_days=1340 days=159 overnight1=+1.363%,t=+8.00 ret1=+1.357%,t=+5.13 ret_2_3=+0.588%,t=+1.69 o2o=+0.245%,t=+0.89
+ARM 1.0 stock_days=2744 days=166 overnight1=+0.231%,t=+1.56 ret1=+0.342%,t=+1.52 ret_2_3=-0.219%,t=-0.64 o2o=-0.124%,t=-0.61
+ARM 2.0 stock_days=5081 days=168 overnight1=-0.000%,t=-0.00 ret1=+0.159%,t=+0.94 ret_2_3=-0.489%,t=-1.92 o2o=-0.285%,t=-1.49
+DIFF vr_third_60 high-low days=158 overnight1=-1.396%,t=-7.13 ret1=-1.130%,t=-4.10 ret_2_3=-1.102%,t=-3.03 o2o=-0.341%,t=-1.31
+GROUP limit_up_close
+ARM False stock_days=6939 days=168 overnight1=-0.505%,t=-7.39 ret1=-0.191%,t=-1.26 ret_2_3=-0.339%,t=-1.42 o2o=-0.078%,t=-0.47
+ARM True stock_days=2226 days=169 overnight1=+2.100%,t=+13.39 ret1=+1.747%,t=+6.94 ret_2_3=+0.140%,t=+0.37 o2o=-0.520%,t=-1.74
+DIFF limit_up_close high-low days=168 overnight1=+2.606%,t=+15.88 ret1=+1.888%,t=+7.28 ret_2_3=+0.466%,t=+1.40 o2o=-0.533%,t=-1.95
+GROUP range_bin_60
+ARM high stock_days=3282 days=167 overnight1=+0.084%,t=+0.74 ret1=+0.410%,t=+1.89 ret_2_3=-0.145%,t=-0.44 o2o=-0.080%,t=-0.34
+ARM low stock_days=2641 days=167 overnight1=+0.843%,t=+5.44 ret1=+1.081%,t=+5.03 ret_2_3=+0.326%,t=+1.23 o2o=+0.377%,t=+1.69
+ARM mid stock_days=3242 days=165 overnight1=-0.137%,t=-1.35 ret1=-0.223%,t=-1.26 ret_2_3=-0.486%,t=-1.71 o2o=-0.509%,t=-2.68
+DIFF range_bin_60 high-low days=163 overnight1=-0.180%,t=-1.43 ret1=-0.518%,t=-2.56 ret_2_3=-0.263%,t=-1.08 o2o=-0.352%,t=-1.98
+GROUP upper_bin_60
+ARM high stock_days=3408 days=164 overnight1=-0.587%,t=-6.62 ret1=-0.111%,t=-0.62 ret_2_3=-0.538%,t=-1.88 o2o=+0.039%,t=+0.20
+ARM low stock_days=2806 days=169 overnight1=+1.515%,t=+12.54 ret1=+1.243%,t=+6.02 ret_2_3=-0.045%,t=-0.14 o2o=-0.466%,t=-1.99
+ARM mid stock_days=2951 days=164 overnight1=-0.413%,t=-5.40 ret1=-0.074%,t=-0.43 ret_2_3=-0.272%,t=-0.95 o2o=+0.008%,t=+0.04
+DIFF upper_bin_60 high-low days=161 overnight1=+0.201%,t=+2.20 ret1=+0.078%,t=+0.40 ret_2_3=+0.286%,t=+0.96 o2o=-0.017%,t=-0.09
+GROUP limit_up_close high-minus-low
+DIFF limit_up_close false->true days=168 overnight1=+2.606%,t=+15.88 ret1=+1.888%,t=+7.28 ret_2_3=+0.466%,t=+1.40 o2o=-0.533%,t=-1.95
+=== H2 platform ===
+ARM narrow stock_days=1540 days=150 overnight1=-0.046%,t=-0.50 ret1=-0.094%,t=-0.58 ret_2_3=-0.158%,t=-0.69 o2o=-0.249%,t=-1.50
+ARM not_narrow stock_days=7625 days=169 overnight1=+0.291%,t=+3.53 ret1=+0.523%,t=+2.98 ret_2_3=-0.328%,t=-1.20 o2o=-0.094%,t=-0.47
+DIFF narrow-vs-not_narrow days=150 overnight1=-0.267%,t=-2.46 ret1=-0.545%,t=-2.65 ret_2_3=+0.119%,t=+0.37 o2o=-0.142%,t=-0.62
+=== H5 shrink5 inside vr>=2 ===
+ARM shrink5 stock_days=814 days=148 overnight1=+0.269%,t=+1.30 ret1=+0.593%,t=+1.73 ret_2_3=+0.170%,t=+0.41 o2o=+0.190%,t=+0.50
+ARM no_shrink5 stock_days=4011 days=168 overnight1=+0.056%,t=+0.53 ret1=+0.195%,t=+0.96 ret_2_3=-0.419%,t=-1.52 o2o=-0.314%,t=-1.51
+DIFF shrink5-vs-no_shrink5 days=148 overnight1=+0.259%,t=+1.20 ret1=+0.528%,t=+1.30 ret_2_3=+0.245%,t=+0.62 o2o=+0.484%,t=+1.13
+=== H3 failure at level ===
+FAIL stock_days=34511 days=170
+ARM vr1-2 stock_days=19353 days=168 overnight1=-0.191%,t=-3.25 ret1=+0.094%,t=+0.69 ret_2_3=+0.070%,t=+0.36 o2o=+0.113%,t=+0.82
+ARM vr2-4 stock_days=7406 days=168 overnight1=-0.572%,t=-7.54 ret1=-0.085%,t=-0.55 ret_2_3=-0.237%,t=-1.06 o2o=+0.065%,t=+0.38
+ARM vr<1 stock_days=5859 days=165 overnight1=-0.089%,t=-1.25 ret1=+0.136%,t=+0.80 ret_2_3=+0.469%,t=+1.74 o2o=+0.121%,t=+0.68
+ARM vr>=4 stock_days=1730 days=163 overnight1=-1.376%,t=-10.36 ret1=-0.691%,t=-2.91 ret_2_3=-0.457%,t=-1.53 o2o=-0.286%,t=-1.18
+DIFF vr_bin high-low days=163 overnight1=-1.186%,t=-9.96 ret1=-0.809%,t=-3.21 ret_2_3=-0.604%,t=-2.22 o2o=-0.429%,t=-1.69
+ARM 0.0 stock_days=13055 days=170 overnight1=-0.106%,t=-1.94 ret1=+0.134%,t=+0.97 ret_2_3=+0.375%,t=+1.50 o2o=+0.093%,t=+0.67
+ARM 1.0 stock_days=11776 days=168 overnight1=-0.274%,t=-4.30 ret1=+0.056%,t=+0.39 ret_2_3=-0.082%,t=-0.38 o2o=+0.134%,t=+0.92
+ARM 2.0 stock_days=9680 days=168 overnight1=-0.736%,t=-9.22 ret1=-0.293%,t=-1.91 ret_2_3=-0.189%,t=-0.90 o2o=-0.070%,t=-0.46
+DIFF vr_third_60 high-low days=168 overnight1=-0.647%,t=-10.18 ret1=-0.373%,t=-2.90 ret_2_3=-0.316%,t=-2.14 o2o=-0.100%,t=-0.80
+ARM high stock_days=19111 days=169 overnight1=-0.477%,t=-6.54 ret1=+0.002%,t=+0.01 ret_2_3=+0.077%,t=+0.31 o2o=+0.117%,t=+0.73
+ARM low stock_days=2708 days=168 overnight1=-0.238%,t=-2.39 ret1=+0.074%,t=+0.43 ret_2_3=-0.147%,t=-0.58 o2o=-0.032%,t=-0.19
+ARM mid stock_days=12692 days=168 overnight1=-0.249%,t=-5.22 ret1=-0.063%,t=-0.54 ret_2_3=+0.051%,t=+0.35 o2o=+0.032%,t=+0.27
+DIFF upper_bin_60 high-low days=168 overnight1=+0.225%,t=+4.29 ret1=-0.005%,t=-0.05 ret_2_3=+0.099%,t=+0.69 o2o=-0.025%,t=-0.24
+
+=== H1 N=120 breakout ===
+EVENT stock_days=6344 days=170 adj_vs_raw_changed=386
+GROUP vr_bin
+ARM vr1-2 stock_days=2830 days=163 overnight1=+0.251%,t=+2.24 ret1=+0.428%,t=+2.03 ret_2_3=-0.148%,t=-0.41 o2o=-0.074%,t=-0.30
+ARM vr2-4 stock_days=2287 days=164 overnight1=+0.131%,t=+1.02 ret1=+0.516%,t=+2.09 ret_2_3=-0.414%,t=-1.04 o2o=+0.011%,t=+0.05
+ARM vr<1 stock_days=420 days=124 overnight1=+3.191%,t=+8.54 ret1=+2.853%,t=+6.35 ret_2_3=+0.921%,t=+1.73 o2o=+0.279%,t=+0.64
+ARM vr>=4 stock_days=784 days=149 overnight1=+0.019%,t=+0.10 ret1=+0.470%,t=+1.29 ret_2_3=+0.126%,t=+0.25 o2o=+0.190%,t=+0.48
+DIFF vr_bin high-low days=145 overnight1=-0.259%,t=-1.22 ret1=-0.106%,t=-0.27 ret_2_3=+0.231%,t=+0.42 o2o=+0.183%,t=+0.43
+GROUP vr_third_120
+ARM 0.0 stock_days=1056 days=150 overnight1=+1.636%,t=+7.05 ret1=+1.555%,t=+4.73 ret_2_3=+0.262%,t=+0.65 o2o=+0.037%,t=+0.11
+ARM 1.0 stock_days=1999 days=158 overnight1=+0.311%,t=+1.79 ret1=+0.562%,t=+2.31 ret_2_3=-0.055%,t=-0.14 o2o=+0.121%,t=+0.51
+ARM 2.0 stock_days=3289 days=167 overnight1=-0.006%,t=-0.06 ret1=+0.315%,t=+1.41 ret_2_3=-0.450%,t=-1.27 o2o=-0.105%,t=-0.45
+DIFF vr_third_120 high-low days=148 overnight1=-1.637%,t=-6.64 ret1=-1.235%,t=-3.44 ret_2_3=-0.980%,t=-2.10 o2o=-0.054%,t=-0.15
+GROUP limit_up_close
+ARM False stock_days=4561 days=168 overnight1=-0.485%,t=-6.63 ret1=-0.023%,t=-0.13 ret_2_3=-0.366%,t=-1.23 o2o=+0.103%,t=+0.55
+ARM True stock_days=1783 days=164 overnight1=+2.106%,t=+11.05 ret1=+2.140%,t=+7.04 ret_2_3=+0.397%,t=+0.89 o2o=-0.036%,t=-0.12
+DIFF limit_up_close high-low days=162 overnight1=+2.563%,t=+13.29 ret1=+2.102%,t=+6.58 ret_2_3=+0.598%,t=+1.59 o2o=-0.358%,t=-1.29
+GROUP range_bin_120
+ARM high stock_days=2223 days=162 overnight1=-0.002%,t=-0.02 ret1=+0.332%,t=+1.27 ret_2_3=-0.286%,t=-0.69 o2o=-0.055%,t=-0.20
+ARM low stock_days=1870 days=164 overnight1=+1.037%,t=+5.50 ret1=+1.081%,t=+4.30 ret_2_3=+0.236%,t=+0.71 o2o=+0.205%,t=+0.83
+ARM mid stock_days=2251 days=159 overnight1=+0.032%,t=+0.29 ret1=+0.212%,t=+0.93 ret_2_3=-0.366%,t=-1.06 o2o=-0.194%,t=-0.77
+DIFF range_bin_120 high-low days=157 overnight1=+0.076%,t=+0.55 ret1=-0.053%,t=-0.18 ret_2_3=+0.053%,t=+0.14 o2o=-0.102%,t=-0.35
+GROUP upper_bin_120
+ARM high stock_days=2429 days=158 overnight1=-0.478%,t=-5.44 ret1=+0.053%,t=+0.25 ret_2_3=-0.621%,t=-1.78 o2o=+0.164%,t=+0.69
+ARM mid stock_days=3915 days=170 overnight1=+0.813%,t=+6.85 ret1=+0.990%,t=+4.75 ret_2_3=+0.079%,t=+0.23 o2o=+0.044%,t=+0.19
+DIFF upper_bin_120 high-low days=158 overnight1=+1.232%,t=+10.70 ret1=+0.753%,t=+3.38 ret_2_3=+0.599%,t=+2.13 o2o=-0.302%,t=-1.33
+GROUP limit_up_close high-minus-low
+DIFF limit_up_close false->true days=162 overnight1=+2.563%,t=+13.29 ret1=+2.102%,t=+6.58 ret_2_3=+0.598%,t=+1.59 o2o=-0.358%,t=-1.29
+=== H2 platform ===
+ARM narrow stock_days=1544 days=153 overnight1=+0.264%,t=+1.66 ret1=+0.414%,t=+1.59 ret_2_3=+0.584%,t=+1.52 o2o=+0.201%,t=+0.81
+ARM not_narrow stock_days=4800 days=169 overnight1=+0.510%,t=+3.90 ret1=+1.007%,t=+4.53 ret_2_3=-0.056%,t=-0.14 o2o=+0.281%,t=+1.19
+DIFF narrow-vs-not_narrow days=152 overnight1=-0.160%,t=-0.81 ret1=-0.529%,t=-1.69 ret_2_3=+0.608%,t=+1.30 o2o=-0.067%,t=-0.22
+=== H5 shrink5 inside vr>=2 ===
+ARM shrink5 stock_days=499 days=132 overnight1=+0.089%,t=+0.32 ret1=+0.257%,t=+0.61 ret_2_3=-0.175%,t=-0.36 o2o=-0.106%,t=-0.24
+ARM no_shrink5 stock_days=2572 days=167 overnight1=+0.121%,t=+0.98 ret1=+0.545%,t=+2.20 ret_2_3=-0.309%,t=-0.78 o2o=+0.060%,t=+0.23
+DIFF shrink5-vs-no_shrink5 days=132 overnight1=-0.091%,t=-0.31 ret1=-0.279%,t=-0.56 ret_2_3=+0.101%,t=+0.22 o2o=-0.245%,t=-0.48
+=== H3 failure at level ===
+FAIL stock_days=22232 days=168
+ARM vr1-2 stock_days=12632 days=168 overnight1=-0.190%,t=-2.84 ret1=+0.112%,t=+0.72 ret_2_3=+0.017%,t=+0.08 o2o=+0.114%,t=+0.70
+ARM vr2-4 stock_days=4786 days=168 overnight1=-0.623%,t=-6.32 ret1=-0.053%,t=-0.29 ret_2_3=-0.130%,t=-0.46 o2o=+0.092%,t=+0.46
+ARM vr<1 stock_days=3506 days=163 overnight1=-0.035%,t=-0.42 ret1=+0.203%,t=+1.07 ret_2_3=+0.386%,t=+1.49 o2o=+0.166%,t=+0.86
+ARM vr>=4 stock_days=1156 days=157 overnight1=-1.213%,t=-7.45 ret1=-0.195%,t=-0.61 ret_2_3=-0.152%,t=-0.35 o2o=+0.018%,t=+0.05
+DIFF vr_bin high-low days=157 overnight1=-1.012%,t=-7.00 ret1=-0.273%,t=-0.83 ret_2_3=-0.246%,t=-0.60 o2o=-0.068%,t=-0.20
+ARM 0.0 stock_days=8353 days=168 overnight1=-0.079%,t=-1.33 ret1=+0.100%,t=+0.68 ret_2_3=+0.213%,t=+1.07 o2o=+0.062%,t=+0.43
+ARM 1.0 stock_days=7466 days=168 overnight1=-0.270%,t=-3.59 ret1=+0.120%,t=+0.69 ret_2_3=-0.081%,t=-0.33 o2o=+0.159%,t=+0.87
+ARM 2.0 stock_days=6413 days=168 overnight1=-0.785%,t=-8.08 ret1=-0.207%,t=-1.07 ret_2_3=-0.010%,t=-0.04 o2o=+0.002%,t=+0.01
+DIFF vr_third_120 high-low days=168 overnight1=-0.705%,t=-8.67 ret1=-0.306%,t=-1.77 ret_2_3=-0.223%,t=-1.06 o2o=-0.060%,t=-0.35
+ARM high stock_days=13677 days=168 overnight1=-0.496%,t=-5.72 ret1=-0.013%,t=-0.08 ret_2_3=+0.061%,t=+0.24 o2o=+0.095%,t=+0.53
+ARM mid stock_days=8555 days=168 overnight1=-0.223%,t=-3.78 ret1=+0.004%,t=+0.03 ret_2_3=-0.054%,t=-0.32 o2o=+0.033%,t=+0.25
+DIFF upper_bin_120 high-low days=168 overnight1=+0.273%,t=+4.03 ret1=+0.017%,t=+0.14 ret_2_3=-0.115%,t=-0.63 o2o=-0.062%,t=-0.47
+
+=== H4 first boards and 60-day level ===
+ARM A_above stock_days=3043 days=166 overnight1=+1.577%,t=+11.35 ret1=+1.490%,t=+5.86 ret_2_3=+0.127%,t=+0.34 o2o=-0.548%,t=-1.97
+SEAL_AGAIN A_above stock_days=3042 days=165 rate=+15.615%
+ARM B_below stock_days=7084 days=171 overnight1=+1.407%,t=+15.07 ret1=+1.362%,t=+8.23 ret_2_3=+0.141%,t=+0.55 o2o=-0.054%,t=-0.28
+SEAL_AGAIN B_below stock_days=7082 days=170 rate=+13.781%
+ARM C_just_under stock_days=281 days=125 overnight1=+1.768%,t=+6.33 ret1=+1.654%,t=+3.93 ret_2_3=+0.651%,t=+1.24 o2o=-0.134%,t=-0.37
+SEAL_AGAIN C_just_under stock_days=281 days=125 rate=+16.726%
+DIFF A_above-B_below days=166 overnight1=+0.176%,t=+1.41 ret1=+0.134%,t=+0.58 ret_2_3=+0.025%,t=+0.08 o2o=-0.488%,t=-2.06
+GAP_BASELINE all_first bucket=-2%-0 stock_days=2133 rate=+2.907%
+GAP_BASELINE all_first bucket=<-2% stock_days=1107 rate=+2.710%
+GAP_BASELINE all_first bucket=0-2% stock_days=3260 rate=+7.393%
+GAP_BASELINE all_first bucket=2-5% stock_days=2201 rate=+18.991%
+GAP_BASELINE all_first bucket=5-9% stock_days=860 rate=+37.442%
+GAP_BASELINE all_first bucket=>=9% stock_days=586 rate=+65.358%
+GAP_BASELINE A_above bucket=0-2% stock_days=780 rate=+6.923%
+GAP_BASELINE A_above bucket=5-9% stock_days=342 rate=+31.287%
+GAP_BASELINE A_above bucket=-2%-0 stock_days=570 rate=+3.860%
+GAP_BASELINE A_above bucket=2-5% stock_days=686 rate=+17.638%
+GAP_BASELINE A_above bucket=>=9% stock_days=261 rate=+62.069%
+GAP_BASELINE A_above bucket=<-2% stock_days=403 rate=+2.233%
+GAP_BASELINE B_below bucket=-2%-0 stock_days=1559 rate=+2.502%
+GAP_BASELINE B_below bucket=<-2% stock_days=701 rate=+2.996%
+GAP_BASELINE B_below bucket=2-5% stock_days=1508 rate=+19.562%
+GAP_BASELINE B_below bucket=0-2% stock_days=2474 rate=+7.559%
+GAP_BASELINE B_below bucket=>=9% stock_days=323 rate=+68.111%
+GAP_BASELINE B_below bucket=5-9% stock_days=517 rate=+41.393%
+GAP_BASELINE C_just_under bucket=-2%-0 stock_days=41 rate=+0.000%
+GAP_BASELINE C_just_under bucket=2-5% stock_days=71 rate=+18.310%
+GAP_BASELINE C_just_under bucket=0-2% stock_days=84 rate=+8.333%
+GAP_BASELINE C_just_under bucket=>=9% stock_days=20 rate=+60.000%
+GAP_BASELINE C_just_under bucket=5-9% stock_days=29 rate=+51.724%
+GAP_BASELINE C_just_under bucket=<-2% stock_days=36 rate=+0.000%

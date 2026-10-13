@@ -1,0 +1,258 @@
+period=development
+rows=34900
+dates=565
+date_min=2023-09-01
+date_max=2025-12-31
+state_cutoffs={"promotion": [0.19696969696969696, 0.2708333333333333], "big_loss": [0.07936507936507936, 0.1746031746031746]}
+
+[leader:leader_boards]
+raw	overnight1	a=leader	b=follower	estimate=0.014375	t=19.100366	days=565	a_stock_days=6282	b_stock_days=23287
+matched_board_gap	overnight1	a=leader	b=follower	estimate=0.008866	t=13.771769	days=556	a_stock_days=3940	b_stock_days=16380
+raw	ret1	a=leader	b=follower	estimate=0.009273	t=8.711946	days=565	a_stock_days=6282	b_stock_days=23287
+matched_board_gap	ret1	a=leader	b=follower	estimate=0.006365	t=4.774039	days=556	a_stock_days=3940	b_stock_days=16380
+raw	seal_next	a=leader	b=follower	estimate=0.163706	t=24.478865	days=565	a_stock_days=6282	b_stock_days=23287
+matched_board_gap	seal_next	a=leader	b=follower	estimate=0.085958	t=9.613789	days=556	a_stock_days=3940	b_stock_days=16380
+raw	o2o	a=leader	b=follower	estimate=0.000757	t=0.558429	days=565	a_stock_days=6275	b_stock_days=23270
+matched_board_gap	o2o	a=leader	b=follower	estimate=0.001275	t=0.733509	days=556	a_stock_days=3937	b_stock_days=16368
+
+[leader:leader_earliest]
+raw	overnight1	a=leader	b=follower	estimate=0.017516	t=24.557164	days=565	a_stock_days=6284	b_stock_days=23285
+matched_board_gap	overnight1	a=leader	b=follower	estimate=0.010734	t=18.085900	days=561	a_stock_days=4596	b_stock_days=16846
+raw	ret1	a=leader	b=follower	estimate=0.011738	t=11.435959	days=565	a_stock_days=6284	b_stock_days=23285
+matched_board_gap	ret1	a=leader	b=follower	estimate=0.007822	t=6.678744	days=561	a_stock_days=4596	b_stock_days=16846
+raw	seal_next	a=leader	b=follower	estimate=0.148219	t=21.783103	days=565	a_stock_days=6284	b_stock_days=23285
+matched_board_gap	seal_next	a=leader	b=follower	estimate=0.097447	t=12.130116	days=561	a_stock_days=4596	b_stock_days=16846
+raw	o2o	a=leader	b=follower	estimate=0.001323	t=0.987348	days=565	a_stock_days=6278	b_stock_days=23267
+matched_board_gap	o2o	a=leader	b=follower	estimate=0.001144	t=0.737696	days=561	a_stock_days=4592	b_stock_days=16832
+
+[leader:leader_ratio]
+raw	overnight1	a=leader	b=follower	estimate=0.014158	t=18.262220	days=565	a_stock_days=6277	b_stock_days=23292
+matched_board_gap	overnight1	a=leader	b=follower	estimate=0.009230	t=16.006578	days=563	a_stock_days=4702	b_stock_days=16905
+raw	ret1	a=leader	b=follower	estimate=0.007220	t=6.760669	days=565	a_stock_days=6277	b_stock_days=23292
+matched_board_gap	ret1	a=leader	b=follower	estimate=0.005745	t=4.408265	days=563	a_stock_days=4702	b_stock_days=16905
+raw	seal_next	a=leader	b=follower	estimate=0.114033	t=15.499046	days=565	a_stock_days=6277	b_stock_days=23292
+matched_board_gap	seal_next	a=leader	b=follower	estimate=0.087126	t=9.682963	days=563	a_stock_days=4702	b_stock_days=16905
+raw	o2o	a=leader	b=follower	estimate=-0.001910	t=-1.468888	days=565	a_stock_days=6266	b_stock_days=23279
+matched_board_gap	o2o	a=leader	b=follower	estimate=0.000634	t=0.364372	days=563	a_stock_days=4693	b_stock_days=16897
+
+[theme_strength]
+subset=members
+group	overnight1	group=1	estimate=0.016738	t=21.966406	days=565	stock_days=5271
+group	overnight1	group=2_3	estimate=0.019521	t=26.298925	days=562	stock_days=8372
+group	overnight1	group=4_6	estimate=0.023563	t=28.127395	days=522	stock_days=7500
+group	overnight1	group=7_plus	estimate=0.030828	t=38.148765	days=478	stock_days=13697
+contrast	overnight1	a=2_3	b=1	estimate=0.002847	t=3.166269	days=562	a_stock_days=8372	b_stock_days=5271
+contrast	overnight1	a=4_6	b=1	estimate=0.006573	t=6.745597	days=522	a_stock_days=7500	b_stock_days=5271
+contrast	overnight1	a=7_plus	b=1	estimate=0.013870	t=15.278869	days=478	a_stock_days=13697	b_stock_days=5271
+group	ret1	group=1	estimate=0.012924	t=10.620821	days=565	stock_days=5271
+group	ret1	group=2_3	estimate=0.016110	t=13.027371	days=562	stock_days=8372
+group	ret1	group=4_6	estimate=0.022279	t=16.336646	days=522	stock_days=7500
+group	ret1	group=7_plus	estimate=0.023938	t=18.230668	days=478	stock_days=13697
+contrast	ret1	a=2_3	b=1	estimate=0.003277	t=2.426256	days=562	a_stock_days=8372	b_stock_days=5271
+contrast	ret1	a=4_6	b=1	estimate=0.009128	t=5.856258	days=522	a_stock_days=7500	b_stock_days=5271
+contrast	ret1	a=7_plus	b=1	estimate=0.011703	t=8.050197	days=478	a_stock_days=13697	b_stock_days=5271
+group	seal_next	group=1	estimate=0.214101	t=32.025070	days=565	stock_days=5271
+group	seal_next	group=2_3	estimate=0.239678	t=37.935161	days=562	stock_days=8372
+group	seal_next	group=4_6	estimate=0.257123	t=35.423533	days=522	stock_days=7500
+group	seal_next	group=7_plus	estimate=0.248628	t=36.843367	days=478	stock_days=13697
+contrast	seal_next	a=2_3	b=1	estimate=0.026407	t=3.266525	days=562	a_stock_days=8372	b_stock_days=5271
+contrast	seal_next	a=4_6	b=1	estimate=0.043299	t=4.569374	days=522	a_stock_days=7500	b_stock_days=5271
+contrast	seal_next	a=7_plus	b=1	estimate=0.039889	t=4.423054	days=478	a_stock_days=13697	b_stock_days=5271
+group	o2o	group=1	estimate=-0.006939	t=-4.788124	days=565	stock_days=5265
+group	o2o	group=2_3	estimate=-0.005590	t=-3.685763	days=562	stock_days=8361
+group	o2o	group=4_6	estimate=-0.002877	t=-1.677425	days=522	stock_days=7496
+group	o2o	group=7_plus	estimate=-0.008131	t=-4.668524	days=478	stock_days=13688
+contrast	o2o	a=2_3	b=1	estimate=0.001491	t=0.943979	days=562	a_stock_days=8361	b_stock_days=5265
+contrast	o2o	a=4_6	b=1	estimate=0.004091	t=2.192622	days=522	a_stock_days=7496	b_stock_days=5265
+contrast	o2o	a=7_plus	b=1	estimate=-0.001073	t=-0.594668	days=478	a_stock_days=13688	b_stock_days=5265
+subset=leaders
+group	overnight1	group=1	estimate=0.016738	t=21.966406	days=565	stock_days=5271
+group	overnight1	group=2_3	estimate=0.026386	t=25.333384	days=562	stock_days=3547
+group	overnight1	group=4_6	estimate=0.040571	t=24.531352	days=522	stock_days=1573
+group	overnight1	group=7_plus	estimate=0.058126	t=30.171023	days=478	stock_days=1162
+contrast	overnight1	a=2_3	b=1	estimate=0.009712	t=8.402908	days=562	a_stock_days=3547	b_stock_days=5271
+contrast	overnight1	a=4_6	b=1	estimate=0.023581	t=13.606264	days=522	a_stock_days=1573	b_stock_days=5271
+contrast	overnight1	a=7_plus	b=1	estimate=0.041168	t=21.286286	days=478	a_stock_days=1162	b_stock_days=5271
+group	ret1	group=1	estimate=0.012924	t=10.620821	days=565	stock_days=5271
+group	ret1	group=2_3	estimate=0.018986	t=11.745053	days=562	stock_days=3547
+group	ret1	group=4_6	estimate=0.035384	t=15.183138	days=522	stock_days=1573
+group	ret1	group=7_plus	estimate=0.047652	t=18.033408	days=478	stock_days=1162
+contrast	ret1	a=2_3	b=1	estimate=0.006154	t=3.646004	days=562	a_stock_days=3547	b_stock_days=5271
+contrast	ret1	a=4_6	b=1	estimate=0.022233	t=9.163142	days=522	a_stock_days=1573	b_stock_days=5271
+contrast	ret1	a=7_plus	b=1	estimate=0.035416	t=13.362993	days=478	a_stock_days=1162	b_stock_days=5271
+group	seal_next	group=1	estimate=0.214101	t=32.025070	days=565	stock_days=5271
+group	seal_next	group=2_3	estimate=0.295619	t=32.294308	days=562	stock_days=3547
+group	seal_next	group=4_6	estimate=0.433602	t=28.874644	days=522	stock_days=1573
+group	seal_next	group=7_plus	estimate=0.539528	t=30.645360	days=478	stock_days=1162
+contrast	seal_next	a=2_3	b=1	estimate=0.082348	t=7.940755	days=562	a_stock_days=3547	b_stock_days=5271
+contrast	seal_next	a=4_6	b=1	estimate=0.219778	t=13.766421	days=522	a_stock_days=1573	b_stock_days=5271
+contrast	seal_next	a=7_plus	b=1	estimate=0.330789	t=17.974205	days=478	a_stock_days=1162	b_stock_days=5271
+group	o2o	group=1	estimate=-0.006939	t=-4.788124	days=565	stock_days=5265
+group	o2o	group=2_3	estimate=-0.008224	t=-4.036422	days=562	stock_days=3544
+group	o2o	group=4_6	estimate=0.000037	t=0.011485	days=522	stock_days=1571
+group	o2o	group=7_plus	estimate=-0.001653	t=-0.439374	days=478	stock_days=1160
+contrast	o2o	a=2_3	b=1	estimate=-0.001143	t=-0.570191	days=562	a_stock_days=3544	b_stock_days=5265
+contrast	o2o	a=4_6	b=1	estimate=0.007005	t=2.165753	days=522	a_stock_days=1571	b_stock_days=5265
+contrast	o2o	a=7_plus	b=1	estimate=0.005405	t=1.512272	days=478	a_stock_days=1160	b_stock_days=5265
+subset=first_boards
+group	overnight1	group=1	estimate=0.013725	t=17.865971	days=563	stock_days=4031
+group	overnight1	group=2_3	estimate=0.016058	t=22.300913	days=562	stock_days=6235
+group	overnight1	group=4_6	estimate=0.019692	t=21.769082	days=519	stock_days=5555
+group	overnight1	group=7_plus	estimate=0.025772	t=30.070205	days=477	stock_days=10339
+contrast	overnight1	a=2_3	b=1	estimate=0.002434	t=2.693413	days=560	a_stock_days=6235	b_stock_days=4031
+contrast	overnight1	a=4_6	b=1	estimate=0.005608	t=5.211745	days=517	a_stock_days=5555	b_stock_days=4031
+contrast	overnight1	a=7_plus	b=1	estimate=0.011868	t=12.586877	days=476	a_stock_days=10339	b_stock_days=4031
+group	ret1	group=1	estimate=0.011509	t=9.603950	days=563	stock_days=4031
+group	ret1	group=2_3	estimate=0.014660	t=12.051886	days=562	stock_days=6235
+group	ret1	group=4_6	estimate=0.019566	t=13.551332	days=519	stock_days=5555
+group	ret1	group=7_plus	estimate=0.019789	t=14.110996	days=477	stock_days=10339
+contrast	ret1	a=2_3	b=1	estimate=0.003300	t=2.333328	days=560	a_stock_days=6235	b_stock_days=4031
+contrast	ret1	a=4_6	b=1	estimate=0.007862	t=4.983289	days=517	a_stock_days=5555	b_stock_days=4031
+contrast	ret1	a=7_plus	b=1	estimate=0.009194	t=5.889841	days=476	a_stock_days=10339	b_stock_days=4031
+group	seal_next	group=1	estimate=0.161573	t=23.032954	days=563	stock_days=4031
+group	seal_next	group=2_3	estimate=0.182418	t=28.674048	days=562	stock_days=6235
+group	seal_next	group=4_6	estimate=0.196979	t=26.245178	days=519	stock_days=5555
+group	seal_next	group=7_plus	estimate=0.186996	t=26.885596	days=477	stock_days=10339
+contrast	seal_next	a=2_3	b=1	estimate=0.021500	t=2.430744	days=560	a_stock_days=6235	b_stock_days=4031
+contrast	seal_next	a=4_6	b=1	estimate=0.034771	t=3.566045	days=517	a_stock_days=5555	b_stock_days=4031
+contrast	seal_next	a=7_plus	b=1	estimate=0.033519	t=3.524178	days=476	a_stock_days=10339	b_stock_days=4031
+group	o2o	group=1	estimate=-0.005142	t=-3.761973	days=563	stock_days=4026
+group	o2o	group=2_3	estimate=-0.004405	t=-3.124011	days=562	stock_days=6227
+group	o2o	group=4_6	estimate=-0.002602	t=-1.558841	days=519	stock_days=5553
+group	o2o	group=7_plus	estimate=-0.008723	t=-5.243377	days=477	stock_days=10333
+contrast	o2o	a=2_3	b=1	estimate=0.000932	t=0.575780	days=560	a_stock_days=6227	b_stock_days=4026
+contrast	o2o	a=4_6	b=1	estimate=0.002359	t=1.271764	days=517	a_stock_days=5553	b_stock_days=4026
+contrast	o2o	a=7_plus	b=1	estimate=-0.002949	t=-1.608656	days=476	a_stock_days=10333	b_stock_days=4026
+
+[market_height]
+top	overnight1	group=True	estimate=0.043892	t=17.556945	days=561	stock_days=770
+top	ret1	group=True	estimate=0.032031	t=9.288637	days=561	stock_days=770
+top	seal_next	group=True	estimate=0.558165	t=28.506167	days=561	stock_days=770
+top	o2o	group=True	estimate=-0.006543	t=-1.324097	days=558	stock_days=767
+top_stock_days=775 top_dates=565 failure_dates=213
+failure_vs_nonfailure	ret1	a=failure	b=nonfailure	estimate=-0.009256	t=-3.239746	a_days=213	b_days=351	a_stock_days=2953	b_stock_days=4957
+failure_vs_nonfailure	ret_f2	a=failure	b=nonfailure	estimate=-0.003813	t=-1.257824	a_days=213	b_days=351	a_stock_days=2949	b_stock_days=4955
+failure_vs_nonfailure	seal_next	a=failure	b=nonfailure	estimate=-0.028268	t=-1.735797	a_days=213	b_days=351	a_stock_days=2953	b_stock_days=4957
+failure_vs_nonfailure	o2o	a=failure	b=nonfailure	estimate=-0.015736	t=-4.054079	a_days=213	b_days=351	a_stock_days=2949	b_stock_days=4955
+
+[ladder_state]
+state=promotion_state
+board=1	overnight1	group=low	estimate=0.017467	t=21.313011	days=189	stock_days=7534
+board=1	overnight1	group=mid	estimate=0.018686	t=23.794523	days=188	stock_days=7931
+board=1	overnight1	group=high	estimate=0.023905	t=23.430257	days=188	stock_days=10695
+board=1	ret1	group=low	estimate=0.019327	t=13.117712	days=189	stock_days=7534
+board=1	ret1	group=mid	estimate=0.016022	t=11.370509	days=188	stock_days=7931
+board=1	ret1	group=high	estimate=0.017337	t=9.803505	days=188	stock_days=10695
+board=1	seal_next	group=low	estimate=0.187118	t=28.758595	days=189	stock_days=7534
+board=1	seal_next	group=mid	estimate=0.187179	t=30.227078	days=188	stock_days=7931
+board=1	seal_next	group=high	estimate=0.193676	t=24.858339	days=188	stock_days=10695
+board=1	o2o	group=low	estimate=-0.002272	t=-1.307531	days=189	stock_days=7527
+board=1	o2o	group=mid	estimate=-0.005776	t=-3.497972	days=188	stock_days=7924
+board=1	o2o	group=high	estimate=-0.008372	t=-3.925638	days=188	stock_days=10688
+board=2	overnight1	group=low	estimate=0.027721	t=13.386951	days=189	stock_days=1182
+board=2	overnight1	group=mid	estimate=0.035028	t=21.577098	days=187	stock_days=1443
+board=2	overnight1	group=high	estimate=0.038562	t=20.778891	days=188	stock_days=2392
+board=2	ret1	group=low	estimate=0.024334	t=8.392889	days=189	stock_days=1182
+board=2	ret1	group=mid	estimate=0.024825	t=9.877613	days=187	stock_days=1443
+board=2	ret1	group=high	estimate=0.023723	t=8.479610	days=188	stock_days=2392
+board=2	seal_next	group=low	estimate=0.353193	t=19.374797	days=189	stock_days=1182
+board=2	seal_next	group=mid	estimate=0.373146	t=24.623571	days=187	stock_days=1443
+board=2	seal_next	group=high	estimate=0.381106	t=24.483053	days=188	stock_days=2392
+board=2	o2o	group=low	estimate=-0.002308	t=-0.584738	days=189	stock_days=1182
+board=2	o2o	group=mid	estimate=-0.012385	t=-3.534818	days=187	stock_days=1441
+board=2	o2o	group=high	estimate=-0.017951	t=-5.369056	days=188	stock_days=2392
+board=3	overnight1	group=low	estimate=0.038109	t=10.727488	days=162	stock_days=371
+board=3	overnight1	group=mid	estimate=0.038129	t=12.095723	days=178	stock_days=606
+board=3	overnight1	group=high	estimate=0.038424	t=12.614867	days=173	stock_days=828
+board=3	ret1	group=low	estimate=0.032578	t=6.272718	days=162	stock_days=371
+board=3	ret1	group=mid	estimate=0.034923	t=8.448245	days=178	stock_days=606
+board=3	ret1	group=high	estimate=0.030386	t=7.661512	days=173	stock_days=828
+board=3	seal_next	group=low	estimate=0.470745	t=15.255471	days=162	stock_days=371
+board=3	seal_next	group=mid	estimate=0.509658	t=20.444853	days=178	stock_days=606
+board=3	seal_next	group=high	estimate=0.508305	t=22.235653	days=173	stock_days=828
+board=3	o2o	group=low	estimate=-0.003269	t=-0.499693	days=161	stock_days=370
+board=3	o2o	group=mid	estimate=0.000573	t=0.100777	days=178	stock_days=606
+board=3	o2o	group=high	estimate=-0.009499	t=-1.773730	days=173	stock_days=827
+board=4_plus	overnight1	group=low	estimate=0.041091	t=11.393673	days=164	stock_days=390
+board=4_plus	overnight1	group=mid	estimate=0.040165	t=11.290245	days=173	stock_days=566
+board=4_plus	overnight1	group=high	estimate=0.045779	t=15.705901	days=184	stock_days=902
+board=4_plus	ret1	group=low	estimate=0.033793	t=6.493096	days=164	stock_days=390
+board=4_plus	ret1	group=mid	estimate=0.023040	t=4.557072	days=173	stock_days=566
+board=4_plus	ret1	group=high	estimate=0.032271	t=7.579414	days=184	stock_days=902
+board=4_plus	seal_next	group=low	estimate=0.572008	t=19.289559	days=164	stock_days=390
+board=4_plus	seal_next	group=mid	estimate=0.494708	t=17.400840	days=173	stock_days=566
+board=4_plus	seal_next	group=high	estimate=0.536290	t=22.057839	days=184	stock_days=902
+board=4_plus	o2o	group=low	estimate=0.006655	t=0.815655	days=164	stock_days=388
+board=4_plus	o2o	group=mid	estimate=-0.022518	t=-3.001197	days=173	stock_days=564
+board=4_plus	o2o	group=high	estimate=-0.013847	t=-2.309561	days=184	stock_days=901
+state=big_loss_state
+board=1	overnight1	group=low	estimate=0.021574	t=19.928656	days=189	stock_days=11416
+board=1	overnight1	group=mid	estimate=0.020998	t=28.273387	days=189	stock_days=8476
+board=1	overnight1	group=high	estimate=0.017444	t=21.256897	days=187	stock_days=6268
+board=1	ret1	group=low	estimate=0.018365	t=11.354290	days=189	stock_days=11416
+board=1	ret1	group=mid	estimate=0.016606	t=11.856702	days=189	stock_days=8476
+board=1	ret1	group=high	estimate=0.017726	t=10.727408	days=187	stock_days=6268
+board=1	seal_next	group=low	estimate=0.177504	t=26.602189	days=189	stock_days=11416
+board=1	seal_next	group=mid	estimate=0.185992	t=29.829187	days=189	stock_days=8476
+board=1	seal_next	group=high	estimate=0.204627	t=27.286715	days=187	stock_days=6268
+board=1	o2o	group=low	estimate=-0.003827	t=-2.067121	days=189	stock_days=11409
+board=1	o2o	group=mid	estimate=-0.007443	t=-4.459605	days=189	stock_days=8469
+board=1	o2o	group=high	estimate=-0.005130	t=-2.516357	days=187	stock_days=6261
+board=2	overnight1	group=low	estimate=0.038417	t=22.109459	days=189	stock_days=2373
+board=2	overnight1	group=mid	estimate=0.035119	t=20.754386	days=189	stock_days=1556
+board=2	overnight1	group=high	estimate=0.027639	t=12.972481	days=186	stock_days=1088
+board=2	ret1	group=low	estimate=0.030413	t=13.122192	days=189	stock_days=2373
+board=2	ret1	group=mid	estimate=0.024356	t=8.824725	days=189	stock_days=1556
+board=2	ret1	group=high	estimate=0.018011	t=5.927246	days=186	stock_days=1088
+board=2	seal_next	group=low	estimate=0.371330	t=25.765119	days=189	stock_days=2373
+board=2	seal_next	group=mid	estimate=0.376941	t=23.312542	days=189	stock_days=1556
+board=2	seal_next	group=high	estimate=0.358905	t=19.472117	days=186	stock_days=1088
+board=2	o2o	group=low	estimate=-0.007398	t=-2.526975	days=189	stock_days=2373
+board=2	o2o	group=mid	estimate=-0.011413	t=-3.205154	days=189	stock_days=1554
+board=2	o2o	group=high	estimate=-0.013826	t=-3.210437	days=186	stock_days=1088
+board=3	overnight1	group=low	estimate=0.037828	t=12.381760	days=179	stock_days=792
+board=3	overnight1	group=mid	estimate=0.041289	t=14.072798	days=171	stock_days=600
+board=3	overnight1	group=high	estimate=0.035437	t=9.495720	days=163	stock_days=413
+board=3	ret1	group=low	estimate=0.035155	t=9.079603	days=179	stock_days=792
+board=3	ret1	group=mid	estimate=0.032063	t=7.327809	days=171	stock_days=600
+board=3	ret1	group=high	estimate=0.030522	t=6.034161	days=163	stock_days=413
+board=3	seal_next	group=low	estimate=0.486049	t=20.835374	days=179	stock_days=792
+board=3	seal_next	group=mid	estimate=0.500583	t=19.149032	days=171	stock_days=600
+board=3	seal_next	group=high	estimate=0.504994	t=17.153316	days=163	stock_days=413
+board=3	o2o	group=low	estimate=-0.002271	t=-0.469307	days=178	stock_days=790
+board=3	o2o	group=mid	estimate=-0.005054	t=-0.864639	days=171	stock_days=600
+board=3	o2o	group=high	estimate=-0.004902	t=-0.711639	days=163	stock_days=413
+board=4_plus	overnight1	group=low	estimate=0.051126	t=17.416211	days=183	stock_days=774
+board=4_plus	overnight1	group=mid	estimate=0.040607	t=11.947050	days=174	stock_days=628
+board=4_plus	overnight1	group=high	estimate=0.034690	t=9.524851	days=164	stock_days=456
+board=4_plus	ret1	group=low	estimate=0.038897	t=9.115405	days=183	stock_days=774
+board=4_plus	ret1	group=mid	estimate=0.027601	t=5.568770	days=174	stock_days=628
+board=4_plus	ret1	group=high	estimate=0.021618	t=4.125779	days=164	stock_days=456
+board=4_plus	seal_next	group=low	estimate=0.578639	t=23.058828	days=183	stock_days=774
+board=4_plus	seal_next	group=mid	estimate=0.507858	t=18.334023	days=174	stock_days=628
+board=4_plus	seal_next	group=high	estimate=0.511054	t=17.300609	days=164	stock_days=456
+board=4_plus	o2o	group=low	estimate=-0.008221	t=-1.287210	days=183	stock_days=772
+board=4_plus	o2o	group=mid	estimate=-0.011622	t=-1.597617	days=174	stock_days=628
+board=4_plus	o2o	group=high	estimate=-0.011130	t=-1.361112	days=164	stock_days=453
+
+[supplement]
+overnight1	a=strong_theme	b=no_3plus_theme	estimate=0.000468	t=0.496000	days=541	a_stock_days=7441	b_stock_days=18719
+ret1	a=strong_theme	b=no_3plus_theme	estimate=-0.000022	t=-0.014671	days=541	a_stock_days=7441	b_stock_days=18719
+seal_next	a=strong_theme	b=no_3plus_theme	estimate=0.019661	t=2.256851	days=541	a_stock_days=7441	b_stock_days=18719
+o2o	a=strong_theme	b=no_3plus_theme	estimate=-0.002873	t=-1.786177	days=541	a_stock_days=7434	b_stock_days=18705
+strength=1	ret1	a=strong_theme	b=no_3plus_theme	estimate=NA	t=NA	days=0	a_stock_days=0	b_stock_days=0
+strength=2_3	ret1	a=strong_theme	b=no_3plus_theme	estimate=0.001848	t=0.626990	days=340	a_stock_days=762	b_stock_days=5473
+strength=4_6	ret1	a=strong_theme	b=no_3plus_theme	estimate=-0.006276	t=-2.091915	days=278	a_stock_days=1500	b_stock_days=4055
+strength=7_plus	ret1	a=strong_theme	b=no_3plus_theme	estimate=-0.006875	t=-2.603406	days=202	a_stock_days=5179	b_stock_days=5160
+
+[broken_board]
+overnight1	a=broken_then_sealed	b=never_broken	estimate=NA	t=NA	days=0	a_stock_days=0	b_stock_days=0
+ret1	a=broken_then_sealed	b=never_broken	estimate=NA	t=NA	days=0	a_stock_days=0	b_stock_days=0
+seal_next	a=broken_then_sealed	b=never_broken	estimate=NA	t=NA	days=0	a_stock_days=0	b_stock_days=0
+o2o	a=broken_then_sealed	b=never_broken	estimate=NA	t=NA	days=0	a_stock_days=0	b_stock_days=0
+
+[tradability]
+next_open_at_limit_up_count=4290
+next_limit_down_close_count=1186
+o2o_nonmissing=34810 o2o_missing=90
+forward_ret1_missing=60 seal_next_missing=60
