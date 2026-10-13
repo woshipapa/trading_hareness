@@ -75,15 +75,24 @@ def owner_plan(target: str, active: str | None, db_revision: str | None) -> list
         return [f"owner: already at {target[:12]}"]
     rows = [line.split("\t", 1) for line in subprocess.run(
         ["bash", str(CLASSIFY), active, target], cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines() if line]
-    full = [path for kind, path in rows if kind == "full"]
-    runtime = [path for kind, path in rows if kind == "runtime"]
+    paths = {kind: [path for row_kind, path in rows if row_kind == kind]
+             for kind in ("unclassified", "image", "full", "runtime", "migration")}
     label = "owner-<label>"
-    if full:
-        lines.append(f"owner: FULL release ({len(full)} path(s) need it, e.g. {', '.join(full[:4])})")
+    if paths["unclassified"]:
+        lines.append(f"owner: NOT RELEASABLE yet ({len(paths['unclassified'])} path(s) have no rule, e.g. "
+                     f"{', '.join(paths['unclassified'][:4])})")
+        lines.append("  add each to scripts/shared-peer/classify-owner-paths.sh (a script: its rule in "
+                     "scripts/generate_scripts_catalog.py), commit, plan again; nothing is built for an unknown path")
+    elif paths["image"] or paths["full"]:
+        needs = paths["image"] + paths["full"]
+        what = "builds the image on the host" if paths["image"] else "ships the host's tree; the image is rebuilt with it"
+        lines.append(f"owner: FULL release ({len(needs)} path(s) need it, e.g. {', '.join(needs[:4])}); it {what}")
         lines.append(f"  release owner full {target} {label}            # check")
         lines.append(f"  release owner full {target} {label} --apply    # release")
-    elif runtime:
-        lines.append(f"owner: code-only overlay ({len(runtime)} runtime file(s))")
+    elif paths["runtime"] or paths["migration"]:
+        migrations = (f", {len(paths['migration'])} migration file(s): the owner database must be at their head first"
+                      if paths["migration"] else "")
+        lines.append(f"owner: code-only overlay ({len(paths['runtime'])} runtime file(s){migrations})")
         lines.append(f"  release owner code {target} {label} --from-sha {active} --apply")
     else:
         lines.append("owner: nothing reaches the owner runtime; a code-only release would only record the SHA")

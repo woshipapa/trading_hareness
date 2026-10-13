@@ -155,7 +155,7 @@ components a change touches, and `--check` to validate the boundaries.
 | You are editing | Component / unit | Hot update with |
 |---|---|---|
 | `quant-service/app/**` (strategies, rules, realtime, providers) | `quant-research` / `owner-quant` | `scripts/shared-peer/deploy-code-only.sh` |
-| `quant-service/migrations/**` | `quant-research` / `owner-schema` | **not hot-updatable** — apply and verify the migration first, then ship the code |
+| `quant-service/migrations/**` | `quant-research` / `owner-schema` | the owner applies the migration first; then `scripts/shared-peer/deploy-code-only.sh` ships it, and its schema gate refuses while the owner database is behind the release head |
 | `frontend/**` (quant strategy + realtime console) | `quant-research` / `edge-quant-console` | `scripts/edge/deploy-quant-console-edge.sh` |
 | `feishu-relay/**` | `feishu-relay` / `edge-relay` | `feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh` |
 | `xhs-intel/**` | `xhs-intel` / `edge-xhs` | `xhs-intel/scripts/hotfix-xhs-intel-edge.sh` |
@@ -165,9 +165,14 @@ Rules that are enforced by tests, not by convention:
 1. **Ordinary source changes never rebuild an image.** Use the unit's script
    above. A hot-update script must not contain `docker build`/`docker pull`, and
    must pass `--no-build --pull never` when it recreates a container.
-   Dependency, Dockerfile, compose, lockfile, system-package and migration
-   changes fail closed and require the full procedure in
-   `docs/RELEASE_SYNC_47.md`.
+   Dependency and Dockerfile changes (the image's inputs) and changes to the
+   host's own tree (owner compose, systemd units, the scripts the host runs)
+   fail closed and require the full procedure in `docs/RELEASE_SYNC_47.md`. A
+   migration ships hot once the owner database is at the release head. A path
+   no rule names is refused as `unclassified`: add its rule to
+   `scripts/shared-peer/classify-owner-paths.sh` (a script: its rule in
+   `scripts/generate_scripts_catalog.py`, whose "Runs on" column decides); it
+   is never a reason to build an image.
 2. **Release units are independent.** An edge deploy must never name the owner
    host and the owner release must never name the edge host. The owner
    code-only path classifies `feishu-relay/*` and `frontend/*` as
@@ -225,10 +230,14 @@ image.
   complete key list. Push credentials to remotes with
   `bash config/secrets/sync-secrets.sh {owner|edge|all}`, never ad-hoc `scp`.
 - A fast source release must fail closed when `requirements.txt`,
-  `package.json`, a lockfile, Dockerfile, compose file, system package,
-  supervisor/systemd contract, or Alembic migration changes. Those changes
-  require the complete image and/or database migration procedure in
-  `docs/RELEASE_SYNC_47.md`.
+  `package.json`, a lockfile, Dockerfile, compose file, system package or
+  supervisor/systemd contract changes. Those changes require the complete
+  image procedure in `docs/RELEASE_SYNC_47.md`. The owner classifier
+  (`scripts/shared-peer/classify-owner-paths.sh`) names six kinds: `runtime`
+  and `migration` ship in the overlay (a migration only through
+  `scripts/shared-peer/schema-gate.sh`), `skip` never reaches the owner,
+  `full` is the host's tree, `image` is an input of the image, and
+  `unclassified` asks for a rule and builds nothing.
 - A database migration must be applied and verified before switching code that
   depends on its schema. Do not recreate an unavailable historical migration
   from memory; use an observed, idempotent repair or stop and document the

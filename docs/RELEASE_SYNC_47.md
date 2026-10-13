@@ -527,18 +527,31 @@ scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> \
   --from-sha <active_sha> --apply
 ```
 
-脚本先比较两个 Git SHA 之间改动的每个路径，分三类：
+脚本先比较两个 Git SHA 之间改动的每个路径，分六类（规则在
+`scripts/shared-peer/classify-owner-paths.sh`，`scripts/release plan` 用的是同一份）：
 
-- **随本次发布**：`quant-service/app/*`、`entrypoint.py`、`run_server.py`、
-  `database_bootstrap.py`、`alembic.ini`。
-- **跳过**，这些路径不进入 owner 运行时：
+- **`runtime`，随本次发布**：`quant-service/app/*`、`entrypoint.py`、`run_server.py`、
+  `database_bootstrap.py`。
+- **`migration`，随本次发布，但先过库版本闸门**：改了代码的迁移文件、`alembic.ini`、
+  `quant-service/migrations/` 下的其他文件。迁移由对方在 Windows 工作站上执行，我们这一侧
+  的服务从不自己执行；闸门（`scripts/shared-peer/schema-gate.sh`，全量发布用的是同一个）
+  读对方服务报告的库版本：已到本次发布的 head 才继续，落后就拒绝并列出要先执行的迁移。
+- **`skip`，不进入 owner 运行时**：
   - `quant-service/tests/`、`docs/`、任何 `*.md`、`.github/`；
-  - `feishu-relay/` 和 `frontend/`，它们随 F6 的 edge overlay 发布；
-  - 发布工具：状态脚本、本脚本、edge 包装脚本、`scripts/windows/`、脚本测试；
+  - `feishu-relay/`、`frontend/`、`frontend-shared/`、`xhs-intel/`，它们在 edge 发布；
+  - 本机和其他主机的部署文件：根目录 `compose.yaml`、`launchd/`、`workflows/`、
+    `deploy/` 里列明的网关配置、服务器 compose 和已停用的 edge 运行时（`deploy/intraday-edge/`）；
+  - `scripts/` 下的脚本，按 `scripts/CATALOG.md` 的“Runs on”一列：不是 `47owner` 的都跳过
+    （工作站、edge、对方的 Windows 工作站、CI）；
   - 只改了注释或 docstring 的迁移文件，脚本会比对去掉 docstring 后的语法树。
-- **其余一律**输出 `full release required for: <path>` 并退出，包括：迁移代码、依赖、
-  Dockerfile、compose、`deploy/`，以及在 owner 上从发布检出运行的 guard 脚本等其他
-  `scripts/`。
+- **`full`，主机自己的目录树**：`deploy/shared-peer/`（compose、systemd 单元、隧道镜像）和
+  目录里“Runs on”为 `47owner` 的脚本。输出 `full release required for: <path>` 并退出。
+- **`image`，镜像的输入**：`quant-service/requirements.txt`、`quant-service/Dockerfile.peer`、
+  `.dockerignore`。输出 `image build required for: <path>` 并退出；只有全量发布会构建镜像。
+- **`unclassified`，没有规则提到的路径**：输出 `unclassified path: <path>` 并退出，什么都不
+  构建。处理办法是给它加一条规则（脚本：在 `scripts/generate_scripts_catalog.py` 里登记它在
+  哪台机器上运行），不是去做全量发布。2026-10-14 之前这类路径一律被当成“需要全量发布”，
+  而全量发布要在只有 894 MB 内存的主机上构建镜像。
 
 所以合并进 `main` 的普通 PR（代码连同测试和文档）可以直接走快速通道。如果两个 SHA
 之间没有 owner 运行时改动（例如只改了 edge），发布只会刷新记录的 SHA，这样
