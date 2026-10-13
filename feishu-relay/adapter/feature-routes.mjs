@@ -16,8 +16,9 @@ function routeMatch(route, pathname) {
 	const match = expression.exec(pathname);
 	if (!match) return null;
 	try {
-		const params = Object.fromEntries(Object.entries(match.groups ?? {}).map(([key, value]) => [key, decodeURIComponent(value)]));
-		return { ...params, ...match.slice(1).reduce((values, value, index) => ({ ...values, [index]: decodeURIComponent(value) }), {}) };
+		const decode = (value) => value === undefined ? value : decodeURIComponent(value);
+		const params = Object.fromEntries(Object.entries(match.groups ?? {}).map(([key, value]) => [key, decode(value)]));
+		return { ...params, ...match.slice(1).reduce((values, value, index) => ({ ...values, [index]: decode(value) }), {}) };
 	} catch { return null; }
 }
 
