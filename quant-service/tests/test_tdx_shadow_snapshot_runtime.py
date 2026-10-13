@@ -33,12 +33,12 @@ FUYAO_ROW = {
 
 
 def evidence():
-    return CapabilityEvidence(rows=[TDX_ROW], warnings=("tdx_host=test",))
+    return CapabilityEvidence(rows=[TDX_ROW] * 5301, warnings=("tdx_host=test",))
 
 
 class TdxShadowCaptureTests(unittest.TestCase):
     def dependencies(self, *, fetch=None, session=True, recent=(NOW - timedelta(seconds=2), [FUYAO_ROW]),
-                     acquire=None, run_database=None, persisted=None, storage=True):
+                     acquire=None, run_database=None, persisted=None, storage=True, roster_total=None):
         calls = []
 
         async def fetch_snapshot():
@@ -69,6 +69,7 @@ class TdxShadowCaptureTests(unittest.TestCase):
             fetch_snapshot=fetch_snapshot, session_gate=session_gate, run_database=run_db,
             database=object(), recent_reference=lambda _now: recent,
             acquire_slot=acquire_slot, persist_capture=persist_capture, storage_allowed=storage_allowed,
+            roster_total=roster_total or (lambda: asyncio.sleep(0, result=5580)),
         )
         return TdxShadowSnapshotRuntime(deps), calls
 
@@ -86,6 +87,39 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertEqual(persisted[0][4]["status"], "compared")
         self.assertEqual(persisted[0][4]["provider_key"], AGREEMENT_PROVIDER)
         self.assertEqual(persisted[0][4]["capability"], AGREEMENT_CAPABILITY)
+        self.assertTrue(persisted[0][3]["completeness"]["complete"])
+        self.assertTrue(persisted[0][4]["completeness"]["complete"])
+
+    def test_empty_snapshot_is_stored_as_incomplete(self):
+        persisted = []
+
+        async def empty():
+            return CapabilityEvidence(rows=[], warnings=("no_trade_rows=5579",))
+
+        runtime, _ = self.dependencies(fetch=empty, persisted=persisted)
+        result = asyncio.run(runtime.capture(NOW))
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(persisted[0][2], [])
+        self.assertFalse(persisted[0][3]["completeness"]["complete"])
+        self.assertEqual(persisted[0][4]["status"], "incomplete")
+        self.assertIsNone(persisted[0][4]["comparison"])
+
+    def test_roster_is_read_once_per_trade_date_and_none_is_not_remembered(self):
+        totals = iter((None, 5580))
+        calls = []
+
+        async def roster_total():
+            calls.append("read")
+            return next(totals)
+
+        runtime, _ = self.dependencies(roster_total=roster_total)
+        first = asyncio.run(runtime.capture(NOW))
+        second = asyncio.run(runtime.capture(NOW + timedelta(minutes=1)))
+        third = asyncio.run(runtime.capture(NOW + timedelta(minutes=2)))
+
+        self.assertEqual([first["status"], second["status"], third["status"]], ["completed"] * 3)
+        self.assertEqual(calls, ["read", "read"])
 
     def test_outside_session_does_not_read_or_write(self):
         runtime, calls = self.dependencies(session=False, fetch=lambda: (_ for _ in ()).throw(AssertionError()))
@@ -176,6 +210,7 @@ class TdxShadowCaptureTests(unittest.TestCase):
             fetch_snapshot=lambda: asyncio.sleep(0, result=evidence()), run_database=run_tdx_shadow_blocking,
             database=OpenCalendar(), recent_reference=lambda _now: None, storage_allowed=allowed,
             acquire_slot=no_wait, persist_capture=persist_capture,
+            roster_total=lambda: asyncio.sleep(0, result=5580),
         ))
         in_session = datetime(2026, 10, 12, 2, 0, tzinfo=timezone.utc)  # Monday 10:00 in Shanghai
         result = asyncio.run(runtime.capture(in_session))
@@ -258,6 +293,20 @@ class TdxShadowCaptureTests(unittest.TestCase):
              patch("app.tdx_shadow_snapshot_runtime.persist_timed_observations", side_effect=RuntimeError("comparison down")):
             with self.assertRaisesRegex(RuntimeError, "comparison down"):
                 persist_shadow_capture(object(), NOW, [], {}, {"status": "compared"})
+
+    def test_main_roster_query_reads_payload_without_normalized(self):
+        from app.minute_cross_section import latest_main_total
+
+        calls = []
+
+        class Connection:
+            def execute(self, sql, params):
+                calls.append((sql, params))
+                return SimpleNamespace(fetchone=lambda: {"total": 5580})
+
+        self.assertEqual(latest_main_total(Connection()), 5580)
+        self.assertNotIn("normalized", calls[0][0])
+        self.assertIn("payload", calls[0][0])
 
 
 class TdxShadowSummaryTests(unittest.TestCase):

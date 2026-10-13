@@ -3,10 +3,40 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.all_a_snapshot_sources import compare, project_tdx_snapshot_rows
+from app.all_a_snapshot_sources import compare, project_tdx_snapshot_rows, tdx_snapshot_completeness
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "all_a_snapshot_fuyao_tdx_20261012.json"
+
+
+class TdxSnapshotCompletenessTests(unittest.TestCase):
+    def test_measured_2026_10_13_snapshots_use_the_main_source_roster(self):
+        empty = tdx_snapshot_completeness(0, ["no_trade_rows=5579"], 5580)
+        pre_open = tdx_snapshot_completeness(5480, ["no_trade_rows=99"], 5580)
+        continuous = tdx_snapshot_completeness(5535, ["no_trade_rows=44"], 5580)
+
+        self.assertEqual(empty, {
+            "priced_rows": 0, "no_trade_rows": 5579, "roster_total": 5580,
+            "roster": 5580, "share": 0.0, "complete": False,
+        })
+        self.assertAlmostEqual(pre_open["share"], 5480 / 5580)
+        self.assertTrue(pre_open["complete"])
+        self.assertAlmostEqual(continuous["share"], 5535 / 5580)
+        self.assertTrue(continuous["complete"])
+
+    def test_short_reads_are_incomplete(self):
+        for priced_rows, no_trade_rows in ((3000, 10), (5000, 0), (5200, 20)):
+            result = tdx_snapshot_completeness(
+                priced_rows, [f"no_trade_rows={no_trade_rows}"], 5580,
+            )
+            self.assertFalse(result["complete"])
+        self.assertTrue(tdx_snapshot_completeness(5301, [], 5580)["complete"])
+
+    def test_missing_main_source_roster_fails_closed(self):
+        result = tdx_snapshot_completeness(5579, [], None)
+        self.assertEqual(result["roster"], 5579)
+        self.assertEqual(result["share"], 1.0)
+        self.assertFalse(result["complete"])
 
 
 class TdxSnapshotProjectionTests(unittest.TestCase):

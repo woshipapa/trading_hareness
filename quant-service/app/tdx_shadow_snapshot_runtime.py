@@ -13,7 +13,7 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .all_a_snapshot_sources import compare, project_tdx_snapshot_rows
+from .all_a_snapshot_sources import compare, project_tdx_snapshot_rows, tdx_snapshot_completeness
 from .datasources.contracts import CapabilityEvidence
 from .error_detail import safe_error_detail
 from .market_session_repository import market_observation_session
@@ -49,14 +49,18 @@ def _as_rows_and_metadata(result: CapabilityEvidence | list[dict[str, Any]]) -> 
 
 
 def _comparison_row(observed_at: datetime, tdx_rows: list[dict[str, Any]],
-                   reference: tuple[datetime, list[dict[str, Any]]] | None) -> dict[str, Any]:
+                   reference: tuple[datetime, list[dict[str, Any]]] | None,
+                   completeness: Mapping[str, Any]) -> dict[str, Any]:
     row: dict[str, Any] = {
         "provider_key": AGREEMENT_PROVIDER,
         "capability": AGREEMENT_CAPABILITY,
         "observed_at": observed_at.isoformat(),
+        "completeness": dict(completeness),
         "research_only": True,
         "live_effect": "none",
     }
+    if not completeness["complete"]:
+        return {**row, "status": "incomplete", "reference_observed_at": None, "comparison": None}
     if reference is None:
         return {**row, "status": "no_reference", "reference_observed_at": None, "comparison": None}
     reference_at, reference_rows = reference
@@ -91,6 +95,7 @@ class TdxShadowSnapshotDependencies:
     database: Any
     recent_reference: Callable[[datetime], tuple[datetime, list[dict[str, Any]]] | None]
     storage_allowed: Callable[[], Awaitable[tuple[bool, dict[str, Any]]]]
+    roster_total: Callable[[], Awaitable[int | None]]
     acquire_slot: Callable[..., Awaitable[None]] = acquire_public_provider_slot
     session_gate: Callable[[Any, datetime], tuple[bool, str]] = market_observation_session
     persist_capture: Callable[[Any, datetime, list[dict[str, Any]], Mapping[str, Any], Mapping[str, Any]], dict[str, Any]] = persist_shadow_capture
@@ -100,6 +105,7 @@ class TdxShadowSnapshotDependencies:
 class TdxShadowSnapshotRuntime:
     deps: TdxShadowSnapshotDependencies
     _read_task: asyncio.Task[CapabilityEvidence | list[dict[str, Any]]] | None = field(default=None, init=False)
+    _roster_totals: dict[date, int] = field(default_factory=dict, init=False)
 
     @staticmethod
     def _consume_late_exception(task: asyncio.Task[Any]) -> None:
@@ -109,6 +115,18 @@ class TdxShadowSnapshotRuntime:
             task.exception()
         except BaseException:
             pass
+
+    async def _roster_total(self, observed_at: datetime) -> int | None:
+        trade_date = observed_at.astimezone(CN_TZ).date()
+        if trade_date in self._roster_totals:
+            return self._roster_totals[trade_date]
+        try:
+            total = await self.deps.roster_total()
+        except DATABASE_UNAVAILABLE:
+            return None
+        if total is not None:
+            self._roster_totals[trade_date] = total
+        return total
 
     async def capture(self, observed_at: datetime | None = None) -> dict[str, Any]:
         observed = observed_at or datetime.now(timezone.utc)
@@ -148,18 +166,22 @@ class TdxShadowSnapshotRuntime:
         self._read_task = None
         rows, metadata = _as_rows_and_metadata(result)
         projected = project_tdx_snapshot_rows(rows, observed)
+        completeness = tdx_snapshot_completeness(
+            len(rows), metadata.get("warnings") or (), await self._roster_total(observed),
+        )
         document_metadata = {
             **metadata,
             "provider": SHADOW_PROVIDER,
             "capability": SHADOW_CAPABILITY,
             "source": "tdx_public_all_a_snapshot",
+            "completeness": completeness,
             "research_only": True,
             "live_effect": "none",
         }
         reference = self.deps.recent_reference(observed)
         if reference is not None and abs((observed - reference[0]).total_seconds()) > REFERENCE_MAX_AGE_SECONDS:
             reference = None
-        comparison_row = _comparison_row(observed, projected, reference)
+        comparison_row = _comparison_row(observed, projected, reference, completeness)
         try:
             stored = await self.deps.run_database(
                 self.deps.persist_capture, self.deps.database, observed, projected,
