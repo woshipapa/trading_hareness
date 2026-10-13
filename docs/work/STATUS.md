@@ -38,7 +38,7 @@
 
 - W008 2026-10-13 15:27 Codex 实现者在做派工 1（方案的 P1），工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-shadow-measure`，分支 `codex/tdx-shadow-measure`，基点 9d75b5d9；这是一个新的 Codex 线程（线程号在它交回时才知道，交回后记进 Log）。结束标志：分支在 9d75b5d9 之后有提交且 `git status --short` 为空。之后：在工作区跑方案 Acceptance 一节的命令、读 diff、在 Steps 里勾掉 P1，再派工 2（P2 和 P3）。它挂在主会话 93ba6e1d 上，主会话结束它就停：新会话先看分支和工作区；工作区不干净且文件十分钟内没再变，就是中断了，用新的 Codex 调用“按方案从派工 1 没做完的地方继续”，不要自己写。
 - W006 2026-10-13 15:48 Codex 实现者在做第 7 步（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 e813f371 之后有提交且 `git status --short` 为空。之后：复跑验收；读 `tactic_trials.py` 里每日总结的文字模板；勾掉 Steps；派第 8 步。
-- W010 2026-10-13 16:20 Codex 方案审查（MCP 调用，线程 01a1342e，cwd 是主检出，只读）。结束标志：调用返回 `SOUND` 或一份编号的问题清单。
+- W010 2026-10-13 16:20 Codex 方案审查（MCP 调用，线程 01a1342e，cwd 是主检出，只读），16:47 起是第二轮。结束标志：调用返回 `SOUND` 或一份编号的问题清单。
 
 ## 待办清单
 

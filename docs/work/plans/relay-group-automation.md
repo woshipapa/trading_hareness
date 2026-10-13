@@ -1,6 +1,6 @@
 # 飞书中继：目标群管理、撤回同步、加急告警、链接入群（relay-group-automation）
 
-- 版本：r1，2026-10-13，基于 main `9d75b5d9`；工作线 W010
+- 版本：r2，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2 采纳了 Codex 方案审查第一轮的全部 7 条意见（见文末“审查记录”）。
 - 组件：只动 `feishu-relay/`（发布单元 edge-relay）。不碰 quant-service、frontend、scripts、config/secrets、docs/work。
 - 出处：待办 B030；用户 2026-10-13「可以这些全部推进，请你写好完整计划给codex-flow去执行推进。不同worktree最后merge」，
   看过方案要点后「同意了，我是trust的」。
@@ -45,7 +45,11 @@
 | 2 并行 | `relay-auto-recall` | D | base、P0-5 |
 
 base 合进集成分支后，其余五条从集成分支拉出并行做，各自只改自己的文件（见“接缝”），按 join → create → members →
-urgent → recall 的顺序 `--no-ff` 合回集成分支，每合一条在集成分支上跑一遍全部验收命令。五条都合完、双重评审无未决的
+urgent → recall 的顺序 `--no-ff` 合回集成分支，每合一条在集成分支上跑一遍全部验收命令。
+base 之后，任何功能线都**不再修改**这些共享文件：`bridge/bridge.py`、`bridge/feature_routes.py`、`bridge/group_admin.py`、
+`adapter/index.mjs`、`adapter/group-relay.mjs`、`adapter/ledger.mjs`、`adapter/feature-routes.mjs`、`adapter/frontend-assets.mjs`、
+两个 Dockerfile、`dashboard/src/App.vue`、`dashboard/src/views/TargetGroupsView.vue`、`dashboard/src/composables/useFeishuDashboardWorkspace.ts`。
+功能线发现非改不可时停下来报告，由 Claude 在集成分支上改。五条都合完、双重评审无未决的
 critical/high 后，集成分支 `--no-ff` 合进 main（要用户同意），随后 edge 热更新和线上验收（Claude 做）。
 每次派给 Codex 的任务控制在 15 分钟内：每条线拆成 bridge、adapter、看板三步，用同一线程续派。
 
@@ -64,6 +68,9 @@ critical/high 后，集成分支 `--no-ff` 合进 main（要用户同意），�
 | P0-5 | 机器人发一条 → 群主撤回它；读回确认；看这条消息在历史里的 `from_id` 和内容长什么样 | `messages.DeleteGroupMessageRequest`（78） | 自测群里一条被撤回的消息 |
 | P0-6 | 账号给用户本人的账号发一条文字并应用内加急，查回执 | `urgent.PutUrgentRequest`（30000）、`PullUrgentsAckStatusRequest`（30005） | 用户的飞书会收到一次加急提醒 |
 | P0-7 | 把用户本人的账号拉进自测群再移除 | `chats.PutChatChatterRequest`（47）、`DeleteChatChatterRequest`（45） | 用户会收到一次入群和被移出的通知 |
+| P0-8 | 让中继往自测群各转发一条文字、带图富文本、卡片，记下“发出去的最终文字”和“从群里读回的文字” | 现有转发通道 + `PullMessagesByPositions` | 自测群里三条消息 |
+
+P0-1 至 P0-5 已于 2026-10-13 试通（`docs/work/probes/2026-10-13-relay-auto-p0.out.txt`）。P0-6、P0-7 由用户运行脚本；P0-8 在 base 合并后做。
 
 ## 接缝（base 线先做，之后各线互不碰对方的文件）
 
@@ -76,6 +83,12 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
   `target_observer.py`（后五个 base 只建 `ROUTES = {}`）。
 - `bridge/bridge.py` 的 `do_POST`：在返回 404 之前查 `FEATURE_ROUTES`；`except (GroupLookupError, HistoryRangeError, ChatBotError)`
   里加上 `GroupAdminError`（同样回 422）。
+- `bridge/bridge.py` 给 D 留的两处钩子（base 接好，`target_observer.py` 的空壳让它们不起作用）：
+  收到 WebSocket 消息后、因不在监听名单而忽略（`not_allowlisted_or_dynamic_binding_failed`，约第 2327 行）之前，先问
+  `target_observer.observed(self, chat_id, message)`：返回真就把这条消息发到 `target_observer.ingress_url(self)` 并结束，不进普通通道；
+  空壳的 `observed` 恒为假。功能线 D 只改 `target_observer.py`。
+- 功能模块的处理函数拿到的是 `bridge` 对象；需要 larkx 的地方在函数内部导入（本机没有 larkx，模块顶层不能导入它），
+  规则写成不依赖 `bridge` 的纯函数，由处理函数把网络访问传进去。
 
 **adapter**
 - `adapter/ledger.mjs`：返回对象里加 `query: (text, params) => pool.query(text, params)`，功能模块自己建表、自己写 SQL。
@@ -83,13 +96,22 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
   `Route = { method, path: string | RegExp, handle({ params, query, body }) }`；本文件提供匹配和分发（读 JSON 体、写 JSON、
   异常回 400）。`readJsonBody` 现在在 `index.mjs` 里，作为依赖传入。
 - `adapter/index.mjs`：创建六个功能对象（`target-registry.mjs` 由 base 实现；`join-link.mjs`、`target-groups.mjs`、
-  `target-members.mjs`、`urgent-alerts.mjs`、`delivery-check.mjs` 先是返回空 `schema`/`routes` 的空壳），启动时依次执行它们的
-  `schema`，在 `createServer` 回调里、现有的 `/api/group-relay/targets` 分支之前调用分发函数。
+  `target-members.mjs`、`urgent-alerts.mjs`、`delivery-check.mjs` 先是空壳），启动时依次执行它们的 `schema`，在 `createServer`
+  回调里、现有的 `/internal/larkagentx/*` 和 `/api/group-relay/targets` 分支之前调用分发函数。
+  `Route` 可带 `internal: true`：分发函数先按现有内部入口的做法校验 `x-larkagentx-token`。
+- 给 U 和 D 预先接好的三处调用（空壳里是什么都不做的函数，功能线只改自己的模块）：
+  `notifyOps`（第 109 行）在原有的发运维群之后 `await urgentAlerts.notify(key, text)`；
+  创建 group relay 时把 `deliveryCheck.recordWebhookDelivery` 和 `deliveryCheck.recallDeliveries` 传进去；
+  `adapter/group-relay.mjs` 的 `sendMessage` 在 webhook 发送成功后调用前者（传 `messageId`、`targetChatId`、最终发出的 `webhookMsgType`
+  和加过关键词的最终内容），源头撤回的分支（第 1007–1010 行，`updateRelaySourceMessage` 之后）调用后者。
+- 分发函数把处理函数抛出的异常一律回 400 并带上原因；bridge 回的 422、429 经 `bridgePostJson` 变成带原因的异常，同样回 400。
 - 两个 Dockerfile（`adapter/Dockerfile`、`deploy/edge/Dockerfile.adapter`）的 COPY 清单一次加齐七个新文件。
 
 **看板**
-- 新增一级栏目 `targets`（“目标群”）：`App.vue` 的菜单、标题、视图切换；`useFeishuDashboardWorkspace.ts` 的栏目白名单
-  （第 86 行）和 `DashboardSection` 类型；`adapter/frontend-assets.mjs` 的 `FEISHU_ROUTES` 加 `/targets`。
+- 新增一级栏目 `targets`（“目标群”）：`App.vue` 的菜单、标题、视图切换；`useFeishuDashboardWorkspace.ts` 里四处：
+  `DashboardSection` 类型、`selectActiveSection` 的白名单（第 86 行）、`loadActiveSection` 的分支（第 93–99 行）、
+  `initialSection` 认的路径和本地存储值（第 173–177 行，否则 `/targets` 刷新后回到监听页）；
+  `adapter/frontend-assets.mjs` 的 `FEISHU_ROUTES` 加 `/targets`。
 - `views/TargetGroupsView.vue` 依次放五个面板组件，每个面板有自己的 SFC、组合函数和 API 模块，base 只实现第一个，其余是空壳：
   `TargetRegistryPanel`（R）、`TargetGroupCreatePanel`（C）、`TargetMembersPanel`（M）、`DeliveryPanel`（D）、`UrgentAlertsPanel`（U）。
   `JoinByLinkPanel`（J）放进 `App.vue` 的新增源群对话框，位置在“源群”表单项上方，base 接好。
@@ -97,12 +119,14 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
 
 ## R：现有目标群纳入看板（base 线）
 
-- bridge `target_registry.py`，`POST /targets/resolve {webhook_hashes: [sha256 十六进制]}`：取账号所在的群
-  （`pull_joined_groups(self.client.feed_page)`），用 `self.client.chat_infos` 留下群主是本账号的；对每个群 `self.client.chat_bots`，
-  对其中的自定义机器人调 `chatbot_api("GetWebhookBotInfo")`，算 webhook 的 sha256。返回
-  `{groups: [{chat_id, name, bots: [{bot_id, name, key_words, webhook_hash}]}]}`。地址本身不出 bridge。
+- bridge `target_registry.py`，`POST /targets/resolve {webhook_hashes: [sha256 十六进制]}`：取账号所在的全部群
+  （`pull_joined_groups(self.client.feed_page)`），用 `self.client.chat_infos` 标出群主是不是本账号（`owned`），不按它筛掉；
+  对每个群 `self.client.chat_bots`，对其中的自定义机器人调 `chatbot_api("GetWebhookBotInfo")`，读得到地址的算 sha256，
+  读不到的（`no_permission`）没有哈希。返回 `{groups: [{chat_id, name, owned, bots: [{bot_id, name, key_words, webhook_hash}]}]}`。
+  地址本身不出 bridge。只有哈希在请求里出现过的机器人才返回 `webhook_hash`。
 - adapter `target-registry.mjs`：表 `feishu_group_relay_target_groups(chat_id text primary key, websocket_chat_id text, chat_name text,
   bot_id text, bot_name text, owned boolean not null, resolved_at timestamptz not null)`，`chat_id` 是目标群编号（`oc_…` 或 `wh_…`）。
+  群主不是本账号的目标群照样入表（`owned` 为假）：看板显示它的群名，M、D 的写操作对它不可用。
   `resolve()`：对运行中的 webhook 映射表里每个目标群算地址的 sha256，交给 bridge，按哈希对上后写表。
   `list()`：把 `webhookTargets.list()` 和本表合并，每行多出 `websocket_chat_id`、`bot_id`、`bot_name`、`owned`，环境变量的目标群有了 `name`。
   路由：`GET /api/group-relay/target-groups`、`POST /api/group-relay/target-groups/resolve`。
@@ -152,9 +176,12 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
 ## U：加急告警
 
 - bridge `urgent_alerts.py`：`POST /alerts/recipients` → 可选的接收会话（形态以 `WEB_GATEWAY.md` 的 P0-6 结果为准）；
-  `POST /alerts/urgent {chat_id, user_id, text}`：核对 `user_id` 是该会话里除本账号外唯一的成员 → 用已有的发送通道发文字
-  （`self.send_gate` 的频率限制和审计照用；这类会话不要求在 `LARKX_SEND_CHAT_IDS` 里）→ 对返回的消息 `PutUrgent`
-  （`urgentType: APP`）→ `{message_id, urgent: true}`。另设每小时最多 6 次加急的上限，超过回 429。
+  `POST /alerts/urgent {chat_id, user_id, text}`：核对 `user_id` 是该会话里除本账号外唯一的成员 → 发文字 → 对这条消息
+  `PutUrgent`（`urgentType: APP`）→ `{message_id, urgent: true}`。
+  发文字**不走** `Bridge.send()`（它只认 `LARKX_SEND_CHAT_IDS` 里的会话，也不返回消息编号）：本模块自己用
+  `larkx.proto.builders.build_send_message_packet` 和 `bridge.client._gateway_post` 发，前后调 `bridge.send_gate.begin / finish`，
+  频率限制和审计因此照用；消息编号的取法按 `WEB_GATEWAY.md` 的 P0-6 结果。另设每小时最多 6 次加急的上限，超过时抛
+  `SendRateLimited`（`do_POST` 已把它映射成 429）。
 - adapter `urgent-alerts.mjs`：表 `feishu_group_relay_alert_settings(setting_key text primary key, value jsonb not null)` 存接收人
   和开关；`notify(key, text)`：开着且有接收人就调 bridge。`index.mjs` 的 `notifyOps`（第 109 行）在原有的发运维群之后调用它；
   bridge 未登录时发不了加急，属于预期，只记日志。路由：`GET/PUT /api/group-relay/alerts/settings`、
@@ -171,8 +198,10 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
 - adapter `delivery-check.mjs`：表 `feishu_group_relay_target_deliveries(delivery_id bigserial primary key, source_message_id text not null,
   target_chat_id text not null, fingerprint text not null, sent_at timestamptz not null, target_message_id text, observed_at timestamptz,
   recalled_at timestamptz, recall_error text)`。
-  1. `group-relay.mjs` 的 `sendMessage` 在 webhook 发送成功后调用注入的 `recordWebhookDelivery({ sourceMessageId, targetChatId, text })`；
-     指纹 = 发出文字去掉关键词和空白后的前 80 个字的 sha256。
+  1. `recordWebhookDelivery({ messageId, targetChatId, msgType, content })`（调用点由 base 接好）收到的是**最终发出**的类型和内容
+     （卡片在带关键词时已被改成文字或富文本，关键词已加上）。本模块的 `outboundText(msgType, content)` 把它变成纯文字；
+     指纹 = 该文字去掉关键词和全部空白后的前 80 个字的 sha256。从群里观察到的消息用同一个规范化算指纹。
+     哪些形态两边的文字对得上，以 P0-8 的样本为准，写在 `WEB_GATEWAY.md` 里；对不上的形态不建发送记录（显示为“不核对”），不猜。
   2. 内部入口 `/internal/larkagentx/target-observed`（校验 `x-larkagentx-token`）：按目标群取 120 秒内未核对的发送记录，指纹相同且
      **恰好一条**时写入 `target_message_id`、`observed_at`；零条或多条都不写（宁可“未核对”，不猜）。
   3. `group-relay.mjs` 第 1007–1010 行源头撤回的分支，在 `updateRelaySourceMessage` 之后调用注入的 `recallDeliveries(sourceMessageId)`：
@@ -191,6 +220,10 @@ python3 -m unittest discover -s feishu-relay/bridge -p 'test_*.py' -q
 git diff --check integration/relay-auto...HEAD
 ```
 
+本机没有 larkx：导入 `bridge.py` 的测试在本机会被跳过（现有测试就是这样）。所以规则的测试写在功能模块自己的测试文件里，
+不导入 `bridge.py`；`bridge.py` 里的接线（`do_POST` 查表、给 D 的钩子）只有 edge 上的套件能测到，由 Claude 在每条线合并前跑
+`bash feishu-relay/scripts/edge/test-bridge-on-edge.sh`，这是 bridge 改动的验收门。实现者在报告里写明本机跳过了哪些测试。
+
 每个功能模块要有会失败的测试，至少覆盖：
 - bridge：不是群主时拒绝且不发任何写命令；J 的非法链接不调用网关；U 的接收人不是会话里唯一的对方时被拒、超过每小时上限被拒；
   D 只转发机器人发的消息、别人的消息不转发。
@@ -207,10 +240,20 @@ Claude 在评审时另跑：`bash feishu-relay/scripts/edge/test-bridge-on-edge.
 - 写操作用的是个人账号：只在自己是群主的群里做；加急每小时 6 次封顶；移除成员、处理申请、入群都只由人在看板上点，不做自动规则。
 - D 让 bridge 多监听目标群：这些群的消息量就是转发量本身；只转发机器人发的消息，不进普通转发通道，避免把目标群当源群再转一遍。
 - 发布时 adapter 和 bridge 重启，WebSocket 断约 15 秒（与平时发布相同）。
-- 并行工作区的冲突靠接缝避免；D 和 U 各改一处共享文件（`bridge.py` 的去向函数和 `group-relay.mjs`、`index.mjs` 的 `notifyOps`），
-  所以排在合并顺序的最后两位。
+- 并行工作区的冲突靠接缝避免：共享文件只由 base 线改，U 和 D 需要的调用点 base 预先接好。
 
 ## 不做
 
 入群申请的自动通过规则、成员到期自动移除、二维码图片的生成与识别、短信和电话加急、webhook 目标群的编辑同步、
 往源群写任何东西、解散群、同名群防重复创建、把旧的“Webhook 目标与关键词”表迁走、环境变量配置的退役。
+
+## 审查记录
+
+第一轮（Codex，只读，2026-10-13，线程 01a1342e）7 条，全部采纳：
+1. high：U、D 仍要改 `adapter/index.mjs` → 调用点和内部入口改由 base 预先接好，功能线不再碰共享文件。
+2. high：`Bridge.send()` 拒绝名单外会话、不返回消息编号 → U 自己发文字，直接用 `send_gate` 记账。
+3. high：分发函数一律回 400，与“回 429”矛盾 → 429 只在 bridge 一侧，adapter 统一回 400 并带原因。
+4. medium：`initialSection`、`loadActiveSection` 没改 → 加入 base 的清单。
+5. medium：D 的指纹不是最终发出的文字 → 调用点传最终类型和内容，规范化两边一致，并用 P0-8 的样本确认。
+6. medium：导入 `bridge.py` 的测试本机被跳过 → 规则测试不导入 `bridge.py`，接线由 edge 套件把关。
+7. medium：R 筛掉了群主不是本账号的目标群 → 全部入表，用 `owned` 区分。
