@@ -1,0 +1,27 @@
+The old owner relay server (47.110.79.189, SSH port 3535, user stockpeer) on 2026-10-13, read-only, two SSH calls
+from the Mac at 20:21 and 20:23 CST. Transcribed from the session's tool output; no script file (the commands are below).
+
+--- 20:21:47 CST: date; uptime; free -m; docker ps -a; curl 127.0.0.1:15682/health; curl 127.0.0.1:15683/health
+2026-10-13 20:21:47 CST
+ 20:21:47 up  3:22,  0 users,  load average: 0.20, 0.07, 0.01
+mem MB total 3495 used 384 available 2828
+failed to connect to the docker API at unix:///run/user/1002/docker.sock; check if the path is correct and if the daemon is running
+on-host 15682/health http=000 0.000318s
+on-host 15683/health http=000 0.000513s
+
+--- 20:23 CST: loginctl show-user -p Linger; systemctl --user is-active/is-enabled docker; journalctl --user -u docker -n 6; last -n 12 -F
+linger: Linger=yes
+docker user unit: inactive / enabled: masked
+sessions of this user: 4
+user manager started: ActiveEnterTimestamp=Tue 2026-10-13 17:00:11 CST
+docker unit journal (last lines):
+2026-10-13T18:37:14+0800 dockerd-rootless.sh[1088]: level=info msg="stopping event stream following graceful shutdown" (two lines)
+2026-10-13T18:37:14+0800 dockerd-rootless.sh[1088]: level=info msg="stopping healthcheck following graceful shutdown"
+2026-10-13T18:37:15+0800 dockerd-rootless.sh[1088]: level=info msg="Daemon shutdown complete"
+2026-10-13T18:37:15+0800 systemd[993]: Stopped Docker Application Container Engine (Rootless).
+2026-10-13T18:37:15+0800 systemd[993]: docker.service: Consumed 3min 37.103s CPU time.
+last: reboot Tue Oct 13 16:59:50 2026 still running
+
+--- from the Mac, 20:21 CST
+supervisor log: daemon owner-tunnel exited rc=255 at 20:19:24 (the Mac woke from sleep), started again 20:20:24
+curl http://127.0.0.1:15682/health -> connection reset (the forward is up, nothing listens on the old host's 15682)

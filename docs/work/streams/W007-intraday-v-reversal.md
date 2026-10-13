@@ -6,7 +6,7 @@
 - plan: docs/work/plans/intraday-v-reversal-study.md
 - branch: codex/v-reversal-study
 - head: 2703af84
-- next: 两件事并行。(1) 等 Codex 交回研究第 1 步（数据核对、等权线、K 线与指标、两张事件表、深跌日的描述；只用五个指数文件），读它的 `01-notes.md` 并抽查：等权线与日线面板的吻合、有没有用到事件时刻之后的数据、深跌日的数量与日线定义的 193 天的差异说明；通过后等基金文件取齐再派第 2 步。(2) 取数 18:35 自己暂停，盘后流程结束后（10 月 13 日 20:30 以后，或次日非交易时段）重跑同一条命令续取余下的 ETF 并补 `SZ399001` 缺的 7 天：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（要限时就加 `--until=HH:MM`）
+- next: 两件事。(1) Codex 的研究第 1 步在跑（线程 01a134cc-8eb1-76f0-9aec-6bb66827ce98，休眠切断后 20:20 续上，分支已有提交）：交回后读 `docs/archive/2026-10-13-v-reversal-study/01-notes.md` 并抽查等权线与日线面板的吻合、有没有用到事件时刻之后的数据、深跌日数量与 193 天的差异说明。(2) 取数停在 `510300` 的 2025-03-10（日志末行 PAUSED，4,105 次），续取要等 BACKLOG B041（本机切到新的 owner 服务器）完成，且先看新主机的内存再定节奏（对方说只有 1 GB）；命令不变：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`
 - updated: 2026-10-13
 
 ## Requirements
@@ -81,16 +81,18 @@
 
 - 2026-10-13 18:28 五个指数文件取齐（`SH000001`、`SZ399006`、`SH000852`、`SH000300` 各 749 天，`SZ399001` 742 天）。照 `codex-flow` 建了 harvest 工作区并派研究第 1 步；基金文件还在取，第 1 步不读它们。研究由用户 10 月 13 日的三条要求发起（见 Requirements），只读本机文件，产出只进 `docs/archive/`，不合并进主线的代码。
 
+- 2026-10-13 20:30 reality: 本机 18:34–20:19 合盖休眠，挂在主会话上的 Codex 调用和后台命令都被切断。研究第 1 步 20:20 续上。取数的续取没有启动：对方把量化服务迁到了新服务器（BACKLOG B041），本机的 owner 读路径不通。
+
 ## Waiting on the user
 
 - [x] 2026-10-13 owner 恢复后，是否同意跑指数和宽基 ETF 的历史分钟线取数（约 8,250 次只读请求，非交易时段） → 用户 2026-10-13 17:27：「对方已经修好了，你如果有需要采集的可以进行了」（2026-10-13）
 
 ## Running
 
-- [ ] 2026-10-13 18:28 Codex 在做研究第 1 步，新线程（交回时才知道线程号），harvest 工作区 `/Users/papa/codebase/.codex-wt/n8n-v-reversal-study`，分支 `codex/v-reversal-study`，基点 2703af84。产出：`docs/archive/2026-10-13-v-reversal-study/`（脚本、输出、`01-notes.md`、事件表 CSV），派生表在本机 `state/research/vshape_20261013/derived/`。结束标志：分支有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上；主会话结束它就停，判断死活的办法见 `docs/work/README.md`，续派用 `codex-reply` 接同一线程（线程号用 `codex-trace.py --list` 按工作区找）。
+- [ ] 2026-10-13 18:28 Codex 在做研究第 1 步，线程 01a134cc-8eb1-76f0-9aec-6bb66827ce98，harvest 工作区 `/Users/papa/codebase/.codex-wt/n8n-v-reversal-study`，分支 `codex/v-reversal-study`，基点 2703af84。产出：`docs/archive/2026-10-13-v-reversal-study/`（脚本、输出、`01-notes.md`、事件表 CSV），派生表在本机 `state/research/vshape_20261013/derived/`。结束标志：分支有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上；主会话结束它就停，判断死活的办法见 `docs/work/README.md`，续派用 `codex-reply` 接同一线程（线程号用 `codex-trace.py --list` 按工作区找）。 20:30 补充：18:34 本机休眠把调用切断（当时没有提交），20:20 用 `codex-reply` 续上；续派的调用立刻返回空内容但线程在跑，所以用 `docs/work/probes/2026-10-13-wait-codex.py 01a134cc` 等它结束（主会话的后台命令）。
 
-- [ ] 2026-10-13 17:30 取数脚本在跑（主会话的后台命令）：11 个代码顺序取，每次请求后停 0.3 秒，带 `--until=18:35`，到点自己停并在日志里写 PAUSED（避开 18:45 开始的盘后流程）。日志 `state/research/vshape_20261013/data/fetch.log`，数据 `<代码>.jsonl`。结束标志：日志末行 FINISHED 或 PAUSED；ABORT 是连续 20 次请求失败。挂在主会话 93ba6e1d 上；主会话结束它就停，重跑同一条命令即续取。
-- [ ] 2026-10-13 18:30 续取已排好（主会话的后台命令）：等到 20:30，先查一次 owner 的 `/health`，不是 200 就不启动并说明；是 200 就用同一条命令续取，带 `--until=23:30`。结束标志同上（日志末行 FINISHED / PAUSED / ABORT）。主会话结束它就没了：那时按 next 手工重跑。
+- [x] 2026-10-13 17:30 取数脚本在跑（主会话的后台命令）：11 个代码顺序取，每次请求后停 0.3 秒，带 `--until=18:35`，到点自己停并在日志里写 PAUSED（避开 18:45 开始的盘后流程）。日志 `state/research/vshape_20261013/data/fetch.log`，数据 `<代码>.jsonl`。结束标志：日志末行 FINISHED 或 PAUSED；ABORT 是连续 20 次请求失败。挂在主会话 93ba6e1d 上；主会话结束它就停，重跑同一条命令即续取。 → 18:35 按设定暂停，日志末行 PAUSED，4,105 次请求，五个指数齐、`510300` 取到 2025-03-07（2026-10-13）
+- [x] 2026-10-13 18:30 续取已排好（主会话的后台命令）：等到 20:30，先查一次 owner 的 `/health`，不是 200 就不启动并说明；是 200 就用同一条命令续取，带 `--until=23:30`。结束标志同上（日志末行 FINISHED / PAUSED / ABORT）。主会话结束它就没了：那时按 next 手工重跑。 → 20:30 前主会话把这条排队命令停掉了（2026-10-13）：owner 迁了服务器，本机读路径不通，不能让它到点自己去连
 
 - [x] 2026-10-13 15:12 第二轮取数排队 → 15:28 排队的后台命令已手工停掉，没有任何取数进程在跑（2026-10-13）；恢复后按 `next` 用一条命令顺序取全部 11 个代码
 - [x] 2026-10-13 14:57 第一轮取数 → 15:10 因 owner 不响应退出，没有取到数据（2026-10-13）；恢复后重跑见 next。原说明：15:10 起先存当天全天雷达，再取 `SH000001`、`SZ399001`、`SZ399006`、`SH000852`、510300、512100 自 2023-09-01 起每个交易日的分钟线，约 4,500 次只读请求。输出和日志在本机 `state/research/vshape_20261013/data/`（`<代码>.jsonl`、`fetch.log`）。结束标志：日志末行 `FINISHED <次数> calls`；出现 `ABORT` 是连续 20 次请求失败。可断点续取：重跑同一脚本会跳过已有的日子。脚本挂在主会话上，主会话结束它就停，重跑即可。之后：数每个文件的行数（应接近 750），再做 Steps 的“研究登记与派工”。

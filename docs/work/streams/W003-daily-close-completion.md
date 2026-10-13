@@ -33,6 +33,8 @@
 
 - 2026-10-13 15:20 reality: owner 主机 15:07 起不响应（BACKLOG B031）。今晚盘后流程和本阶段的首次运行都取决于它恢复；恢复前这条线什么也核对不了。
 
+- 2026-10-13 20:30 reality: 19:30 的核对没做成，原因和现状见 Due 那条与 BACKLOG B041、FACTS F021。
+
 ## Waiting on the user
 
 - [x] 2026-10-13 请从云控制台看 owner 主机（47.110.79.189）的 CPU、内存和带宽监控，并决定是否重启服务或主机。为什么等：15:07 起它不响应，agent 连不上去就看不到原因，重启只能由用户做。之后：用户说明看到了什么，agent 据此排查并核对今晚的盘后流程（BACKLOG B031）。 → 用户 15:56：「当前那台机器在修复」（2026-10-13）；修好后的原因和处置待用户告知
@@ -42,7 +44,7 @@
 ## Due
 
 - [x] 2026-10-13 15:20 先确认 owner 主机是否恢复（BACKLOG B031 写了现象和检查命令）。没恢复就提醒用户看云控制台；恢复后先读负载和内存、弄清原因，再做下面 18:45 那条。 → 17:29 已恢复（中转服务器 17:00 前后重启过，原因没有告知；见 BACKLOG B031 note6），17:41 又发布了 `owner-code-20261013-04`（2026-10-13）
-- [ ] 2026-10-13 19:30 核对该阶段第一次自动运行（盘后流程 18:45 才开始，早查只会看到“没有收据”）：读 `fetch_runs` 里能力 `daily_close_completion` 的回执（状态、各分类计数、剩下的股票和原因）；抽查补上的日线有没有涨跌停价和因子；健康检查 `data.daily_bars_complete`（`curl http://127.0.0.1:18300/api/research/indicators/health`）。阶段没跑或 `blocked`：查原因；当天缺口可用本机 `state/research/owner_repairs_20261012/` 里验证过的脚本手工补（写库由用户执行）。 2026-10-13 18:30 补充：主会话排了一条后台命令，19:30 用 `docs/work/probes/2026-10-13-post-close-stages.py` 读当晚各阶段的回执，存到 `docs/work/probes/2026-10-13-post-close-stages.1930.out.txt`（这个探针直接读 owner 读路径的 `automation/runs`，可以随时手工重跑）。18:15 那次已看到：当天 16:02 跑过一轮，其中 `adjustment_factors` 失败、没有 `daily_close_completion` 的回执；要看 18:45 这一轮。
+- [ ] 2026-10-13 19:30 核对该阶段第一次自动运行（盘后流程 18:45 才开始，早查只会看到“没有收据”）：读 `fetch_runs` 里能力 `daily_close_completion` 的回执（状态、各分类计数、剩下的股票和原因）；抽查补上的日线有没有涨跌停价和因子；健康检查 `data.daily_bars_complete`（`curl http://127.0.0.1:18300/api/research/indicators/health`）。阶段没跑或 `blocked`：查原因；当天缺口可用本机 `state/research/owner_repairs_20261012/` 里验证过的脚本手工补（写库由用户执行）。 2026-10-13 18:30 补充：主会话排了一条后台命令，19:30 用 `docs/work/probes/2026-10-13-post-close-stages.py` 读当晚各阶段的回执，存到 `docs/work/probes/2026-10-13-post-close-stages.1930.out.txt`（这个探针直接读 owner 读路径的 `automation/runs`，可以随时手工重跑）。18:15 那次已看到：当天 16:02 跑过一轮，其中 `adjustment_factors` 失败、没有 `daily_close_completion` 的回执；要看 18:45 这一轮。 2026-10-13 20:30 没有做成：本机 18:34–20:19 合盖休眠，挂在主会话上的 Codex 调用和后台命令都被切断；醒来后发现对方当天把量化服务迁到了新服务器，本机的 owner 读路径还指着旧主机，不通（BACKLOG B041）。旧主机的 Docker 18:37:15 就停了，早于 18:45 的盘后流程，所以当晚这一轮只可能是在新主机上跑的，跑没跑、结果如何都还不知道。B041 连通后先做这条。
 
 ## Evidence
 

@@ -38,7 +38,7 @@
 
 ## Due
 
-- [ ] 2026-10-13 19:30 核对当晚盘后自动生成的涨停榜和风险分读数（明早 09:15 的竞价池从 10 月 13 日的风险分读数取昨日涨停股）：`curl 'http://127.0.0.1:18300/api/research/market/limit-up-risk/daily'` 返回的 `reading.trade_date` 应是 2026-10-13。没有的话看盘后流程是否运行，以及 owner 主机是否正常（BACKLOG B031）。
+- [ ] 2026-10-13 19:30 核对当晚盘后自动生成的涨停榜和风险分读数（明早 09:15 的竞价池从 10 月 13 日的风险分读数取昨日涨停股）：`curl 'http://127.0.0.1:18300/api/research/market/limit-up-risk/daily'` 返回的 `reading.trade_date` 应是 2026-10-13。没有的话看盘后流程是否运行，以及 owner 主机是否正常（BACKLOG B031）。 2026-10-13 20:30 没有做成：本机的 owner 读路径不通（对方迁了服务器，见 BACKLOG B041）；经 edge 的那条 `curl` 也要等 edge 到新主机的连接确认。B041 连通后做；明早 09:15 的竞价池依赖这份读数。
 
 ## Evidence
 
