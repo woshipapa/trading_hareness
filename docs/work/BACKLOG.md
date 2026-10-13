@@ -474,6 +474,17 @@
 - updated: 2026-10-13
 - result: 2026-10-13 23:05 八个模块 61 步全部通过，没有要修的语句；脚本和输出在 `docs/work/probes/2026-10-13-adapter-pg-probe/`。没查并发和加锁
 
+### B056 看板还调用不到的 LarkAgentX 能力（会员这条线上最常手做的几件）
+
+- state: ready
+- kind: follow-up
+- stream: W010
+- why: 用户 2026-10-13 23:58：「我希望的就是咱们的前端可以自由的调用我们larkagentx，websocket具备的能力」。今天这些事是本会话用脚本或用户在飞书里手做的：读每个成员的备注名和单聊里的续费对话来定期限；到期后私聊提醒；续费后改备注名；把续费的人拉回群
+- how: 候选，按用户今天实际用到的顺序：(1) 会员表里显示备注名，并提供“按备注名填期限”的建议（备注名的写法是月日加期限，`chatters.PullChattersByIds` 的 `alias`）；(2) 一键私聊到期提醒（发单聊消息，`messages.PutMessage`，要先探测单聊的发送）；(3) 续费时把备注名一并改掉（`users.PutUserAlias` 5400 或 `contact.v1.SetChatterAlias` 2191，没试过）；(4) 把人拉回群（`chats.PutChatChatter` 47，P0-7 试过）；(5) B052 的指定到期日。写操作都先在自测群和本账号身上探测，再接到看板
+- who: agent
+- needs: 用户说先做哪几项
+- updated: 2026-10-13
+
 ### B052 会员期限：指定到期日；读个人资料里的备注信息
 
 - state: ready

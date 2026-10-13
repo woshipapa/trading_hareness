@@ -39,7 +39,7 @@
 
 ## 待办清单
 
-open 31, ready 14, doing 2, waiting-user 1, done 6, dropped 1
+open 31, ready 15, doing 2, waiting-user 1, done 6, dropped 1
 
 在做的、可以开工的、等用户处理的:
 
@@ -57,6 +57,7 @@ open 31, ready 14, doing 2, waiting-user 1, done 6, dropped 1
 - B046 (ready) W010 的探测 P0-8：富文本和卡片转发读回的样子
 - B048 (ready) 目标群功能里查群主失败时不带飞书的原因
 - B049 (ready) W010 评审里没改的小项
+- B056 (ready) 看板还调用不到的 LarkAgentX 能力（会员这条线上最常手做的几件）
 - B052 (ready) 会员期限：指定到期日；读个人资料里的备注信息
 - B050 (doing) owner 上只用一套镜像，以后的发布都是代码覆盖
 - B055 (ready) 补取 2026-10-13 当天的指数和 ETF 分钟线
