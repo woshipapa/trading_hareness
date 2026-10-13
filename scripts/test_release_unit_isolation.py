@@ -30,7 +30,7 @@ OWNER_SCRIPT = ROOT / "scripts" / "shared-peer" / "deploy-code-only.sh"
 OWNER_RULES = ROOT / "scripts" / "shared-peer" / "classify-owner-paths.sh"
 CONSOLE_SCRIPT = ROOT / "scripts" / "edge" / "deploy-quant-console-edge.sh"
 
-OWNER_MARKERS = ("47.110.79.189", "stockpeer", "OWNER_PEER_HOST", "OWNER_PEER_SSH_KEY")
+OWNER_MARKERS = ("118.178.133.37", "47.110.79.189", "stockpeer", "OWNER_PEER_HOST", "OWNER_PEER_SSH_KEY")
 EDGE_MARKERS = ("47.114.113.152", "EDGE_HOST")
 
 
