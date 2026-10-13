@@ -20,7 +20,7 @@
 | | n8n `feishu-relay-edge-n8n`（`127.0.0.1:5678`）的 4 个 webhook 工作流 | `scripts/deploy-edge-relay-workflows.sh` | `scripts/verify-edge-relay-workflows.sh`（只读漂移比对） |
 | | `stock-reports-import` watchdog | `scripts/install-edge-import-watchdog.sh` | systemd 状态 |
 | | **已退役**：`quant-intraday-edge.service` 及其 timers | 不部署 | 必须保持 `inactive`/`disabled` |
-| **47 owner**（Longhu 主机 / lightServer1）`stockpeer@47.110.79.189 -p 3535`，密钥 `stockpeer_ed25519`，rootless Docker，compose 项目 `trading-hareness-peer` | `db-tunnel` | release 归档 + `scripts/shared-peer/activate-peer-release.sh` + compose | 容器健康 |
+| **47 owner**（Longhu 主机 / lightServer1）`stockpeer@118.178.133.37 -p 22`（2026-10-13 迁到这台；此前是 `47.110.79.189 -p 3535`，那台上的量化容器已停用，不要恢复），密钥 `stockpeer_ed25519`，rootless Docker，compose 项目 `trading-hareness-peer` | `db-tunnel` | release 归档 + `scripts/shared-peer/activate-peer-release.sh` + compose | 容器健康 |
 | | `quant-research`（`127.0.0.1:15682`，`QUANT_RUNTIME_PROFILE=intraday_edge`，唯一盘中写入者） | 同上，镜像在主机上用 wheelhouse 构建 | `/health` 的 `build.git_sha`；容器 profile |
 | | `quant-research-scheduler`（`127.0.0.1:15683`，`research`） | 同上，复用同一镜像 | `/health` 的 `build.git_sha` |
 | | systemd `--user`：`peer-session-guard-{heal,preopen}.timer`、`peer-daily-backfill.timer` | 从 release 目录安装单元文件 | `systemctl --user list-timers` |
@@ -55,7 +55,7 @@ owner 容器设置了 `QUANT_SKIP_MIGRATIONS=true`，服务启动时只检查几
 
   ```bash
   export RELAY_EDGE_SSH_KEY=~/.ssh/feishu_relay_edge_ed25519   # 47 edge root
-  export OWNER_PEER_SSH_KEY=~/.ssh/stockpeer_ed25519           # 47 owner stockpeer，端口 3535
+  export OWNER_PEER_SSH_KEY=~/.ssh/stockpeer_ed25519           # 47 owner stockpeer，端口 22
   ```
 
   脚本默认路径是 `/Users/papa/.ssh/...`，在其他机器上必须 export 上面两个变量。
@@ -92,7 +92,7 @@ scripts/release-sync-status.sh --sha origin/main | tee ~/release-sync-logs/$(dat
 ```bash
 E=root@47.114.113.152
 ssh -i "$RELAY_EDGE_SSH_KEY" $E 'readlink /opt/feishu-relay-edge/hotfix/current; cat /opt/feishu-relay-edge/hotfix/current/.base-git-sha'
-ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 \
+ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 \
   'ls -1 ~/.local/share/trading-hareness/releases/; ls ~/.local/share/trading-hareness/releases/*/trading_hareness/quant-service/migrations/versions/ 2>/dev/null | grep -E "_0(09[5-9]|1[0-9][0-9])_" | sort -u'
 ```
 
@@ -446,7 +446,7 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
    wheelhouse：如果 `quant-service/requirements.txt` 自 owner 上次发布以来没有变化（PR #2 没有改它），就直接复用 owner 上现有的 wheelhouse，在 owner 上打包：
 
    ```bash
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 \
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 \
      'tar -C ~ -chf /tmp/wheelhouse-current.tar wheelhouse && tar -tf /tmp/wheelhouse-current.tar | grep -c SHA256SUMS'
    ```
 
@@ -455,9 +455,9 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
 2. **上传并激活**。首次同步必须使用新版本里的激活脚本，因为旧版脚本不会保留 `intraday-secrets.env`：
 
    ```bash
-   O="-i $OWNER_PEER_SSH_KEY -P 3535"
-   scp $O "/tmp/trading_hareness-$X.tar" stockpeer@47.110.79.189:/tmp/
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 "set -euo pipefail
+   O="-i $OWNER_PEER_SSH_KEY -P 22"
+   scp $O "/tmp/trading_hareness-$X.tar" stockpeer@118.178.133.37:/tmp/
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 "set -euo pipefail
      tar -xOf /tmp/trading_hareness-$X.tar trading_hareness/scripts/shared-peer/activate-peer-release.sh > /tmp/activate-peer-release.sh
      RELEASE_ID='$L' bash /tmp/activate-peer-release.sh /tmp/trading_hareness-$X.tar /tmp/wheelhouse-current.tar
      test -s ~/trading_hareness/deploy/shared-peer/.env
@@ -471,7 +471,7 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
    `.env` 是指向 `~/.secrets/owner/.env.owner` 的软链接，必须写软链接背后的真实文件（`resolve()`），否则 `replace` 会把软链接换成普通文件，从此脱离集中凭据。整个重建期间持有守护锁，heal 定时器不会在中途重启容器；主服务 `--wait` 健康之后才启动 scheduler，二者同时启动会抢写同一批目录表：
 
    ```bash
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 "set -euo pipefail
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 "set -euo pipefail
      export XDG_RUNTIME_DIR=/run/user/\$(id -u) DOCKER_HOST=unix:///run/user/\$(id -u)/docker.sock
      LOCK=~/trading_hareness/scripts/shared-peer/release-lock.sh
      bash \$LOCK hold '$L' 3600
@@ -506,7 +506,7 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
 5. **核验**：
 
    ```bash
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 'set -a; . ~/trading_hareness/deploy/shared-peer/intraday-secrets.env; set +a
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 'set -a; . ~/trading_hareness/deploy/shared-peer/intraday-secrets.env; set +a
      ~/trading_hareness/scripts/peer-session-guard.sh preopen
      curl -fsS http://127.0.0.1:15683/api/v1/intraday/services/status | head -c 800; echo
      curl -fsS "http://127.0.0.1:15682/api/v1/research/trials?limit=3" | head -c 400'

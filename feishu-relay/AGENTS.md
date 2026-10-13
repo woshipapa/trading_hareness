@@ -31,7 +31,7 @@
   `docs/decisions/0014`). Do not pass `RELEASE_WINDOW_OVERRIDE` for it. A release
   still restarts the adapter and the bridge, so the WebSocket is down for about
   15 seconds.
-- Never name the owner host (`47.110.79.189`, `stockpeer`, `OWNER_PEER_*`) in an
+- Never name the owner host (`118.178.133.37`, the pre-migration `47.110.79.189`, `stockpeer`, `OWNER_PEER_*`) in an
   edge script. Edge deploys must not be able to reach 47owner.
 - The dirty-worktree check watches `feishu-relay` sources only. Never point it at
   a gitignored `*/dist` directory — `git diff` always reports those clean.
