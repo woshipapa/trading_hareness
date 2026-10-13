@@ -14,14 +14,13 @@
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | planned | Claude Code 会话 93ba6e1d，2026-10-13 | 等 owner 恢复、B031 查明原因、用户同意取数（见 Waiting on the user）后，在非交易时段跑 `/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（一条命令顺序取 11 个代码，带参数就不存雷达；可断点续取），另用 `curl` 把全天雷达存成 `state/research/vshape_20261013/radar/radar_2026-10-13.full.json`（13:27 那份 `radar_2026-10-13.json` 是早先输出的依据，留着）；`fetch.log` 出现 FINISHED 后核对 11 个文件各约 750 行，写研究登记，派 Codex | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | building | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 等 Codex 交回派工 2（方案的 P2 完整性门槛和 P3 按数据时间比对），在工作区跑方案 Acceptance 的命令并读 diff，通过后用同一线程派工 3（P4：当日汇总不读正文并报告当天是否达标） | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
-| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | approved | Claude Code 会话 eac0e1fc，2026-10-13 | 用户确认派工后：从 main 建集成分支 `integration/relay-auto`，把 `docs/work/probes/2026-10-13-relay-auto-p0.out.txt` 和 `…-web-gateway-messages.out.txt` 整理成 `feishu-relay/bridge/WEB_GATEWAY.md` 提交在集成分支上，然后 `mkworktree.sh . relay-auto-base --disposition merge --target integration/relay-auto` 并派 base 线的第一步（bridge 接缝） | 2026-10-13 |
+| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | building | Claude Code 会话 eac0e1fc，2026-10-13 | base 线第一步（bridge 接缝和 R 的 bridge 部分）返回后：在工作区里自己跑验收命令和 `bash feishu-relay/scripts/edge/test-bridge-on-edge.sh`，读 `git diff integration/relay-auto...HEAD`，通过后用同一线程续派第二步（adapter 接缝和 R），再第三步（看板） | 2026-10-13 |
 
 ## 等用户处理
 
 - W004 2026-10-13 请看一下控制台“盘面雷达与战法”页签的新图，配色、数字口径、点的密度是否还要调。为什么等：这是按用户的参考图做的，是否“看得懂”只有用户能判断。之后：没有意见就关闭本记录。
 - W007 2026-10-13 owner 恢复后，是否同意跑指数和宽基 ETF 的历史分钟线取数：11 个代码、2023-09-01 起每个交易日、共约 8,250 次只读请求，经授权数据网关，非交易时段跑。为什么等：超过 5,000 次的批量读取按 README 要用户明确同意；此前两次只是告知（“不同意请说”），用户没有反对，并在之后要求把假设放到历史上验证，但没有明确说同意。之后：按 `next` 取数。
 - W008 2026-10-13 是否同意在发布分类器里把 `scripts/tdx-promote.py` 列为“只在工作站运行”的工具（改的是 `scripts/shared-peer/classify-owner-paths.sh` 的规则）？为什么等：这是发布安全规则的改动，方案要求用户明确同意。同意：派工 5 带上这条规则，两次发布都是纯代码发布。不同意：派工 4–5 的分支等派工 6–10 的分支一起合并，发布 B 走全量发布。派工 5 开始前需要答案；派工 1–4 不受影响。
-- W010 2026-10-13 看过方案审查后的改动，同意派工（codex-flow 的派工前确认）。之后：建集成分支 `integration/relay-auto`，写 `WEB_GATEWAY.md`，派 base 线。
 
 ## 到点要做
 
@@ -37,6 +36,7 @@
 
 - W006 2026-10-13 15:48 Codex 实现者在做第 7 步（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 e813f371 之后有提交且 `git status --short` 为空。之后：复跑验收；读 `tactic_trials.py` 里每日总结的文字模板；勾掉 Steps；派第 8 步。
 - W008 2026-10-13 16:08 Codex 实现者在做派工 2（P2 和 P3），同一线程 01a13426-d823-78b1-9f68-2907eb221981，工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-shadow-measure`。结束标志：分支在 b11e97e9 之后有两个提交且 `git status --short` 为空。之后：跑验收、读 diff（门槛的比值、分母、缺数据时不放行是否与方案一致；比对行的新字段名）、勾掉 Steps，派工 3（P4）。挂在主会话 93ba6e1d 上，判断死活和续派的办法同 W006 的 Resume here。
+- W010 2026-10-13 17:45 Codex 实现者在做 base 线第一步（cwd `/Users/papa/codebase/.codex-wt/n8n-relay-auto-base`）。结束标志：MCP 调用返回，
 
 ## 待办清单
 

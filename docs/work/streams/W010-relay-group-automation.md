@@ -1,19 +1,20 @@
 # W010 飞书中继：目标群管理、撤回同步、加急告警、链接入群
 
-- state: approved
+- state: building
 - holder: Claude Code 会话 eac0e1fc，2026-10-13
 - goal: 在转发看板里完成建同步群、管理目标群成员、源头撤回后同步撤回、降级告警加急、粘贴邀请链接入群，以及把现有目标群纳入看板管理
 - plan: docs/work/plans/relay-group-automation.md
-- branch: none
-- head: 9d75b5d9
+- branch: 集成分支 `integration/relay-auto`（工作区 `/Users/papa/codebase/.codex-wt/n8n-relay-auto-int`）；base 线 `codex/relay-auto-base`（工作区 `/Users/papa/codebase/.codex-wt/n8n-relay-auto-base`，处置 merge，目标集成分支）
+- head: 集成分支 6b31c254（main 49a6c2f7 加一份 `feishu-relay/bridge/WEB_GATEWAY.md`）
 - release: none
-- next: 用户确认派工后：从 main 建集成分支 `integration/relay-auto`，把 `docs/work/probes/2026-10-13-relay-auto-p0.out.txt` 和 `…-web-gateway-messages.out.txt` 整理成 `feishu-relay/bridge/WEB_GATEWAY.md` 提交在集成分支上，然后 `mkworktree.sh . relay-auto-base --disposition merge --target integration/relay-auto` 并派 base 线的第一步（bridge 接缝）
+- next: base 线第一步（bridge 接缝和 R 的 bridge 部分）返回后：在工作区里自己跑验收命令和 `bash feishu-relay/scripts/edge/test-bridge-on-edge.sh`，读 `git diff integration/relay-auto...HEAD`，通过后用同一线程续派第二步（adapter 接缝和 R），再第三步（看板）
 - updated: 2026-10-13
 
 ## Requirements
 
 - 2026-10-13 我给出盘点和建议（待办 B030）之后，用户：「可以这些全部推进，请你写好完整计划给codex-flow去执行推进。不同worktree最后merge」
 - 2026-10-13 看过方案要点、写文件被权限分类器拦下的说明、以及探测会打扰到本人账号的两项之后，用户：「同意了，我是trust的」
+- 2026-10-13 看过三轮审查后的改动、探测结果和六个工作区的处置之后，用户：「开始分发工作执行」
 
 ## Plan
 
@@ -24,8 +25,8 @@
 
 ## Steps
 
-- [ ] 0 用户同意方案（已同意）；方案落盘（已落盘）；Codex 方案审查
-- [ ] 1 线上探测与 `WEB_GATEWAY.md`
+- [x] 0 用户同意方案；方案落盘；Codex 方案审查三轮，12 条全部采纳，r4 — 399e0fc5
+- [x] 1 线上探测 P0-1 至 P0-7 与 `WEB_GATEWAY.md` — 集成分支 6b31c254；输出在 `docs/work/probes/2026-10-13-relay-auto-p0*.out.txt`（P0-8 在 base 合并后做）
 - [ ] 2 base 线
 - [ ] 3 五条功能线
 - [ ] 4 合并、发布、线上验收
@@ -57,6 +58,8 @@
   `PutUrgent {messageId, chatterIds, urgentType: 'APP', chatId}` 成功，响应 `{urgent: {messageId, type: 1, sendTime, fromId}, chatterIds, urgentAckIds: {<对方>: <ackId>}}`；
   `PullUrgentsAckStatus {messageIds}` 返回 `urgentAcks[<messageId>].urgentAckList[]`，每项有 `ackId`、`toId`、`type`、`status`、`phoneStatus`。
   至此 P0-1 至 P0-7 全部通过，方案里没有因探测失败要拿掉的功能；P0-8 按方案在 base 合并后做。
+- 2026-10-13 17:45 用户确认派工。建集成分支和它的工作区，提交 `WEB_GATEWAY.md`（6b31c254）；建 base 工作区并快进到集成分支；
+  派 base 线第一步给 Codex（`danger-full-access`，`gpt-5.6-sol` high）。
 
 ## Waiting on the user
 
@@ -66,11 +69,14 @@
 - [x] 2026-10-13 运行 P0-6、P0-7 的脚本 → 用户在对话里发了这条命令（前面带空格，没有被当作 shell 命令执行），本会话据此代为运行，17:32 完成，两项都通过（见 Log）。原说明：运行 `! bash docs/work/probes/2026-10-13-relay-auto-p0-c.sh`（P0-6 加急、P0-7 拉人和移除）。为什么等：这两项会通知用户本人的飞书账号，
   agent 执行被权限分类器拒绝。之后：读同目录生成的 `…-p0-c.out.txt`，把结果并进 `WEB_GATEWAY.md`；不运行的话，U（加急）和 M 里的“移除成员”
   按没试过处理——要么从方案里拿掉，要么上线后由用户第一次使用时验收。
-- [ ] 2026-10-13 看过方案审查后的改动，同意派工（codex-flow 的派工前确认）。之后：建集成分支 `integration/relay-auto`，写 `WEB_GATEWAY.md`，派 base 线。
+- [x] 2026-10-13 看过方案审查后的改动，同意派工 → 「开始分发工作执行」（2026-10-13）。原说明：之后：建集成分支 `integration/relay-auto`，写 `WEB_GATEWAY.md`，派 base 线。
 
 ## Running
 
 - [x] 2026-10-13 16:20 Codex 方案审查（线程 01a1342e）→ 17:20 三轮结束，共 12 条意见全部采纳，方案 r4；结果记在 Plan 一节和方案末尾。原说明：  之后：逐条裁决，改方案或写明不采纳的理由，再审一轮（最多 3 轮）。该调用挂在会话 eac0e1fc 上，会话结束它就停；接手者重新发起审查即可。
+- [ ] 2026-10-13 17:45 Codex 实现者在做 base 线第一步（cwd `/Users/papa/codebase/.codex-wt/n8n-relay-auto-base`）。结束标志：MCP 调用返回，
+  分支 `codex/relay-auto-base` 在 6b31c254 之后有新提交且工作区 `git status --short` 为空。之后：见 `next`。该调用挂在会话 eac0e1fc 上，
+  会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从没做完的地方接着派（方案和 `WEB_GATEWAY.md` 都在工作区里）。
 
 ## Due
 
@@ -90,9 +96,10 @@
 
 ## Resume here
 
-方案 r4 已批准、审查完（三轮，12 条全部采纳）并落盘；线上探测 P0-1 至 P0-7 全部通过并存档。还没有建集成分支，也没有派工，
-仓库里没有本线的代码改动。唯一在等的是用户对“派工”的确认（Waiting on the user 里没勾的那一项）。
-得到确认后的第一步见 `next`：建 `integration/relay-auto`，把三份探测输出（`docs/work/probes/2026-10-13-relay-auto-p0.out.txt`、
-`…-p0-c.out.txt`、`…-web-gateway-messages.out.txt`）整理成 `feishu-relay/bridge/WEB_GATEWAY.md` 提交在集成分支上，再派 base 线。
-不要再跑 P0-1（会再建一个群）和 P0-c 脚本（会再打扰用户一次）。“中继自测群”（7696053062053530578）是留着的试验场，已是看板目标群。
-codex-flow 的要求照做：实现者用 `danger-full-access`，每步 15 分钟以内，双重评审，合并要用户同意，结束时回收工作区并报告 token 开销。
+已开始派工。集成分支 `integration/relay-auto`（6b31c254）有自己的工作区，用来提交、合并和跑验收；base 线的工作区已建，
+第一步（bridge）在 Codex 手里（见 Running）。base 线还有第二步（adapter）和第三步（看板），三步都做完、双重评审通过后合进集成分支，
+再做探测 P0-8，然后从集成分支拉五条功能线并行派。
+先跑 `bash ~/codebase/agent-skills/own/codex-flow/scripts/lsworktrees.sh . --target integration/relay-auto` 看各工作区的状态。
+mkworktree 用主检出的 HEAD 作基点：建好功能线的工作区后要在里面 `git merge --ff-only integration/relay-auto`，评审的 diff 用
+`integration/relay-auto...HEAD`。本机跑不到导入 `bridge.py` 的测试，每条线合并前要在 edge 上跑完整 bridge 套件。
+不要再跑 P0-1 和 P0-c 脚本。合并进 main、发布都要用户同意；结束时回收工作区并报告 token 开销。
