@@ -366,6 +366,18 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertEqual(summary["judged_minutes"], 0)
         self.assertEqual(summary["rows_without_data_times"], 1)
 
+        incomplete_persisted = []
+
+        async def empty_snapshot():
+            return CapabilityEvidence(rows=[], warnings=("no_trade_rows=5579",), available_at_max=NOW)
+
+        incomplete_runtime, _ = self.dependencies(
+            fetch=empty_snapshot, recent=reference, persisted=incomplete_persisted,
+        )
+        asyncio.run(incomplete_runtime.capture(NOW))
+        self.assertEqual(incomplete_persisted[0][4]["status"], "incomplete")
+        self.assertIsNone(incomplete_persisted[0][4]["comparison"])
+
     def test_data_times_across_open_or_before_continuous_session_are_not_same_segment(self):
         from app.all_a_snapshot_sources import project_tdx_snapshot_rows
         from app.tdx_shadow_snapshot_runtime import _comparison_row
