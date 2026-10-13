@@ -16,7 +16,10 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 async function loadDaily(day?: string) {
-  daily.value = await getJson<LimitUpRiskDaily>(`/api/research/market/limit-up-risk/daily${day ? `?date=${encodeURIComponent(day)}` : ''}`);
+  // Two literal paths: the relay route contract test reads each research path up to its '?'.
+  daily.value = day
+    ? await getJson<LimitUpRiskDaily>(`/api/research/market/limit-up-risk/daily?date=${encodeURIComponent(day)}`)
+    : await getJson<LimitUpRiskDaily>('/api/research/market/limit-up-risk/daily');
   if (!day && daily.value.reading) tradeDate.value = daily.value.reading.trade_date;
 }
 
