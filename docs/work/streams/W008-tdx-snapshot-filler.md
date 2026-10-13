@@ -6,7 +6,7 @@
 - plan: docs/work/plans/tdx-live-snapshot-fallback.md
 - branch: codex/tdx-promote-gate
 - head: 26170231
-- next: 等 Codex 交回派工 4（B3 的目录部分：一致性按“占比达标”判定），在工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate` 跑验收并读 diff；派工 5 之前先向用户问清发布分类器那一问（见 Waiting on the user）；第一个分支的发布脚本已备好，等用户执行
+- next: 等 Codex 交回派工 4（B3 的目录部分：一致性按“占比达标”判定），在工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate` 跑验收并读 diff；派工 5 之前先向用户问清发布分类器那一问（见 Waiting on the user）；第一个分支已于 10 月 13 日 17:41 发布
 - updated: 2026-10-13
 
 ## Requirements
@@ -78,9 +78,11 @@
 
 - 2026-10-13 17:37 第一个分支合并：评审三轮（主会话读 diff 无发现；Codex 评审者两条高优先级发现都已修），合并提交 26170231（12 个文件，+504 −26），发布路径测试 3050 项通过（主会话在分支末端复跑）。合并的同意见 Requirements 里用户 17:1x 的话。工作区回收被脚本拒绝一次（十分钟内还有 Codex 会话活动），稍后重试：`bash ~/codebase/agent-skills/own/codex-flow/scripts/finishworktree.sh /Users/papa/codebase/n8n tdx-shadow-measure --apply`。`scripts/release plan 26170231` 的结论：owner 纯代码覆盖（10 个运行时文件），edge 没有要发的。Codex 用量：实现者线程 1,433 万（其中缓存 1,358 万）、评审者线程 304 万。发布脚本和干净的发布检出（`/Users/papa/codebase/.codex-wt/n8n-release-26170231`）已备好。
 
+- 2026-10-13 17:43 第一个分支发布：用户 17:41 执行短路径包装脚本（推送 main 到 147e589b，owner 纯代码发布 `owner-code-20261013-04`，源 26170231）。核对：`release-sync-status.sh` ALL CHECKS PASSED（输出 `docs/work/probes/2026-10-13-release-status-04.out.txt`）；两个容器实际导入的是 `owner-code-20261013-04`；当日汇总命令在生产上即刻返回（238 份快照，可判分钟 0，因为当天的比对行是发布前写的）；回看接口 `track?days=60` 返回 59 天。已记入 `docs/RELEASE_SYNC_47.md`。新节拍的第一次真实运行在 10 月 14 日 09:15（见 Due）。
+
 ## Waiting on the user
 
-- [ ] 2026-10-13 17:37 执行第一个分支的发布：`! bash ~/codebase/n8n/state/rel04.sh --apply`（同一脚本的短路径副本；原路径太长，用户 17:40 粘贴时在换行处被拆开，命令没有执行）（先推送 main，再做 owner 纯代码发布 `owner-code-20261013-04`，从 29f3ffdf 到 26170231，10 个运行时文件）。为什么等：owner 发布和推送只能用户做。可发的时段：18:45 之前，或 22:05 之后，或次日 11:30–13:00、15:10–18:45。发布内容：两条采集循环的节拍、通达信完整性门槛、按数据时间比对、当日汇总，以及回看接口的修复（B011）。要知道的风险：改了主行情采集循环，它只在交易时段运行，第一次真实运行是下一个交易日 09:15，那时处在不能发布的窗口；agent 会在 09:16–09:20 核对两条采集都按第 50、52 秒落库，异常就立即告诉用户回滚到 `owner-code-20261013-03`。之后：agent 跑 `scripts/release-sync-status.sh`、做方案 “Verification after release” 一节的检查、把发布记进 `docs/RELEASE_SYNC_47.md`，从这次发布起累计 5 个交易日的达标观察。
+- [x] 2026-10-13 执行第一个分支的发布（`! bash ~/codebase/n8n/state/rel04.sh --apply`） → 用户 17:41 执行，`owner-code-20261013-04` 生效（2026-10-13）；核对见 Log
 
 - [x] 2026-10-13 批准 W008 方案第 3 版（`docs/work/plans/tdx-live-snapshot-fallback.md`）并开工吗？为什么等：动工前要用户批准（`codex-flow` 第 3 步），而且里面有三件只有用户能定的事。请一并回答：(1) 是否同意在发布分类器里给 `scripts/tdx-promote.py` 加“只在工作站运行”的规则（同意：两次发布都是纯代码发布；不同意：派工 4–5 的分支要等派工 6–10 的分支一起合并，发布 B 走全量发布）；(2) 升级前要看几个交易日，方案取 5 个（写进目录常量 `min_sessions`，由工具把关），可以改；(3) 最后一轮审查后改的那一处（名册取主源已存文档的上游总数，读不到就不补）没有再审：按现在的写法开工，还是先让 Codex 加审一轮。执行：Codex `gpt-5.6-sol` / high；三个工作区依次是 `tdx-shadow-measure`、`tdx-promote-gate`、`tdx-live-snapshot-fallback`，都是 disposition merge、target main，路径由 `mkworktree.sh` 给出（应在 `/Users/papa/codebase/.codex-wt/` 下）。之后：建第一个工作区，派工 1。 → 「批准开工」（2026-10-13 15:25）；(1) 未明确回答，另列一条
 - [ ] 2026-10-13 是否同意在发布分类器里把 `scripts/tdx-promote.py` 列为“只在工作站运行”的工具（改的是 `scripts/shared-peer/classify-owner-paths.sh` 的规则）？为什么等：这是发布安全规则的改动，方案要求用户明确同意。同意：派工 5 带上这条规则，两次发布都是纯代码发布。不同意：派工 4–5 的分支等派工 6–10 的分支一起合并，发布 B 走全量发布。派工 5 开始前需要答案；派工 1–4 不受影响。
@@ -99,6 +101,8 @@
 - [x] 2026-10-13 13:50 主会话派出的接手 agent 在做：查清四个前置问题（只读）、把方案改到第 3 版、送 Codex 审查（最多三轮）、更新本记录并提交。结束标志：它交回最终方案和待用户批准的问题，本记录的 Plan 一节写了各轮审查结果。之后：主会话把方案转给用户请批准。该 agent 挂在主会话上，主会话结束它就停：接手者看本记录的 Log 和方案文件的修订说明，从没做完的那一步继续。 → 2026-10-13 15:25 做完交回：方案第 3 版、三轮审查、待批准的问题都在本记录里；没做成的只有收盘后重跑容差探针（见 Due）。
 
 ## Due
+
+- [ ] 2026-10-14 09:16 发布后第一个交易时段：核对两条采集循环按新节拍落库。只读查 owner（探针写法见 `docs/work/README.md`）：`quant.raw_market_observations` 里当天 `fuyao_ths` / `a_share_minute_cross_section` 和 `tdx_public` / `a_share_minute_cross_section_shadow` 的 `effective_at`，09:15 起每分钟各一份、秒数稳定（主源在第 50 秒之后几秒、通达信在第 52 秒之后），没有漏分钟。异常（没有文档、或漏得比原来多）立刻告诉用户：回滚命令是把 `owner-code-20261013-03` 重新发布，但 08:30–11:30 是不能发布的窗口，要用户决定是否破例。收盘后跑当日汇总看可判分钟数和是否达标，记为 5 个交易日观察的第 1 天。
 
 - [x] 2026-10-13 16:00 重跑容差探针取全天的表 → 17:33 完成（2026-10-13）：全天通达信 238 份、主源 244 份；数据时刻间隔 15 秒以内的 19 个分钟（14:17 那次是 15 个），19 个都达到“95% 的股票相差 0.5% 以内”，最低仍是 97.46%，规则的取值站得住。当天按“至少 30 个可判分钟”不算达标，这是修采集节拍之前的数据，间隔中位数 46 秒；P1 上线后两边差 2 秒，可判分钟会多得多。输出已覆盖到 `docs/work/probes/2026-10-13-tdx-tolerance.out.txt`，FACTS F016 已改；方案里引用的“15 个分钟”是 14:17 的数，方案正文没有改
 

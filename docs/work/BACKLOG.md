@@ -105,16 +105,6 @@
 - needs: 无
 - updated: 2026-10-13
 
-### B011 回看接口日历上界的修复待发布
-
-- state: ready
-- kind: follow-up
-- why: 大面风险分和竞价处置表的回看接口把日历里未来的交易日算进“最近 N 天”；修复 7bb29e71 已在主线，没发布。主线有本地提交没推送（数目用 `git log --oneline origin/main..HEAD | wc -l` 看；本机的 origin/main 引用停在 ac15bcde，没有 fetch 过就可能偏旧）：这个修复、发布记录、调研归档，其余是笔记；推送由用户做
-- how: 随下一次 owner 纯代码发布上线；发布后 `track?days=60` 返回的天数应接近 60
-- who: 用户执行发布；agent 核对
-- needs: 下一次 owner 发布（预计随 W006）
-- updated: 2026-10-13
-
 ### B012 盘中卖出规则
 
 - state: open
@@ -314,6 +304,18 @@
 - updated: 2026-10-13
 
 ## Closed
+
+### B011 回看接口日历上界的修复待发布
+
+- state: done
+- kind: follow-up
+- why: 大面风险分和竞价处置表的回看接口把日历里未来的交易日算进“最近 N 天”；修复 7bb29e71 已在主线，没发布。主线有本地提交没推送（数目用 `git log --oneline origin/main..HEAD | wc -l` 看；本机的 origin/main 引用停在 ac15bcde，没有 fetch 过就可能偏旧）：这个修复、发布记录、调研归档，其余是笔记；推送由用户做
+- how: 随下一次 owner 纯代码发布上线；发布后 `track?days=60` 返回的天数应接近 60
+- who: 用户执行发布；agent 核对
+- needs: 下一次 owner 发布（预计随 W006）
+- result: 2026-10-13 17:41 随 `owner-code-20261013-04` 发布；`track?days=60` 返回 59 天
+- updated: 2026-10-13
+
 
 ### B030 LarkAgentX 还能自动化的事：目标群管理、撤回同步、加急告警等
 

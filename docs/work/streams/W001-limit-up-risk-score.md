@@ -6,8 +6,8 @@
 - plan: docs/work/plans/limit-up-distribution-scores.md
 - branch: none
 - head: 932f6b5c
-- release: owner-code-20261013-02
-- next: “回看接口把未来交易日算进最近 N 天”的修复（7bb29e71，见 BACKLOG B011）随下一次 owner 发布上线后，关闭本记录
+- release: owner-code-20261013-04
+- next: 10 月 13 日 19:30 之后核对当晚的涨停榜和风险分读数已自动生成（见 Due），通过后把本记录改成 `closed`
 - updated: 2026-10-13
 
 ## Requirements
@@ -24,7 +24,7 @@
 - [x] 后端：读数 `limit_up_risk_daily`、九个系数、与研究逐只一致的夹具 — 合并 dff8acee
 - [x] 页面、中继路由、回看提速与“近期是否有效” — 合并 857e4832
 - [x] 修复 `daily()` 返回窗口里最早读数的错误 — 5e2d159a
-- [ ] 回看接口日历上界修复 — 7bb29e71，已在主线，未发布
+- [x] 回看接口日历上界修复 — 7bb29e71 — 随 `owner-code-20261013-04` 发布（2026-10-13 17:41）；`track?days=60` 返回 59 天（修复前 1 天），`days=250` 返回 249 天
 
 ## Log
 
