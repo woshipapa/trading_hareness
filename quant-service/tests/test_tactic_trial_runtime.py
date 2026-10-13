@@ -281,5 +281,33 @@ class TacticTrialRuntimeTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
 
 
+class EveningTests(unittest.TestCase):
+    def test_the_evening_run_is_blocked_without_the_days_inputs_and_otherwise_runs_in_order(self):
+        day = date(2026, 10, 14)
+        calls = []
+
+        def step(name, result):
+            def run(_database, _day, **_kwargs):
+                calls.append(name)
+                return result
+            return run
+
+        with mock.patch.object(runtime, "refresh_auction", step("auction", {"status": "not_ready"})), \
+             mock.patch.object(runtime, "refresh_close", step("close", {"status": "blocked"})), \
+             mock.patch.object(runtime, "settle", step("settle", {"days": []})), \
+             mock.patch.object(runtime, "summarise", step("summarise", {"summary": {}})):
+            self.assertEqual(runtime.evening(Database(), day)["status"], "blocked")
+            self.assertEqual(calls, ["auction", "close"], "nothing is settled or summarised on a day without its inputs")
+        calls.clear()
+        with mock.patch.object(runtime, "refresh_auction", step("auction", {"status": "completed"})), \
+             mock.patch.object(runtime, "refresh_close", step("close", {"status": "already_stored"})), \
+             mock.patch.object(runtime, "settle", step("settle", {"days": [{"trade_date": "2026-10-13", "slot": "close", "complete": True}]})), \
+             mock.patch.object(runtime, "summarise", step("summarise", {"summary": {"lines": 80}})):
+            result = runtime.evening(Database(), day)
+        self.assertEqual(calls, ["auction", "close", "settle", "summarise"])
+        self.assertEqual((result["status"], result["close"], result["summary"]), ("completed", "already_stored", {"lines": 80}))
+        self.assertTrue(result["research_only"])
+
+
 if __name__ == "__main__":
     unittest.main()

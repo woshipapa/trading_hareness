@@ -271,6 +271,23 @@ def summarise(database: Any, as_of: date, *, apply: bool = True) -> dict[str, An
                                   "bytes": len(json.dumps(summary, ensure_ascii=False, default=str))}})
 
 
+def evening(database: Any, trade_date: date) -> dict[str, Any]:
+    """One session's evening run: the day's two readings, what the bars now settle, the summary.
+
+    Started by the peer's evening loop after the day's limit-up risk reading exists (decision 0021). The receipt of
+    that stage closes on ``completed`` only; ``blocked`` (the day's lists or risk reading are missing) is tried again.
+    """
+    auction = refresh_auction(database, trade_date)
+    close = refresh_close(database, trade_date)
+    if close["status"] == "blocked":
+        return _research({"status": "blocked", "trade_date": trade_date.isoformat(),
+                          "reason": "the day's limit lists or its risk reading are not stored"})
+    settled = settle(database, trade_date)
+    summary = summarise(database, trade_date)
+    return _research({"status": "completed", "trade_date": trade_date.isoformat(), "close": close["status"],
+                      "auction": auction["status"], "settled": settled["days"], "summary": summary["summary"]})
+
+
 def _report_view(report: Mapping[str, Mapping[str, int]]) -> dict[str, dict[str, Any]]:
     return {year: {"days_built": value["days"], "rows": value["rows"],
                    "skipped_days": value["skipped_days"],
@@ -442,4 +459,4 @@ if __name__ == "__main__":
     main()
 
 
-__all__ = ["refresh_auction", "refresh_close", "replay", "settle", "summarise"]
+__all__ = ["refresh_auction", "evening", "refresh_close", "replay", "settle", "summarise"]

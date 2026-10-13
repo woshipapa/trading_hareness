@@ -3155,6 +3155,7 @@ async def peer_close_research_loop() -> None:
     ever ran by hand until this loop (see ``peer_close_research``).
     """
     from .peer_close_research import PeerCloseDependencies, run_peer_close_loop
+    from .tactic_trial_runtime import evening as tactic_trial_evening
     # Late-bound so a test that patches one of these names in app.main still reaches the loop.
     await run_peer_close_loop(PeerCloseDependencies(
         database=db, run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs),
@@ -3169,6 +3170,9 @@ async def peer_close_research_loop() -> None:
         call_longhu=(lambda request: shared_stock_api_call(request)) if longhu_vendor_configured() else None,
         refresh_broad_etf_flow=lambda day: refresh_broad_etf_flow(db, day, run_database=run_database_blocking),
         refresh_market_timing=lambda day: refresh_market_timing(db, day, run_database=run_database_blocking),
+        # Decision 0022: the tactic trial ledger's evening run. Its inputs are the two stages before it.
+        tactic_trials=(lambda day: run_database_blocking(tactic_trial_evening, db, day, timeout_seconds=590))
+        if longhu_vendor_configured() else None,
     ))
 
 

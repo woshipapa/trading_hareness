@@ -156,7 +156,28 @@ class ProductStageTests(unittest.TestCase):
         deps = product_deps(now=at(self.TODAY, 16, 30))
         bare = PeerCloseDependencies(**{**deps.__dict__, "call_longhu": None})
         self.assertEqual(set(peer_stages(bare)), set(STAGES[:5]))
-        self.assertEqual(set(peer_stages(deps)), set(STAGES[:8]))
+        self.assertEqual(set(peer_stages(deps)) - set(STAGES[:5]),
+                         {"peer_limit_performance_lists", "peer_limit_up_risk", "peer_market_temperature"})
+
+    def test_the_tactic_ledger_runs_after_the_risk_reading_and_only_when_it_completed(self):
+        self.assertEqual(peer.STAGE_DEPENDENCIES["peer_tactic_trials"], "peer_limit_up_risk")
+        self.assertLess(STAGES.index("peer_limit_up_risk"), STAGES.index("peer_tactic_trials"))
+        ran = []
+
+        def stage(name, status):
+            async def run(_day):
+                ran.append(name)
+                return {"status": status}
+            return run
+
+        async def record(_name, _day, action):
+            return await action()
+
+        stages = {"peer_limit_performance_lists": stage("lists", "completed"), "peer_limit_up_risk": stage("risk", "blocked"),
+                  "peer_tactic_trials": stage("tactics", "completed")}
+        result = asyncio.run(run_due(self.TODAY, stages=stages, record=record))
+        self.assertEqual(ran, ["lists", "risk"])
+        self.assertEqual(result["stages"]["peer_tactic_trials"], "blocked")
 
     def test_the_session_before_skips_the_holiday(self):
         self.assertEqual(asyncio.run(previous_session(date(2026, 9, 28), calendar_open_with_gap)), date(2026, 9, 24))
