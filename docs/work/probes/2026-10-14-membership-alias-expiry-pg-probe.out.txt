@@ -1,0 +1,12 @@
+ok   columns before: 0
+ok   schema run twice adds the columns once: [{"column_name":"alias","data_type":"text","is_nullable":"YES","column_default":null},{"column_name":"expiry_fixed","data_type":"boolean","is_nullable":"NO","column_default":"false"}]
+ok   an old row reads with an empty alias and a counted expiry: [["a1","",false,"2026-11-23",[]]]
+ok   sync stores the aliases: [["a1","阿明 823三个月","2026-08-23"],["a2","小华 到12月底 918","2026-09-18"],["a3","","2026-10-01"]]
+ok   the list offers what each alias says: [["a1",["08-23 起 3 个月"]],["a2",["到 12-31","09-18 起"]],["a3",[]]]
+ok   a typed expiry date is kept: ["2026-09-18","2026-12-31",true,"小华 到12月底 918"]
+ok   …also when the exempt flag is sent with it: ["2026-12-31",true]
+ok   saving without one counts from the term again: ["2026-12-18",false]
+ok   an expiry before the start is refused: "到期日不能早于开始日期"
+ok   a typed expiry in the past is reviewed like any other: [["a3","2026-10-08","已到期"]]
+ok   the alias changes with Feishu at the next sync, the dates do not: [["阿明 1123三个月","2026-08-23","2026-11-23","手填"]]
+ALL STEPS PASSED
