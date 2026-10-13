@@ -108,8 +108,8 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
   `Route` 可带 `internal: true`：分发函数先按现有内部入口的做法校验 `x-larkagentx-token`。
   执行完 `schema` 后，对有 `start()` 的功能对象调用一次 `start()`（D 用它定时把观察名单发给 bridge）。
   `targetRegistry` 提供 `onChange(listener)`，由它**自己的写方法**通知监听者：`resolve()` 写表后、`record(target)`（登记或更新一行）、
-  `forget(chatId)`（删一行）。`/api/group-relay/targets` 新增和删除目标群的两个处理分支（`index.mjs`，base 改）成功后分别调用
-  `record` 和 `forget`；C 建好同步群后也调用 `record`。这样任何途径加减目标群都会通知到，功能线不需要碰 `index.mjs`。
+  `forget(chatId)`（删一行）。`/api/group-relay/targets` 新增和删除目标群的两个处理分支（`index.mjs`，base 改）成功后分别触发
+  `resolve`（后台）和 `forget`；C 建好同步群后调用 `record`。这样任何途径加减目标群都会通知到，功能线不需要碰 `index.mjs`。
 - 给 U 和 D 预先接好的三处调用（空壳里是什么都不做的函数，功能线只改自己的模块）：
   `notifyOps`（第 109 行）在原有的发运维群之后 `await urgentAlerts.notify(key, text)`；
   创建 group relay 时把 `deliveryCheck.recordWebhookDelivery` 和 `deliveryCheck.recallDeliveries` 传进去；
@@ -125,7 +125,10 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
 - 每个功能模块的 `createXxx(deps)` 收到同一组依赖：`{ ledger, bridgePost, targetRegistry, webhookTargets, refreshGroups, now }`，其中
   `bridgePost` 就是 `index.mjs` 里的 `bridgePostJson(pathname, payload, timeoutMs)`，`refreshGroups` 是 `() => groupSync.requestRefresh()`
   （J 和 C 加群、建群后用它）。功能线要用的都在这里面，不需要再改 `index.mjs`。
-- `webhookTargets.addressHashes()` 返回 `[{ chatId, hash }]`（每个运行中的 webhook 地址的 sha256 十六进制），R 用它；地址本身仍不出模块。
+- `webhookTargets.webhookHashes()` 返回 `[{ chat_id, webhook_hash }]`（每个运行中的 webhook 地址的 sha256 十六进制），R 用它；地址本身仍不出模块。
+- `targetRegistry` 通知监听者时，某个监听者失败只记日志，不让 `record` / `forget` / `resolve` 失败（通知是旁路）。
+- `/api/group-relay/targets` 新增成功后在后台跑一次 `targetRegistry.resolve()`（补上数字群 ID、机器人和是否群主），删除成功后调 `forget`；
+  `resolve()` 只更新它对上的行，不清空表。
 
 **看板**
 - 新增一级栏目 `targets`（“目标群”）：`App.vue` 的菜单、标题、视图切换；`useFeishuDashboardWorkspace.ts` 里四处：
