@@ -460,6 +460,27 @@
 - needs: 无
 - updated: 2026-10-13
 
+### B051 W010 其余 adapter 模块的 SQL 没在真实 PostgreSQL 上跑过
+
+- state: doing
+- kind: follow-up
+- stream: W010
+- why: 会员模块的三处问题（`date` 列读成 `Date`、参数被推断成 interval、提前返回盖住报错）都是手写的假数据库测不出来的；`delivery-check`、`urgent-alerts`、`target-groups`、`target-registry`、`target-members`、`join-link`、`webhook-targets`、`source-tags` 是同一种测法
+- how: 按 `docs/work/probes/2026-10-13-memberships-pg-probe.mjs` 的办法，在本地临时 `postgres:16-alpine` 上用 node-pg 把每个模块的每条语句跑一遍；失败的在集成分支修并热更新。2026-10-13 23:00 已派只读子任务（W010 的 Running）
+- who: agent
+- needs: 无
+- updated: 2026-10-13
+
+### B052 会员期限：指定到期日；读个人资料里的备注信息
+
+- state: ready
+- kind: follow-up
+- why: 期限只能填整月，anqiang 群有两人是“到 12 月底”；备注名（alias）能读，个人资料里的备注信息（memo）这套库没有对应的消息定义，读不到
+- how: 会员行加一个可选的到期日，填了就不按月数算；memo 要先从网页端代码里找到接口和消息结构
+- who: agent
+- needs: 用户说要不要做
+- updated: 2026-10-13
+
 ### B050 owner 上只用一套镜像，以后的发布都是代码覆盖
 
 - state: doing

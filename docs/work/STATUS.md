@@ -14,7 +14,7 @@
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | building | Claude Code 会话 93ba6e1d，2026-10-13 | 取数排在 10 月 13 日 22:06 自动续取（主会话的后台命令，先查新主机可用内存不低于 150 MB 和 `/health`，带 `--until=23:50`）。日志末行是 FINISHED 就核对 6 个基金文件各约 749 行、`SZ399001` 补到 749 行，然后用同一线程（01a134cc-8eb1-76f0-9aec-6bb66827ce98）派研究第 2 步：先做登记里基金文件的两项核对（第三个值是否累计均价、成交量单位），再做五类因素各自对照基准；`SZ399001` 补齐的 7 天要让它重建派生表。末行是 PAUSED 或没启动，就在非交易时段重跑 `next` 里原来的命令 | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | released | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 10 月 14 日 09:16 核对新服务器上两条采集循环按新节拍落库（见 Due）；然后从 main 建 `tdx-live-snapshot-fallback` 工作区派工 6（B1 的读取链）。当日汇总从 10 月 14 日起才有可判的分钟：收盘后跑一次并把输出存到 `docs/work/probes/`，记为五个交易日观察的第 1 天 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
-| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户在看板上试用后按反馈改；用户第一次真实使用时核对三件没在线上看到的事：(1) 会员到期提醒真的 @ 到别的租户的成员；(2) 一条文字转发被核对上、源头撤回后目标群同步撤回；(3) 一键建同步群走通全程。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
+| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 等其余模块的真实数据库检查（Running）出结果并处理；用户在看板上改完 anqiang 群剩下的 7 个会员后，按用户的意思打开或不打开每天自动审查；用户第一次真实使用时核对没在线上看到的事（Open questions）。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
 | [W011](streams/W011-peer-evening-stages.md) | 每晚该跑的阶段由我们这一侧自己触发 | planned | Claude Code 会话 93ba6e1d（主会话），2026-10-13 | 等 Codex 对方案的只读审计（新线程，主会话的后台调用；结论是 SOUND 或逐条异议），按异议改方案，把最终方案的要点给用户看一眼后建工作区 `peer-evening-stages` 派工（两次）。目标是 10 月 14 日 15:10–18:45 的窗口发布，当晚第一次自动运行 | 2026-10-13 |
 | [W012](streams/W012-owner-hot-releases.md) | owner 只用一套镜像，其余改动全部热部署 | planned | Claude Code 会话 93ba6e1d（主会话），2026-10-13 | 送 Codex 做方案审计（只读，新线程；W011 的审计也还在跑，两个都回来后一起处理），按异议改方案，把最终方案的要点给用户看，然后建工作区 `owner-hot-releases` 派工（四次）。这条线改的是发布安全规则，合并前要双评审，第一次真实使用要用户在场并演练一次回滚 | 2026-10-13 |
 
@@ -22,8 +22,8 @@
 
 - W004 2026-10-13 请看一下控制台“盘面雷达与战法”页签的新图，配色、数字口径、点的密度是否还要调。为什么等：这是按用户的参考图做的，是否“看得懂”只有用户能判断。之后：没有意见就关闭本记录。
 - W010 2026-10-13 刷新看板的“目标群”页，确认登记表有数据、按钮不再转圈。为什么等：本会话连不上浏览器，只能用组件测试验证渲染。之后：仍有问题就按报告的现象继续查。
+- W010 2026-10-13 在看板上改 anqiang 群剩下的 7 个会员（会员表里备注栏为空的 7 行：两人是“到 12 月底”，一人三个月外加假期，一人备注名和对话不一致，三人没有期限信息；
 - W010 2026-10-13 在看板上试用七项功能并反馈；特别是会员期限：对真实目标群第一次“同步成员”后，老成员的开始日期是各自的入群日期、期限是默认的 1 个月，
-- W010 2026-10-13 确认 anqiang 群 6 个不确定成员的开始日期和期限，并决定是否把推断结果写进会员表。为什么等：这些只有用户知道；写进去之后会影响到期提醒。之后：先在看板对该目标群“同步成员”，再逐个写入。
 
 ## 到点要做
 
@@ -37,10 +37,11 @@
 
 - W011 2026-10-13 22:20 Codex 方案审计在跑（只读，新线程）。结束标志：它交回 SOUND 或编号的异议。之后见 next。挂在主会话 93ba6e1d 上。
 - W007 2026-10-13 22:31 取数在跑（主会话的后台命令）。结束标志：`state/research/vshape_20261013/data/fetch.log` 末行 FINISHED / PAUSED / ABORT。主会话结束或本机合盖它就停，重跑 next 里的命令即可。
+- W010 2026-10-13 23:00 只读子任务：把 `delivery-check`、`urgent-alerts`、`target-groups`、`target-registry`、`target-members`、`join-link`、`webhook-targets`、`source-tags`
 
 ## 待办清单
 
-open 29, ready 13, doing 2, waiting-user 1, done 4, dropped 1
+open 29, ready 14, doing 3, waiting-user 1, done 4, dropped 1
 
 在做的、可以开工的、等用户处理的:
 
@@ -59,4 +60,6 @@ open 29, ready 13, doing 2, waiting-user 1, done 4, dropped 1
 - B047 (ready) 目标群识别在启动时失败后不重试
 - B048 (ready) 目标群功能里查群主失败时不带飞书的原因
 - B049 (ready) W010 评审里没改的小项
+- B051 (doing) W010 其余 adapter 模块的 SQL 没在真实 PostgreSQL 上跑过
+- B052 (ready) 会员期限：指定到期日；读个人资料里的备注信息
 - B050 (doing) owner 上只用一套镜像，以后的发布都是代码覆盖
