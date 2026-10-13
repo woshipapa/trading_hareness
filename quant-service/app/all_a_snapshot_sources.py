@@ -12,6 +12,27 @@ from .datasources.catalog import BINDINGS
 _TDX_BINDING = next(item for item in BINDINGS
                     if item.source == "tdx_public" and item.capability == "quote.all_a_snapshot")
 _TDX_VOLUME_FACTOR = _TDX_BINDING.spec.unit_factors["volume"]
+TDX_SNAPSHOT_MIN_COMPLETE_SHARE = 0.95
+TDX_SNAPSHOT_ROSTER_FLOOR = 5000
+
+
+def tdx_snapshot_completeness(priced_rows: int, warnings: Iterable[str],
+                              roster_total: int | None) -> dict[str, Any]:
+    no_trade_rows = next(
+        (int(warning.removeprefix("no_trade_rows="))
+         for warning in warnings if warning.startswith("no_trade_rows=")),
+        0,
+    )
+    roster = max(priced_rows + no_trade_rows, roster_total or 0, TDX_SNAPSHOT_ROSTER_FLOOR)
+    share = priced_rows / roster
+    return {
+        "priced_rows": priced_rows,
+        "no_trade_rows": no_trade_rows,
+        "roster_total": roster_total,
+        "roster": roster,
+        "share": share,
+        "complete": roster_total is not None and share >= TDX_SNAPSHOT_MIN_COMPLETE_SHARE,
+    }
 
 
 def project_tdx_snapshot_rows(rows: Iterable[Mapping[str, Any]], observed_at: datetime) -> list[dict[str, Any]]:
@@ -101,4 +122,7 @@ def compare(fuyao_rows: Iterable[Mapping[str, Any]], tdx_rows: Iterable[Mapping[
     }
 
 
-__all__ = ["compare", "project_tdx_snapshot_rows"]
+__all__ = [
+    "TDX_SNAPSHOT_MIN_COMPLETE_SHARE", "TDX_SNAPSHOT_ROSTER_FLOOR", "compare",
+    "project_tdx_snapshot_rows", "tdx_snapshot_completeness",
+]

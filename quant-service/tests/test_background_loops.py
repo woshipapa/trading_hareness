@@ -14,6 +14,7 @@ from app import storage_tiering_mover as mover_module
 from app.level1_snapshot_runtime import Level1CaptureDependencies, level1_capture
 from app.peer_close_research import PeerCloseDependencies, peer_stages, run_peer_close_loop
 from app.storage_tiering_mover import run_mover_loop
+from app.tdx_shadow_snapshot_runtime import run_tdx_shadow_snapshot_loop
 
 
 class Stop(Exception):
@@ -27,6 +28,16 @@ def stop_after(rounds: int, delays: list[float]):
             raise Stop
 
     return sleep
+
+
+class WallClock:
+    def __init__(self, value: float) -> None:
+        self.value = value
+
+    async def sleep(self, delay: float) -> None:
+        self.value += delay
+        if getattr(self, "stop_after", None) == len(getattr(self, "starts", [])):
+            raise Stop
 
 
 async def run_inline(action, *args, **_kwargs):
@@ -180,6 +191,65 @@ class Level1CaptureTests(unittest.TestCase):
         with patch.object(level1, "run_level1_snapshot_loop", fake_loop):
             asyncio.run(level1.run_level1_capture_service(level1_deps(fetch=None, health=[])))
         self.assertEqual(seen["interval_seconds"], 60)
+
+    def test_capture_starts_on_second_50_for_40_rounds(self):
+        clock = WallClock(1_000_010)
+        starts = []
+        clock.starts = starts
+        clock.stop_after = 40
+
+        async def capture():
+            starts.append(clock.value)
+            clock.value += 1.8
+            return {"status": "completed"}
+
+        with self.assertRaises(Stop):
+            asyncio.run(level1.run_level1_snapshot_loop(
+                interval_seconds=60, capture=capture, clock=lambda: clock.value, sleep=clock.sleep,
+            ))
+        self.assertEqual(len(starts), 40)
+        self.assertTrue(all(round(start % 60, 3) == 50 for start in starts))
+
+    def test_capture_overrun_skips_the_next_slot(self):
+        clock = WallClock(1_000_010)
+        starts = []
+        clock.starts = starts
+        clock.stop_after = 2
+        logs = []
+
+        async def capture():
+            starts.append(clock.value)
+            clock.value += 61
+            return {"status": "completed"}
+
+        with self.assertRaises(Stop):
+            asyncio.run(level1.run_level1_snapshot_loop(
+                interval_seconds=60, capture=capture, clock=lambda: clock.value, sleep=clock.sleep,
+                log=logs.append,
+            ))
+        self.assertEqual([round(start % 60) for start in starts], [50, 50])
+        self.assertIn("skipped", " ".join(logs))
+
+
+class TdxShadowLoopTests(unittest.TestCase):
+    def test_capture_starts_on_second_52_for_40_rounds(self):
+        clock = WallClock(1_000_010)
+        starts = []
+        clock.starts = starts
+        clock.stop_after = 40
+
+        class Runtime:
+            async def capture(self):
+                starts.append(clock.value)
+                clock.value += 3.5
+                return {"status": "completed"}
+
+        with self.assertRaises(Stop):
+            asyncio.run(run_tdx_shadow_snapshot_loop(
+                Runtime(), interval_seconds=60, clock=lambda: clock.value, sleep=clock.sleep,
+            ))
+        self.assertEqual(len(starts), 40)
+        self.assertTrue(all(round(start % 60, 3) == 52 for start in starts))
 
 
 if __name__ == "__main__":  # pragma: no cover

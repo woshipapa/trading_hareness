@@ -3177,12 +3177,21 @@ market_radar = MarketRadarRuntime(MarketRadarDependencies(
     run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs), database=db,
     persist_timed_observations=lambda *args: persist_timed_observations(*args)))
 
+
+async def tdx_shadow_roster_total() -> int | None:
+    def read() -> int | None:
+        with db.transaction() as connection:
+            return minute_cross_section.latest_main_total(connection)
+
+    return await run_tdx_shadow_blocking(read, timeout_seconds=10)
+
 tdx_shadow_runtime = TdxShadowSnapshotRuntime(TdxShadowSnapshotDependencies(
     fetch_snapshot=fetch_tdx_all_a_snapshot,
     run_database=run_tdx_shadow_blocking,
     database=db,
     recent_reference=minute_cross_section.recent,
     storage_allowed=tdx_shadow_storage_allowed,
+    roster_total=tdx_shadow_roster_total,
 ))
 
 auction_pool_runtime = AuctionPoolCaptureRuntime(AuctionPoolCaptureDependencies(
