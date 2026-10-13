@@ -8,13 +8,14 @@ from typing import Any, Mapping, Sequence
 from .limit_up_risk import _seal_minutes, _seal_time
 
 HISTORY_FIELDS = (
-    "turnover_vs_max250", "runup_20", "close_vs_high60",
+    "vr", "turnover_vs_max250", "runup_20", "close_vs_high60",
     "cost_share_below_close", "cost_share_0_30_above",
 )
 
 
-def _adjusted(row: Mapping[str, Any], field: str) -> float:
-    return float(row[field]) * float(row["adj_factor"])
+def _price(row: Mapping[str, Any], field: str, adjusted: bool) -> float:
+    value = float(row[field])
+    return value * float(row["adj_factor"]) if adjusted else value
 
 
 def _amount_cny(row: Mapping[str, Any]) -> float:
@@ -22,11 +23,20 @@ def _amount_cny(row: Mapping[str, Any]) -> float:
     return float(row["amount"]) * 1000.0
 
 
-def history_features(window: Sequence[Mapping[str, Any]]) -> dict[str, float | None]:
+def history_features(window: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Compute the close-day history features from oldest-first bars."""
     current = window[-1]
     previous = list(window[:-1])
-    features: dict[str, float | None] = {}
+    adjusted = all(row.get("adj_factor") is not None and float(row["adj_factor"]) > 0 for row in window)
+    features: dict[str, float | None] = {
+        "history_basis": "adjusted" if adjusted else "unadjusted_missing_adj_factor",
+    }
+
+    recent = previous[-20:]
+    features["vr"] = (
+        _amount_cny(current) / (sum(_amount_cny(row) for row in recent) / len(recent))
+        if len(recent) >= 10 else None
+    )
 
     if len(previous) < 60:
         features["turnover_vs_max250"] = None
@@ -37,13 +47,13 @@ def history_features(window: Sequence[Mapping[str, Any]]) -> dict[str, float | N
     if len(window) < 21:
         features["runup_20"] = None
     else:
-        features["runup_20"] = _adjusted(current, "close") / _adjusted(window[-21], "close") - 1
+        features["runup_20"] = _price(current, "close", adjusted) / _price(window[-21], "close", adjusted) - 1
 
     if len(previous) < 60:
         features["close_vs_high60"] = None
     else:
-        highest = max(_adjusted(row, "high") for row in previous[-60:])
-        features["close_vs_high60"] = _adjusted(current, "close") / highest - 1
+        highest = max(_price(row, "high", adjusted) for row in previous[-60:])
+        features["close_vs_high60"] = _price(current, "close", adjusted) / highest - 1
 
     valid = []
     for age, row in enumerate(reversed(previous[-120:]), 1):
@@ -51,14 +61,16 @@ def history_features(window: Sequence[Mapping[str, Any]]) -> dict[str, float | N
         if volume <= 0:
             continue
         weight = volume * pow(0.5, age / 20.0)
-        average_price = _amount_cny(row) / (volume * 100.0) * float(row["adj_factor"])
+        average_price = _amount_cny(row) / (volume * 100.0)
+        if adjusted:
+            average_price *= float(row["adj_factor"])
         valid.append((weight, average_price))
     if len(valid) < 20:
         features["cost_share_below_close"] = None
         features["cost_share_0_30_above"] = None
     else:
         total = sum(weight for weight, _price in valid)
-        close = _adjusted(current, "close")
+        close = _price(current, "close", adjusted)
         features["cost_share_below_close"] = sum(weight for weight, price in valid if price < close) / total
         features["cost_share_0_30_above"] = sum(
             weight for weight, price in valid if close <= price < close * 1.30
@@ -85,7 +97,9 @@ def build_trial_row(
         "main_net": decoded["main_net"], "turnover": decoded["turnover"], "float_cap": decoded["float_cap"],
         "reopened": decoded["reopened"], "sealed_from_open": _seal_minutes(decoded["first_seal_time"]) == 0,
         "one_word": float(bar["high"]) == float(bar["low"]),
-        "vr": risk_row.get("vr"), "gap": risk_row.get("gap"), "risk_rank": risk_row.get("risk_rank"),
+        "vr": features["vr"],
+        "gap": float(bar["open"]) / float(bar["pre_close"]) - 1,
+        "risk_rank": risk_row.get("risk_rank"),
         "theme_count": sum(row["sector"] == sector for row in decoded_rows),
         **{field: features[field] for field in HISTORY_FIELDS},
     }
