@@ -35,7 +35,7 @@
 
 ## 待办清单
 
-open 18, ready 9, done 1, dropped 1
+open 19, ready 9, done 1, dropped 1
 
 可以开工或等用户处理的:
 
