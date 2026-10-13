@@ -111,6 +111,8 @@ export function createLedger(connectionString) {
 			CREATE TABLE IF NOT EXISTS feishu_group_history_messages (source_chat_id text NOT NULL, source_message_id text NOT NULL, position bigint, source_create_time bigint NOT NULL, message jsonb NOT NULL, fetched_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (source_chat_id, source_message_id));
 			CREATE INDEX IF NOT EXISTS feishu_group_history_messages_time_idx ON feishu_group_history_messages(source_chat_id, source_create_time);
 			CREATE TABLE IF NOT EXISTS feishu_group_relay_webhook_targets (chat_id text PRIMARY KEY, chat_name text NOT NULL, webhook_ciphertext text NOT NULL, keyword text NOT NULL, websocket_chat_id text, verified_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
+			ALTER TABLE feishu_group_relay_webhook_targets ADD COLUMN IF NOT EXISTS bot_id text;
+			ALTER TABLE feishu_group_relay_webhook_targets ADD COLUMN IF NOT EXISTS managed boolean NOT NULL DEFAULT false;
 			ALTER TABLE feishu_group_chat_state ADD COLUMN IF NOT EXISTS removed_route jsonb;
 			ALTER TABLE feishu_group_chat_state ADD COLUMN IF NOT EXISTS route_removed_at timestamptz;
 			CREATE TABLE IF NOT EXISTS feishu_summary_listener_state (listener_key text PRIMARY KEY, chat_id text NOT NULL, cursor_create_time bigint NOT NULL, last_source_create_time bigint, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
@@ -188,13 +190,14 @@ export function createLedger(connectionString) {
 		async saveSourceProfile(route, defaultTopicKey = 'general') { await saveSourceProfile(route, defaultTopicKey); },
 		// Target groups whose custom-bot webhook was entered in the dashboard. The address is stored encrypted.
 		async webhookTargets() {
-			const { rows } = await pool.query('SELECT chat_id,chat_name,webhook_ciphertext,keyword,websocket_chat_id,verified_at,created_at,updated_at FROM feishu_group_relay_webhook_targets ORDER BY created_at,chat_id');
+			const { rows } = await pool.query('SELECT chat_id,chat_name,webhook_ciphertext,keyword,websocket_chat_id,bot_id,managed,verified_at,created_at,updated_at FROM feishu_group_relay_webhook_targets ORDER BY created_at,chat_id');
 			return rows;
 		},
-		async saveWebhookTarget({ chatId, chatName, webhookCiphertext, keyword, websocketChatId = null, verifiedAt = null }) {
-			const { rows } = await pool.query(`INSERT INTO feishu_group_relay_webhook_targets(chat_id,chat_name,webhook_ciphertext,keyword,websocket_chat_id,verified_at) VALUES($1,$2,$3,$4,$5,$6)
-				ON CONFLICT(chat_id) DO UPDATE SET chat_name=EXCLUDED.chat_name,webhook_ciphertext=EXCLUDED.webhook_ciphertext,keyword=EXCLUDED.keyword,websocket_chat_id=EXCLUDED.websocket_chat_id,verified_at=EXCLUDED.verified_at,updated_at=now()
-				RETURNING chat_id,chat_name,webhook_ciphertext,keyword,websocket_chat_id,verified_at,created_at,updated_at`, [chatId, chatName, webhookCiphertext, keyword, websocketChatId, verifiedAt]);
+		// `managed` marks a target whose bot the relay created itself (bot_id), so removing the target can remove the bot.
+		async saveWebhookTarget({ chatId, chatName, webhookCiphertext, keyword, websocketChatId = null, botId = null, managed = false, verifiedAt = null }) {
+			const { rows } = await pool.query(`INSERT INTO feishu_group_relay_webhook_targets(chat_id,chat_name,webhook_ciphertext,keyword,websocket_chat_id,bot_id,managed,verified_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+				ON CONFLICT(chat_id) DO UPDATE SET chat_name=EXCLUDED.chat_name,webhook_ciphertext=EXCLUDED.webhook_ciphertext,keyword=EXCLUDED.keyword,websocket_chat_id=EXCLUDED.websocket_chat_id,bot_id=EXCLUDED.bot_id,managed=EXCLUDED.managed,verified_at=EXCLUDED.verified_at,updated_at=now()
+				RETURNING chat_id,chat_name,webhook_ciphertext,keyword,websocket_chat_id,bot_id,managed,verified_at,created_at,updated_at`, [chatId, chatName, webhookCiphertext, keyword, websocketChatId, botId, managed, verifiedAt]);
 			return rows[0];
 		},
 		async deleteWebhookTarget(chatId) {

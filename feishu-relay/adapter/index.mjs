@@ -263,7 +263,15 @@ if (!['skip_existing', 'forward_existing'].includes(groupRelayBootstrapMode)) {
 const groupRelayWebhooksByChatId = parseRelayMap(process.env.FEISHU_GROUP_RELAY_WEBHOOKS);
 const groupRelayWebhookKeywordsByChatId = parseRelayMap(process.env.FEISHU_GROUP_RELAY_WEBHOOK_KEYWORDS);
 // Targets entered in the dashboard are added to the same two maps, so the relay needs no restart for them.
-const webhookTargets = createWebhookTargets({ ledger, secret: appSecret, webhooks: groupRelayWebhooksByChatId, keywords: groupRelayWebhookKeywordsByChatId });
+// `bots` is how a target gets its bot without anyone making one by hand: the
+// bridge has the account's own session create the group's relay bot.
+const webhookTargets = createWebhookTargets({
+	ledger, secret: appSecret, webhooks: groupRelayWebhooksByChatId, keywords: groupRelayWebhookKeywordsByChatId,
+	bots: {
+		ensure: ({ chatId, keyword }) => bridgePostJson('/chat-bots/ensure', { chat_id: chatId, keyword }, 60_000),
+		remove: ({ chatId, botId }) => bridgePostJson('/chat-bots/remove', { chat_id: chatId, bot_id: botId }, 30_000),
+	},
+});
 const webhookTargetsLoaded = await webhookTargets.load();
 if (webhookTargetsLoaded.unreadable) console.error(`有 ${webhookTargetsLoaded.unreadable} 个看板配置的目标群 webhook 无法解密，需要在看板里重新填写`);
 const groupRelayConfig = {
@@ -2599,10 +2607,14 @@ const dashboard = createServer((request, response) => {
 	}
 	if (url.pathname === '/api/group-relay/targets' && request.method === 'POST') {
 		// Saving sends one test message to the group through the webhook; a
-		// webhook that refuses it is not stored.
+		// webhook that refuses it is not stored.  Without a webhook address the
+		// group's relay bot is created (or found) through the account's session.
 		void readJsonBody(request, 16 * 1024).then(async (payload) => {
-			const target = await webhookTargets.add({ name: payload?.name, webhookUrl: payload?.webhook_url, keyword: payload?.keyword, websocketChatId: payload?.websocket_chat_id, chatId: payload?.chat_id });
-			console.log(`目标群 ${target.name}（${target.chat_id}）的 webhook 已由看板配置并通过测试`);
+			const typed = String(payload?.webhook_url ?? '').trim();
+			const target = typed
+				? await webhookTargets.add({ name: payload?.name, webhookUrl: typed, keyword: payload?.keyword, websocketChatId: payload?.websocket_chat_id, chatId: payload?.chat_id })
+				: await webhookTargets.addManaged({ name: payload?.name, websocketChatId: payload?.websocket_chat_id, keyword: payload?.keyword });
+			console.log(`目标群 ${target.name}（${target.chat_id}）的 webhook 已由看板配置并通过测试${typed ? '' : target.bot_created ? '；机器人为自动创建' : '；沿用已有的转发机器人'}`);
 			response.writeHead(201, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 			response.end(JSON.stringify({ target }));
 		}).catch((error) => response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
@@ -2613,7 +2625,7 @@ const dashboard = createServer((request, response) => {
 		void ledger.relayRoutes().then(async (routes) => {
 			const removed = await webhookTargets.remove(relayTargetMatch[1], { routes });
 			if (!removed) { response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: '目标群不存在' })); return; }
-			response.writeHead(204, { 'cache-control': 'no-store' }).end();
+			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify({ status: 'removed', bot_removed: removed.bot_removed }));
 		}).catch((error) => response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
 		return;
 	}

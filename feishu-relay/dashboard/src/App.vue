@@ -50,7 +50,7 @@ const dashboard = useFeishuDashboardWorkspace();
         <el-select v-model="dashboard.groupRelayRouteForm.target_chat_ids" multiple filterable allow-create default-first-option placeholder="选择目标群（可多选）" style="width: 100%">
           <el-option v-for="target in dashboard.relayTargetOptions" :key="target.value" :value="target.value" :label="target.label" />
         </el-select>
-        <el-text size="small" type="info">列表里是已配置好 webhook 的目标群。要转发到一个新的群：<el-button link type="primary" @click="dashboard.openTargetDialog()">新增目标群</el-button></el-text>
+        <el-text size="small" type="info">列表里是已配置好的目标群。要转发到一个新的群：<el-button link type="primary" @click="dashboard.openTargetDialog()">新增目标群</el-button>（选群即可，机器人自动创建）</el-text>
       </el-form-item>
       <el-collapse class="section-gap"><el-collapse-item title="高级（一般不用填）">
         <el-form-item label="源群官方 chat_id（仅 OAuth 补读用）"><el-input v-model="dashboard.groupRelayRouteForm.chat_id" placeholder="oc_xxx" /></el-form-item>
@@ -61,18 +61,26 @@ const dashboard = useFeishuDashboardWorkspace();
     <template #footer><el-button @click="dashboard.groupRelayRouteDialog = false">取消</el-button><el-button type="primary" :loading="dashboard.groupRelayRouteSaving" @click="dashboard.saveGroupRelayRoute">保存</el-button></template>
   </el-dialog>
 
-  <el-dialog v-model="dashboard.targetDialog" :title="dashboard.targetForm.chat_id ? '更换目标群的 webhook' : '新增目标群'" width="560px" destroy-on-close append-to-body>
+  <el-dialog v-model="dashboard.targetDialog" :title="dashboard.targetForm.chat_id ? '重新配置目标群' : '新增目标群'" width="560px" destroy-on-close append-to-body>
     <el-form label-position="top" @submit.prevent="dashboard.saveRelayTarget">
-      <el-alert title="先在飞书里打开目标群：设置 → 群机器人 → 添加机器人 → 自定义机器人，安全设置选“自定义关键词”。再把机器人的 webhook 地址和关键词填到这里。保存时会向该群发一条测试消息，发不出去就不保存。" type="info" :closable="false" show-icon class="section-gap" />
+      <el-form-item label="机器人">
+        <el-radio-group v-model="dashboard.targetForm.mode">
+          <el-radio-button value="auto">自动创建机器人</el-radio-button>
+          <el-radio-button value="manual">手动填写 webhook</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+      <el-alert v-if="dashboard.targetForm.mode === 'auto'" title="选一个本账号已加入的群即可：系统用本账号在群里添加一个名为“转发机器人”的自定义机器人并设好关键词，群里已有它就直接沿用。保存时会向该群发一条测试消息。" type="info" :closable="false" show-icon class="section-gap" />
+      <el-alert v-else title="用于账号不在的群，或想用已有的机器人：在飞书里打开目标群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人，安全设置选“自定义关键词”，再把 webhook 地址和关键词填到这里。保存时会向该群发一条测试消息，发不出去就不保存。" type="info" :closable="false" show-icon class="section-gap" />
       <el-form-item label="目标群" required>
         <el-select :model-value="dashboard.targetForm.websocket_chat_id || dashboard.targetForm.name" filterable allow-create default-first-option :loading="dashboard.joinedGroupsLoading" placeholder="选择已加入的群，或输入群名" style="width: 100%" @change="dashboard.pickTargetGroup">
           <el-option v-for="group in dashboard.pickableGroups" :key="group.chat_id" :value="group.chat_id" :label="group.name || group.chat_id" />
         </el-select>
       </el-form-item>
-      <el-form-item label="机器人 webhook 地址" required><el-input v-model="dashboard.targetForm.webhook_url" type="password" show-password autocomplete="off" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" /></el-form-item>
-      <el-form-item label="关键词" required><el-input v-model="dashboard.targetForm.keyword" maxlength="40" placeholder="机器人安全设置里填的自定义关键词" /></el-form-item>
+      <el-form-item v-if="dashboard.targetForm.mode === 'manual'" label="机器人 webhook 地址" required><el-input v-model="dashboard.targetForm.webhook_url" type="password" show-password autocomplete="off" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" /></el-form-item>
+      <el-form-item v-if="dashboard.targetForm.mode === 'manual'" label="关键词" required><el-input v-model="dashboard.targetForm.keyword" maxlength="40" placeholder="机器人安全设置里填的自定义关键词" /></el-form-item>
+      <el-form-item v-else label="关键词（可不填）"><el-input v-model="dashboard.targetForm.keyword" maxlength="40" placeholder="默认：转发。每条转发消息里会带上它，机器人靠它放行" /></el-form-item>
     </el-form>
-    <template #footer><el-button @click="dashboard.targetDialog = false">取消</el-button><el-button type="primary" :loading="dashboard.targetSaving" @click="dashboard.saveRelayTarget">发测试消息并保存</el-button></template>
+    <template #footer><el-button @click="dashboard.targetDialog = false">取消</el-button><el-button type="primary" :loading="dashboard.targetSaving" @click="dashboard.saveRelayTarget">{{ dashboard.targetForm.mode === 'auto' ? '创建机器人并保存' : '发测试消息并保存' }}</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="dashboard.bundleDialog" :title="`导出资料包 · ${dashboard.bundleRoute?.chat_name ?? ''}`" width="560px" destroy-on-close>

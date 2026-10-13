@@ -20,7 +20,8 @@ type ItouguProductTarget = { business_product_id?: string; name?: string; target
 type ItouguStatus = { status?: string; state?: string; service?: string; observed_at?: string; updated_at?: string | null; started_at?: string | null; heartbeat_age_seconds?: number | null; stale_after_seconds?: number; message?: string | null; last_poll_started_at?: string | null; last_poll_completed_at?: string | null; last_success_at?: string | null; last_error?: string | null; last_trigger?: string | null; manual_refresh_count?: number; consecutive_error_count?: number; poll_count?: number; failure_count?: number; sent_count?: number; interval_seconds?: number; off_hours_interval_seconds?: number; midday_interval_seconds?: number; trading_hours_only?: boolean; current_window?: string | null; next_poll_in_seconds?: number; products?: { business_product_id?: string; name?: string }[]; product_targets?: ItouguProductTarget[]; target_chat_ids?: string[]; article_target_chat_ids?: string[]; webhook_config?: WebhookConfigStatus & { keyword_chat_ids?: string[] } };
 type GroupRelayStatus = { status?: string; observed_at?: string; enabled?: boolean; interval_seconds?: number; stale_after_seconds?: number; user_oauth_configured?: boolean; user_oauth_scope_audit?: OAuthScopeAudit | null; user_oauth_refresh_expires_at?: string | null; user_oauth_access_expires_at?: string | null; target_configured?: boolean; delivery_verified?: boolean; last_tick_started_at?: string | null; last_tick_completed_at?: string | null; last_tick_error?: string | null; writer?: RelayWriterStatus; delivery_outbox?: DeliveryOutboxStatus; webhook_config?: WebhookConfigStatus; webhook_targets?: WebhookTarget[]; source_tags?: SourceTagStatus[]; larkagentx?: LarkAgentXStatus; itougu?: ItouguStatus; sources?: GroupRelaySourceStatus[]; summary_listener?: SummaryListenerStatus };
 type GroupRelayRouteForm = { key: string; chat_name: string; chat_id: string; websocket_chat_id: string; tag: string; target_chat_ids: string[]; target_chat_names_text: string; enabled: boolean; ingest: boolean };
-type RelayTargetForm = { chat_id: string; websocket_chat_id: string; name: string; webhook_url: string; keyword: string };
+// 'auto': the relay creates the group's bot itself. 'manual': the address of a bot somebody made by hand is typed in.
+type RelayTargetForm = { mode: 'auto' | 'manual'; chat_id: string; websocket_chat_id: string; name: string; webhook_url: string; keyword: string };
 type FeishuCapability = { key: string; label: string; category: string; enabled: boolean; configured: boolean; resource_configured?: boolean; implementation_ready?: boolean; authorization_subject?: 'user' | 'tenant'; authorization_status?: 'verified' | 'missing' | 'unknown' | 'awaiting_verification' | 'not_required'; missing_user_scopes?: string[]; missing_tenant_scopes?: string[]; requires: string[]; note: string };
 type FeishuEventSubscription = { event_type: string; label: string; required_for: string; handler_registered: boolean; state: 'received' | 'awaiting_callback'; received_count?: number; last_received_at?: string | null };
 type FeishuApplicationInspection = { status?: 'not_checked' | 'verified' | 'missing_inspection_scope' | 'error'; checked_at?: string | null; scopes?: string[]; app_status?: number | null; target_chat?: { status?: 'not_checked' | 'not_configured' | 'verified' | 'error'; message?: string }; message?: string };
@@ -29,7 +30,7 @@ type FeishuWorkbenchMessage = { source_message_id: string; route_tag: string; so
 type WorkbenchIntegrationKind = 'documents' | 'wiki-documents' | 'base-records' | 'calendar-events' | 'approvals';
 
 const defaultRouteForm = (): GroupRelayRouteForm => ({ key: '', chat_name: '', chat_id: '', websocket_chat_id: '', tag: '', target_chat_ids: [], target_chat_names_text: '', enabled: true, ingest: true });
-const defaultTargetForm = (): RelayTargetForm => ({ chat_id: '', websocket_chat_id: '', name: '', webhook_url: '', keyword: '' });
+const defaultTargetForm = (): RelayTargetForm => ({ mode: 'auto', chat_id: '', websocket_chat_id: '', name: '', webhook_url: '', keyword: '' });
 const normalizeTag = (tag: string) => tag.trim().replace(/^#/, '').toLowerCase();
 
 export function useFeishuRelayWorkspace() {
@@ -404,7 +405,7 @@ export function useFeishuRelayWorkspace() {
     finally { feishuWorkbenchAction.value = ''; }
   }
   function openTargetDialog(target?: WebhookTarget) {
-    targetForm.value = target?.chat_id ? { chat_id: target.chat_id, websocket_chat_id: target.websocket_chat_id ?? '', name: target.name ?? '', webhook_url: '', keyword: target.keyword ?? '' } : defaultTargetForm();
+    targetForm.value = target?.chat_id ? { mode: target.managed ? 'auto' : 'manual', chat_id: target.chat_id, websocket_chat_id: target.websocket_chat_id ?? '', name: target.name ?? '', webhook_url: '', keyword: target.keyword ?? '' } : defaultTargetForm();
     targetDialog.value = true; void loadJoinedGroups();
   }
   function pickTargetGroup(chatId: string) {
@@ -415,18 +416,27 @@ export function useFeishuRelayWorkspace() {
   async function saveRelayTarget() {
     const form = targetForm.value; targetSaving.value = true;
     try {
-      const { target } = await groupRelayApi.addTarget({ chat_id: form.chat_id || undefined, websocket_chat_id: form.websocket_chat_id || undefined, name: form.name.trim(), webhook_url: form.webhook_url.trim(), keyword: form.keyword.trim() });
+      const auto = form.mode === 'auto';
+      if (auto && !form.websocket_chat_id) throw new Error('自动创建机器人需要从列表里选一个已加入的群；不在列表里的群请改用“手动填写”');
+      const { target } = await groupRelayApi.addTarget(auto
+        ? { websocket_chat_id: form.websocket_chat_id, name: form.name.trim(), keyword: form.keyword.trim() || undefined }
+        : { chat_id: form.chat_id || undefined, websocket_chat_id: form.websocket_chat_id || undefined, name: form.name.trim(), webhook_url: form.webhook_url.trim(), keyword: form.keyword.trim() });
       // The address is not kept in the page once it is saved.
       targetDialog.value = false; targetForm.value = defaultTargetForm();
-      ElMessage.success(`目标群「${target.name ?? target.chat_id}」已配置，测试消息已发到群里`);
+      ElMessage.success(`目标群「${target.name ?? target.chat_id}」已配置${auto ? (target.bot_created ? '，机器人已自动创建' : '，沿用群里已有的转发机器人') : ''}，测试消息已发到群里`);
       await loadGroupRelayStatus();
       if (groupRelayRouteDialog.value && !groupRelayRouteForm.value.target_chat_ids.includes(target.chat_id)) groupRelayRouteForm.value.target_chat_ids.push(target.chat_id);
     } catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
     finally { targetSaving.value = false; }
   }
   async function removeRelayTarget(target: WebhookTarget) {
-    try { await ElMessageBox.confirm(`删除目标群「${target.name ?? target.chat_id}」的 webhook 配置？删除后不能再转发到它。`, '删除目标群', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }); } catch { return; }
-    try { await groupRelayApi.removeTarget(target.chat_id); ElMessage.success('目标群已删除'); await loadGroupRelayStatus(); }
+    try { await ElMessageBox.confirm(`删除目标群「${target.name ?? target.chat_id}」的 webhook 配置？删除后不能再转发到它。${target.managed ? '群里自动创建的转发机器人会一并移除。' : ''}`, '删除目标群', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }); } catch { return; }
+    try {
+      const removed = await groupRelayApi.removeTarget(target.chat_id);
+      if (removed.bot_removed === false) ElMessage.warning('目标群已删除，但群里的转发机器人没能移除，请在飞书里手动移除');
+      else ElMessage.success(removed.bot_removed ? '目标群已删除，群里的转发机器人已移除' : '目标群已删除');
+      await loadGroupRelayStatus();
+    }
     catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
   }
   function openCreateGroupRelayRoute(group?: JoinedGroup) {

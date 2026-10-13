@@ -79,9 +79,9 @@ export default defineComponent({
         <el-table :data="relayTargets" size="small" max-height="260">
           <el-table-column label="目标群" min-width="240"><template #default="{ row }"><div>{{ row.name ?? '（服务器配置，未命名）' }}</div><small class="group-relay-age">{{ row.chat_id }}</small></template></el-table-column>
           <el-table-column label="Webhook keyword" min-width="120"><template #default="{ row }">{{ row.keyword ?? '—' }}</template></el-table-column>
-          <el-table-column label="来源" width="110"><template #default="{ row }"><el-tag size="small" effect="plain" :type="row.origin === 'dashboard' ? 'primary' : 'info'">{{ row.origin === 'dashboard' ? '看板配置' : '服务器配置' }}</el-tag></template></el-table-column>
+          <el-table-column label="来源" width="110"><template #default="{ row }"><el-tag size="small" effect="plain" :type="row.origin === 'dashboard' ? 'primary' : 'info'">{{ row.origin === 'dashboard' ? (row.managed ? '自动创建' : '看板配置') : '服务器配置' }}</el-tag></template></el-table-column>
           <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag size="small" :type="row.usable ? 'success' : 'danger'">{{ row.usable ? 'URL 已加载' : '需重新填写' }}</el-tag></template></el-table-column>
-          <el-table-column label="操作" width="150"><template #default="{ row }"><template v-if="row.origin === 'dashboard'"><el-button link type="primary" size="small" @click="openTargetDialog(row)">更换地址</el-button><el-button link type="danger" size="small" @click="removeRelayTarget(row)">删除</el-button></template></template></el-table-column>
+          <el-table-column label="操作" width="150"><template #default="{ row }"><template v-if="row.origin === 'dashboard'"><el-button link type="primary" size="small" @click="openTargetDialog(row)">{{ row.managed ? '重新配置' : '更换地址' }}</el-button><el-button link type="danger" size="small" @click="removeRelayTarget(row)">删除</el-button></template></template></el-table-column>
         </el-table>
         <el-alert v-if="(groupRelayStatus.webhook_config?.missing_keyword_chat_ids?.length ?? 0) > 0" class="section-gap" type="error" :closable="false" :title="`缺少关键词：${groupRelayStatus.webhook_config?.missing_keyword_chat_ids?.join('、')}`"/>
       </el-card>

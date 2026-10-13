@@ -22,9 +22,14 @@ export type WebhookTarget = {
   origin: 'env' | 'dashboard';
   /** false when the stored address can no longer be read and must be entered again. */
   usable: boolean;
+  /** The relay created this group's bot itself; removing the target removes the bot. */
+  managed?: boolean;
+  /** Only in the answer to a save without a webhook address: whether a bot was created or an existing relay bot was found. */
+  bot_created?: boolean;
   websocket_chat_id?: string | null; verified_at?: string | null; created_at?: string | null;
 };
-export type WebhookTargetInput = { chat_id?: string; websocket_chat_id?: string; name: string; webhook_url: string; keyword: string };
+/** Without `webhook_url` the relay creates the group's bot itself; the group must then come from the joined list. */
+export type WebhookTargetInput = { chat_id?: string; websocket_chat_id?: string; name: string; webhook_url?: string; keyword?: string };
 /** Downstream registration of one source tag. */
 export type SourceTagStatus = { tag: string; registered: boolean; enabled: boolean; origin: 'file' | 'dashboard' | null; label: string | null };
 
@@ -155,5 +160,5 @@ export const groupRelayApi = {
   removeRoute: <T>(key: string) => deleteJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}`),
   // Saving sends one test message to the group; a webhook that refuses it is not stored.
   addTarget: (input: WebhookTargetInput) => postJson<{ target: WebhookTarget }>('/api/group-relay/targets', input),
-  removeTarget: <T>(chatId: string) => deleteJson<T>(`/api/group-relay/targets/${encodeURIComponent(chatId)}`),
+  removeTarget: (chatId: string) => deleteJson<{ status?: string; bot_removed?: boolean | null }>(`/api/group-relay/targets/${encodeURIComponent(chatId)}`),
 };

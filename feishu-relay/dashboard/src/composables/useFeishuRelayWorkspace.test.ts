@@ -56,7 +56,12 @@ describe('useFeishuRelayWorkspace', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       if (method !== 'GET') writes.push({ url, method, body: JSON.parse(String(init?.body ?? '{}')) });
-      if (url === '/api/group-relay/targets') return jsonResponse({ target: { chat_id: 'wh_000000000000000000000001', name: '三叔外部同步群', keyword: 'sanshu', origin: 'dashboard', usable: true } });
+      if (url === '/api/group-relay/targets') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        // No address in the request: the relay makes the bot itself.
+        return jsonResponse({ target: { chat_id: 'wh_000000000000000000000001', name: '三叔外部同步群', keyword: body.keyword ?? '转发', origin: 'dashboard', usable: true, ...(body.webhook_url ? {} : { managed: true, bot_created: true }) } });
+      }
+      if (url.startsWith('/api/group-relay/targets/')) return jsonResponse({ status: 'removed', bot_removed: true });
       if (url.startsWith('/api/group-relay/routes')) return jsonResponse({ route: { key: 'r1', tag: 'rccs', chat_name: '新群', state: 'healthy' } });
       if (url.startsWith('/api/group-relay/chats')) return jsonResponse({ observed_at: '', live: true, error: null, groups: [], sync: {} });
       return jsonResponse(status);
@@ -117,7 +122,9 @@ describe('useFeishuRelayWorkspace', () => {
 
     workspace.openCreateGroupRelayRoute();
     workspace.openTargetDialog();
-    Object.assign(workspace.targetForm.value, { name: ' 三叔外部同步群 ', webhook_url: ' https://open.feishu.cn/open-apis/bot/v2/hook/abcdefgh ', keyword: ' sanshu ' });
+    // The dialog opens in the automatic mode; a typed address belongs to the manual one.
+    expect(workspace.targetForm.value.mode).toBe('auto');
+    Object.assign(workspace.targetForm.value, { mode: 'manual', name: ' 三叔外部同步群 ', webhook_url: ' https://open.feishu.cn/open-apis/bot/v2/hook/abcdefgh ', keyword: ' sanshu ' });
     await workspace.saveRelayTarget();
 
     expect(writes.at(-1)).toEqual({ url: '/api/group-relay/targets', method: 'POST', body: { name: '三叔外部同步群', webhook_url: 'https://open.feishu.cn/open-apis/bot/v2/hook/abcdefgh', keyword: 'sanshu' } });
@@ -125,5 +132,31 @@ describe('useFeishuRelayWorkspace', () => {
     // The address does not stay in the page after it is saved.
     expect(workspace.targetForm.value.webhook_url).toBe('');
     expect(workspace.groupRelayRouteForm.value.target_chat_ids).toEqual(['wh_000000000000000000000001']);
+  });
+
+  it('creates the target group\'s bot itself when a joined group is picked and no address is typed', async () => {
+    const writes = stubRelay(relayStatus);
+    const workspace = useFeishuRelayWorkspace();
+    await workspace.loadGroupRelayStatus();
+
+    // Without a group from the joined list there is no group to add a bot to: nothing is sent.
+    workspace.openTargetDialog();
+    workspace.targetForm.value.name = '账号不在的群';
+    await workspace.saveRelayTarget();
+    expect(writes).toEqual([]);
+    expect(workspace.targetDialog.value).toBe(true);
+
+    workspace.joinedGroups.value = [{ chat_id: '7690000000000000001', name: '三叔外部同步群', member_count: 6, in_directory: true, source_key: null, route_tag: null, membership: 'member', left_at: null, is_new: false, first_seen_at: null, history: null }];
+    workspace.pickTargetGroup('7690000000000000001');
+    await workspace.saveRelayTarget();
+    // Only the group goes out: no address, and no keyword unless one was typed.
+    expect(writes.at(-1)).toEqual({ url: '/api/group-relay/targets', method: 'POST', body: { websocket_chat_id: '7690000000000000001', name: '三叔外部同步群' } });
+    expect(workspace.targetDialog.value).toBe(false);
+
+    // Reconfiguring a relay-made target stays automatic; a typed one stays manual.
+    workspace.openTargetDialog({ chat_id: 'wh_a', name: '自动的', keyword: '转发', origin: 'dashboard', usable: true, managed: true, websocket_chat_id: '7690000000000000001' });
+    expect(workspace.targetForm.value.mode).toBe('auto');
+    workspace.openTargetDialog({ chat_id: 'wh_b', name: '手动的', keyword: 'x', origin: 'dashboard', usable: true });
+    expect(workspace.targetForm.value.mode).toBe('manual');
   });
 });

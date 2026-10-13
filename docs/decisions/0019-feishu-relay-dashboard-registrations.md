@@ -1,6 +1,6 @@
 # 0019 飞书转发：看板登记的来源标签和目标群 webhook 存在中继自己的库里
 
-- 状态：生效（2026-10-13）；实现见 `feishu-relay/adapter/source-tags.mjs`、`webhook-targets.mjs`
+- 状态：生效（2026-10-13）；第 6 条被 0020 取代；实现见 `feishu-relay/adapter/source-tags.mjs`、`webhook-targets.mjs`
 - 日期：2026-10-13
 
 ## 背景

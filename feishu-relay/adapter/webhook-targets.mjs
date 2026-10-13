@@ -5,6 +5,10 @@
 // as they are.  A target added here is checked with one test message, stored
 // with its address encrypted, and put into the same maps, so it is usable at
 // once and after a restart.  The address never leaves this module.
+//
+// The address is either typed in (a bot somebody made by hand) or obtained
+// from `bots`, which has the account's own session create the group's relay
+// bot and hand back its webhook; such a target is `managed`.
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
@@ -13,6 +17,7 @@ const HOOK_PATH = /^\/open-apis\/bot\/v2\/hook\/[A-Za-z0-9-]{8,80}$/;
 // A target the relay knows only by its webhook has no official chat id.
 export const WEBHOOK_ONLY_TARGET_ID = /^wh_[a-f0-9]{24}$/;
 const OFFICIAL_CHAT_ID = /^oc_[A-Za-z0-9]+$/;
+export const DEFAULT_MANAGED_KEYWORD = '转发';
 // What a custom bot answers when its security setting refuses the message.
 const REFUSALS = new Map([
 	[19001, 'webhook 地址无效，机器人可能已被删除'],
@@ -57,7 +62,7 @@ function asIso(value) {
 	return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-export function createWebhookTargets({ ledger, secret, webhooks, keywords, fetchImpl = fetch, now = () => new Date(), newId = () => `wh_${randomBytes(12).toString('hex')}` }) {
+export function createWebhookTargets({ ledger, secret, webhooks, keywords, bots = null, fetchImpl = fetch, now = () => new Date(), newId = () => `wh_${randomBytes(12).toString('hex')}` }) {
 	if (!secret) throw new Error('缺少用于加密 webhook 地址的应用密钥');
 	const key = deriveKey(secret);
 	const envIds = new Set(webhooks.keys());
@@ -68,7 +73,7 @@ export function createWebhookTargets({ ledger, secret, webhooks, keywords, fetch
 		const meta = stored.get(chatId);
 		return {
 			chat_id: chatId, name: meta?.name ?? unreadable.get(chatId) ?? null, keyword: keywords.get(chatId) ?? null,
-			origin: envIds.has(chatId) ? 'env' : 'dashboard', usable: webhooks.has(chatId),
+			origin: envIds.has(chatId) ? 'env' : 'dashboard', usable: webhooks.has(chatId), managed: Boolean(meta?.managed),
 			websocket_chat_id: meta?.websocketChatId ?? null, verified_at: asIso(meta?.verifiedAt), created_at: asIso(meta?.createdAt),
 		};
 	}
@@ -76,7 +81,7 @@ export function createWebhookTargets({ ledger, secret, webhooks, keywords, fetch
 	function apply(row, url) {
 		webhooks.set(row.chat_id, url);
 		keywords.set(row.chat_id, row.keyword);
-		stored.set(row.chat_id, { name: row.chat_name, websocketChatId: row.websocket_chat_id ?? null, verifiedAt: row.verified_at ?? null, createdAt: row.created_at ?? null });
+		stored.set(row.chat_id, { name: row.chat_name, websocketChatId: row.websocket_chat_id ?? null, botId: row.bot_id ?? null, managed: row.managed === true, verifiedAt: row.verified_at ?? null, createdAt: row.created_at ?? null });
 		unreadable.delete(row.chat_id);
 	}
 
@@ -100,30 +105,61 @@ export function createWebhookTargets({ ledger, secret, webhooks, keywords, fetch
 		throw new Error(`测试消息没有发出去：${REFUSALS.get(Number(result?.code)) ?? result?.msg ?? `HTTP ${response.status}`}`);
 	}
 
-	async function add({ name, webhookUrl, keyword, websocketChatId = '', chatId = '' }) {
+	function checkedName(name) {
 		const chatName = String(name ?? '').trim();
 		if (!chatName || chatName.length > 120) throw new Error('请填写 1–120 字的目标群名称');
+		return chatName;
+	}
+
+	function checkedGroupId(websocketChatId) {
+		const wsId = String(websocketChatId ?? '').trim();
+		if (wsId && !/^\d{6,24}$/.test(wsId)) throw new Error('websocket_chat_id 必须是数字群 ID');
+		return wsId;
+	}
+
+	// One address serves one target; the address is tried before it is kept.
+	async function store({ id, chatName, word, url, wsId, botId = null, managed = false }) {
+		for (const [otherId, otherUrl] of webhooks) {
+			if (otherUrl === url && otherId !== id) throw new Error(`这个 webhook 已经配置给目标群 ${stored.get(otherId)?.name ?? otherId}`);
+		}
+		await sendTest(url, `${word} 转发目标群已接入（看板发出的测试消息）`);
+		const row = await ledger.saveWebhookTarget({ chatId: id || newId(), chatName, webhookCiphertext: encrypt(url, key), keyword: word, websocketChatId: wsId || null, botId, managed, verifiedAt: now() });
+		apply(row, url);
+		return publicTarget(row.chat_id);
+	}
+
+	// The same group entered again replaces its address instead of becoming a second target.
+	const targetOfGroup = (wsId) => (wsId ? [...stored].find(([, meta]) => meta.websocketChatId === wsId)?.[0] ?? '' : '');
+
+	async function add({ name, webhookUrl, keyword, websocketChatId = '', chatId = '' }) {
+		const chatName = checkedName(name);
 		const word = String(keyword ?? '').trim();
 		if (!word || word.length > 40) throw new Error('请填写机器人安全设置里的关键词（1–40 字）');
 		const url = parseWebhookUrl(webhookUrl);
-		const wsId = String(websocketChatId ?? '').trim();
-		if (wsId && !/^\d{6,24}$/.test(wsId)) throw new Error('websocket_chat_id 必须是数字群 ID');
+		const wsId = checkedGroupId(websocketChatId);
 		let id = String(chatId ?? '').trim();
 		if (id) {
 			if (envIds.has(id)) throw new Error('这个目标群由服务器环境变量配置，不能在看板里修改');
 			const known = stored.has(id) || unreadable.has(id);
 			if (!known && !OFFICIAL_CHAT_ID.test(id)) throw new Error('目标群不存在');
-		} else if (wsId) {
-			// The same group entered again replaces its address instead of becoming a second target.
-			id = [...stored].find(([, meta]) => meta.websocketChatId === wsId)?.[0] ?? '';
+		} else {
+			id = targetOfGroup(wsId);
 		}
-		for (const [otherId, otherUrl] of webhooks) {
-			if (otherUrl === url && otherId !== id) throw new Error(`这个 webhook 已经配置给目标群 ${stored.get(otherId)?.name ?? otherId}`);
-		}
-		await sendTest(url, `${word} 转发目标群已接入（看板发出的测试消息）`);
-		const row = await ledger.saveWebhookTarget({ chatId: id || newId(), chatName, webhookCiphertext: encrypt(url, key), keyword: word, websocketChatId: wsId || null, verifiedAt: now() });
-		apply(row, url);
-		return publicTarget(row.chat_id);
+		return store({ id, chatName, word, url, wsId });
+	}
+
+	// No address is typed: the account's own session makes the group's relay bot
+	// (or finds the one it made before) and its webhook comes back from there.
+	async function addManaged({ name, websocketChatId, keyword = '' }) {
+		if (!bots) throw new Error('这台服务没有接上 LarkAgentX，不能自动创建机器人，请手动填写 webhook 地址');
+		const chatName = checkedName(name);
+		const wsId = checkedGroupId(websocketChatId);
+		if (!wsId) throw new Error('自动创建机器人需要从已加入的群里选目标群');
+		const word = String(keyword ?? '').trim() || DEFAULT_MANAGED_KEYWORD;
+		if (word.length > 40) throw new Error('关键词不能超过 40 个字');
+		const bot = await bots.ensure({ chatId: wsId, keyword: word });
+		const url = parseWebhookUrl(bot?.webhook);
+		return { ...(await store({ id: targetOfGroup(wsId), chatName, word, url, wsId, botId: String(bot.bot_id ?? '') || null, managed: true })), bot_created: bot.created === true };
 	}
 
 	// A target still used by a live route is not removed: its messages would have nowhere to go.
@@ -133,17 +169,24 @@ export function createWebhookTargets({ ledger, secret, webhooks, keywords, fetch
 		if (!stored.has(id) && !unreadable.has(id)) return false;
 		const users = routes.filter((route) => !route.archivedAt && (route.targetChatIds ?? []).includes(id));
 		if (users.length) throw new Error(`还有 ${users.length} 个源群在转发到这个目标群（${users.map((route) => `#${route.tag} ${route.chatName}`).join('、')}），先在源群里去掉它`);
+		// The bot the relay made goes with its target.  A bot that cannot be removed
+		// (the account left the group, the session expired) does not keep the target.
+		const meta = stored.get(id);
+		let botRemoved = null;
+		if (meta?.managed && meta.botId && meta.websocketChatId && bots) {
+			botRemoved = await bots.remove({ chatId: meta.websocketChatId, botId: meta.botId }).then((result) => result?.status === 'removed', () => false);
+		}
 		await ledger.deleteWebhookTarget(id);
 		webhooks.delete(id);
 		keywords.delete(id);
 		stored.delete(id);
 		unreadable.delete(id);
-		return true;
+		return { removed: true, bot_removed: botRemoved };
 	}
 
 	function list() {
 		return [...new Set([...webhooks.keys(), ...unreadable.keys()])].sort().map(publicTarget);
 	}
 
-	return { load, add, remove, list, has: (chatId) => webhooks.has(String(chatId ?? '')) };
+	return { load, add, addManaged, remove, list, has: (chatId) => webhooks.has(String(chatId ?? '')) };
 }

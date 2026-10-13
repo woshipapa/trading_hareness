@@ -45,6 +45,7 @@ from rich_text_render import render_rich_text
 from export_support import NameCache, card_images_by_message
 from history_range import HistoryRangeError, PAGE_SIZE, locate_positions
 from chat_directory import FEED_PAGE_SIZE, membership_report, pull_joined_groups
+from chat_bots import PULL_CHAT_BOTS_CMD, PULL_CHAT_CANDIDATE_BOTS_CMD, ChatBotError, ensure_custom_bot, remove_custom_bot
 from history_render import render_transcript
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
@@ -334,6 +335,15 @@ def message_recalled(value: dict[str, Any]) -> bool:
 	return bool(value.get("isRemoved")) or str(value.get("status", "")).strip().upper() in {"2", "DELETED"}
 
 
+# The web client's group-bot panel calls these with the session cookies and no
+# further token; the origin is the one the gateway headers already declare.
+CHATBOT_API_BASE = "https://open.feishu.cn/open-apis/chatbot/api"
+CHATBOT_API_HEADERS = {
+	"content-type": "application/json", "accept": "*/*", "origin": "https://open-dev.feishu.cn", "referer": "https://open-dev.feishu.cn/",
+	"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+}
+
+
 class RecoveringLarkClient(LarkClient):
 	"""Keep the upstream WebSocket client, but expose malformed-frame events.
 
@@ -414,6 +424,36 @@ class RecoveringLarkClient(LarkClient):
 	def in_chat(self, chat_id: str, user_id: str) -> bool:
 		response = self.api("chats.CheckChattersInChatRequest", {"chatId": str(chat_id), "chatterIds": [str(user_id)]}) or {}
 		return bool((response.get("chatters") or {}).get(str(user_id)))
+
+	def _gateway_message(self, cmd: int, request, response_cls) -> dict[str, Any]:
+		"""A gateway command the pinned command table does not list, called by its number."""
+		from larkx.proto import gateway, proto_pb2
+		from larkx.proto.ids import generate_long_request_id
+		answer = proto_pb2.Packet()
+		answer.ParseFromString(self._gateway_post(gateway.build_packet(cmd, generate_long_request_id(), req_msg=request)))
+		return gateway.response_to_dict(response_cls, answer.payload) if answer.payload else {}
+
+	def chat_bots(self, chat_id: str) -> dict[str, Any]:
+		"""The bots of a group, as the web client's group-bot panel reads them."""
+		from larkx.proto import lark_all_pb2
+		request = lark_all_pb2.bots.PullChatBotsRequest()
+		request.chatId = str(chat_id)
+		return self._gateway_message(PULL_CHAT_BOTS_CMD, request, lark_all_pb2.bots.PullChatBotsResponse)
+
+	def chat_candidate_bots(self, chat_id: str) -> dict[str, Any]:
+		"""The bots that can be added to a group; the custom bot's template is among them."""
+		from larkx.proto import lark_all_pb2
+		request = lark_all_pb2.bots.PullChatCandidateBotsRequest()
+		request.chatId = str(chat_id)
+		return self._gateway_message(PULL_CHAT_CANDIDATE_BOTS_CMD, request, lark_all_pb2.bots.PullChatCandidateBotsResponse)
+
+	def chatbot_api(self, name: str, body: dict[str, Any]) -> dict[str, Any]:
+		"""One call of the web client's group-bot interface, authenticated by the session cookies."""
+		response = requests.post(f"{CHATBOT_API_BASE}/{name}", headers=CHATBOT_API_HEADERS, cookies=self.auth.cookies, data=json.dumps(body), timeout=20)
+		try:
+			return response.json()
+		except ValueError:
+			return {"code": -1, "msg": f"HTTP {response.status_code}"}
 
 	def history_times(self, chat_id: str, start: int, end: int) -> list[tuple[int, float]]:
 		"""(position, create_time) of the messages that exist in a position range, without decoding them."""
@@ -868,6 +908,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
 			if self.path == "/chats/membership":
 				self.send_json(200, self.bridge.chat_membership(payload))
 				return
+			if self.path == "/chat-bots/ensure":
+				self.send_json(200, self.bridge.ensure_chat_bot(payload))
+				return
+			if self.path == "/chat-bots/remove":
+				self.send_json(200, self.bridge.remove_chat_bot(payload))
+				return
 			if self.path == "/users/names":
 				self.send_json(200, self.bridge.user_names(payload))
 				return
@@ -897,7 +943,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				self.send_json(200, self.bridge.qr_login.poll(session_id))
 				return
 			self.send_json(404, {"status": "not_found"})
-		except (GroupLookupError, HistoryRangeError) as error:
+		except (GroupLookupError, HistoryRangeError, ChatBotError) as error:
 			LOG.warning("request refused path=%s: %s", self.path, error)
 			self.send_json(422, {"status": "unresolved", "message": str(error)[:240]})
 		except SendRateLimited as error:
@@ -933,6 +979,7 @@ class Bridge:
 		configured_anqiang_keywords = parse_csv(os.environ.get("LARKX_ANQIANG_BLOCK_KEYWORDS"))
 		self.anqiang_block_keywords = configured_anqiang_keywords or set(DEFAULT_ANQIANG_BLOCK_KEYWORDS)
 		self.route_bindings_lock = threading.RLock()
+		self.chat_bots_lock = threading.Lock()
 		self.summary_chat_ids = csv_env("LARKX_SUMMARY_CHAT_IDS")
 		self.summary_ingress_url = os.environ.get("LARKX_SUMMARY_INGRESS_URL", "").strip()
 		if self.summary_chat_ids and not self.summary_ingress_url:
@@ -1354,6 +1401,32 @@ class Bridge:
 			item.update(payload_extras(message, str(message.get("msg_type_name") or "")))
 			messages.append(item)
 		return {"status": "ok", "chat_id": chat_id, "start": start, "end": end, "messages": messages}
+
+	def _chat_bot_access(self) -> dict[str, Any]:
+		if self.client is None:
+			raise RuntimeError("尚未登录(needs_login),无法配置群机器人")
+		return {"user_id": str(self.auth.user_id), "pull_chat_bots": self.client.chat_bots, "call": self.client.chatbot_api}
+
+	def ensure_chat_bot(self, payload: dict[str, Any]) -> dict[str, Any]:
+		"""The webhook of the relay's bot in a group, creating the bot when the group has none.
+
+		The answer carries the webhook address.  Like the image keys of a card,
+		it stays on the token-protected loopback interface; it is never logged.
+		"""
+		access = self._chat_bot_access()
+		with self.chat_bots_lock:
+			result = ensure_custom_bot(chat_id=str(payload.get("chat_id", "")), keyword=str(payload.get("keyword", "")),
+			                           pull_candidate_bots=self.client.chat_candidate_bots, **access)
+		LOG.info("群 %s 的转发机器人%s bot_id=%s", result["chat_id"], "已创建" if result["created"] else "已存在", result["bot_id"])
+		return {"status": "ok", **result}
+
+	def remove_chat_bot(self, payload: dict[str, Any]) -> dict[str, Any]:
+		"""Remove the relay's own bot from a group; a bot the relay did not make is refused."""
+		access = self._chat_bot_access()
+		with self.chat_bots_lock:
+			result = remove_custom_bot(chat_id=str(payload.get("chat_id", "")), bot_id=str(payload.get("bot_id", "")), **access)
+		LOG.info("群 %s 的转发机器人 bot_id=%s：%s", result["chat_id"], result["bot_id"], result["status"])
+		return result
 
 	def user_names(self, payload: dict[str, Any]) -> dict[str, Any]:
 		"""Display names for sender ids of one chat, for the history bundle (read-only)."""

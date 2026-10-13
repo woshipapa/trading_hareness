@@ -22,7 +22,8 @@
 | [0016](0016-limit-up-risk-score.md) | 涨停股次日大面风险分：只作研究展示 | 生效 |
 | [0017](0017-auction-open-desk.md) | 竞价采集与 09:25 处置表：只作研究展示 | 生效 |
 | [0018](0018-daily-close-completion.md) | 盘后日线补齐与逐股完成判定 | 生效 |
-| [0019](0019-feishu-relay-dashboard-registrations.md) | 飞书转发：看板登记的来源标签和目标群 webhook 存在中继自己的库里 | 生效 |
+| [0019](0019-feishu-relay-dashboard-registrations.md) | 飞书转发：看板登记的来源标签和目标群 webhook 存在中继自己的库里 | 生效（第 6 条被 0020 取代） |
+| [0020](0020-feishu-relay-creates-target-bots.md) | 飞书转发：用账号自己的会话在目标群里创建自定义机器人 | 生效 |
 
 格式：
 
