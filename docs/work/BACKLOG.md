@@ -211,6 +211,7 @@
 - note4: 2026-10-13 16:57 correction: note3 末尾和主会话 16:55 对用户说的“主机磁盘可能被新增采集写满”说错了对象。数据库不在 47.110.79.189 上：PostgreSQL 在 owner 的 Windows 工作站（热数据在 F: 盘，冷表空间在 G: 盘），经常驻的反向 SSH 发布到这台中转服务器的 127.0.0.1:15432/15433，peer 容器再经 `db-tunnel` 边车连过去（`deploy/shared-peer/compose.yaml`，`docs/SHARED_PEER_RUNTIME.md` 的拓扑图；peer 的 compose 里没有数据库服务）。39 GB 的原始观测表和每天新增的快照都落在那台工作站的 F: 盘，热库预算是 500 GB 里的 300 GB（`docs/OWNER_DATABASE_STORAGE.md:70-80`）。47.110.79.189 上只有容器和隧道；主会话的重读消耗的是这台服务器上容器里的内存和隧道带宽，以及工作站上数据库的读。文档还写明：Windows 一侧的隧道断了，peer 服务就不可用
 - note5: 2026-10-13 17:02 用户：在修的是 owner 的 Windows 工作站；代码这边先全部做完，等工作站修好就发布
 - note6: 2026-10-13 17:33 reality: 17:29 检查，中转服务器已恢复（`uptime` 显示开机 29 分钟，也就是 17:00 前后重启过；内存 3,495 MB 里可用 2,226 MB；四个 peer 容器健康）；owner 读路径 `/health` 返回 200，直接读 owner 的雷达正常。用户 17:27 说“对方已经修好了”。原因没有告知，agent 也没有查到。还没恢复的一处：经 edge 中继读 owner 的路由仍返回 `fetch failed`（控制台因此看不到 owner 的数据），edge 到 owner 的那段连接要在 edge 上重连；agent 从本机没有登录 edge 的凭据（部署脚本有自己的），没有动
+- note7: 2026-10-13 18:13 reality: 经 edge 中继读 owner 的路由恢复了：`curl http://127.0.0.1:18300/api/research/indicators/health` 返回当天的指标清单（第一次请求 20 秒超时，第二次在 20 秒内返回；这个接口本来就慢）。agent 没有动 edge；是它自己重连的还是有人处理的，不清楚。到此 owner 一侧的三条路径（中转服务器 SSH、owner 读路径、edge 中继）都通了；还不知道的只有下午那次不响应的原因
 - updated: 2026-10-13
 
 ### B032 `dev-notes` 技能在 agent-skills 仓库里还没提交
