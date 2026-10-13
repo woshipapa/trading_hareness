@@ -132,7 +132,7 @@ n8n 的表，不能整片划给谁）。检查器核对每一张声明的表都�
 | 保证 | 机制 |
 |---|---|
 | 改 feishu-relay（含 xhs、分析师）热部署 47edge 不动 47owner | edge 脚本正文里不出现 `47.110.79.189` / `stockpeer` / `OWNER_PEER_*`，只操作 `EDGE_HOST` |
-| 47owner 的策略更新与迭代不动 47edge | owner 脚本正文里不出现 `47.114.113.152` / `EDGE_HOST`；且 `feishu-relay/*`、`frontend/*` 被归入 `skipped_files`（"不属于 owner 运行时"），未知路径一律 `full release required` fail closed，迁移变更强制走完整流程 |
+| 47owner 的策略更新与迭代不动 47edge | owner 脚本正文里不出现 `47.114.113.152` / `EDGE_HOST`；且 `feishu-relay/*`、`frontend/*` 被归入 `skipped_files`（"不属于 owner 运行时"），没有规则的路径一律 `unclassified path` 拒绝（加规则，不构建镜像），带迁移的发布要先过库版本闸门 |
 
 ### 两个前端已拆成独立发布单元
 
