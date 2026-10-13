@@ -1,18 +1,22 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from send_gate import SendRateLimited
-from urgent_alerts import check_hourly_limit, pick_sent_message, recipient_groups, resolve_recipients, send_urgent
+from urgent_alerts import check_hourly_limit, pick_sent_message, recipient_groups, reserve_urgent_slot, resolve_recipients, send_urgent
 
 
 class FakeClient:
-	def __init__(self, members=None, messages=None, gateway_error=None):
+	def __init__(self, members=None, messages=None, gateway_error=None, gateway_response=None, positions=(10, 11)):
 		self.members = members or {"account": 1, "person": 1}
-		self.messages = messages or [{"msg_id": "sent", "from_id": "account", "position": 11}]
+		self.messages = messages or [{"msg_id": "sent", "from_id": "account", "content": "告警", "position": 11}]
 		self.gateway_error = gateway_error
+		self.gateway_response = gateway_response or {"payloadType": 1}
+		self.positions = iter(positions)
 		self.sent = []
 		self.api_calls = []
+		self.history_calls = []
 
 	def api(self, name, payload):
 		self.api_calls.append((name, payload))
@@ -23,15 +27,17 @@ class FakeClient:
 		raise AssertionError(name)
 
 	def chat_infos(self, _chat_ids):
-		return {"chat": {"lastMessagePosition": 11}}
+		return {"chat": {"lastMessagePosition": next(self.positions)}}
 
 	def pull_history(self, _chat_id, _positions):
+		self.history_calls.append(list(_positions))
 		return self.messages
 
 	def _gateway_post(self, packet):
 		if self.gateway_error:
 			raise RuntimeError(self.gateway_error)
 		self.sent.append(packet)
+		return self.gateway_response
 
 
 class FakeGate:
@@ -63,9 +69,16 @@ class UrgentAlertsTest(unittest.TestCase):
 		client.chat_infos = lambda _chat_ids: {"7001": {"userCount": 2, "name": "单聊群"}}
 		self.assertEqual(resolve_recipients(bridge(client), {}), {"status": "ok", "recipients": [{"chat_id": "7001", "name": "单聊群", "user_id": "person"}]})
 
-	def test_sent_message_is_the_newest_message_from_the_account(self):
-		messages = [{"msg_id": "old", "from_id": "account", "position": 10}, {"msg_id": "other", "from_id": "person", "position": 12}, {"msg_id": "new", "from_id": "account", "position": 13}]
-		self.assertEqual(pick_sent_message(messages, "account"), "new")
+	def test_sent_message_matches_exact_text_across_interleaved_positions(self):
+		messages = [{"msg_id": "other", "from_id": "person", "content": "别人的消息", "position": 11},
+			{"msg_id": "sent", "from_id": "account", "content": "告警", "position": 13}]
+		self.assertEqual(pick_sent_message(messages, "account", "告警"), "sent")
+
+	def test_sent_message_requires_exactly_one_text_match(self):
+		messages = [{"msg_id": "one", "from_id": "account", "content": "告警", "position": 11},
+			{"msg_id": "two", "from_id": "account", "content": "告警", "position": 13}]
+		with self.assertRaisesRegex(RuntimeError, "唯一"):
+			pick_sent_message(messages, "account", "告警")
 
 	def test_third_member_is_refused_before_any_send(self):
 		client = FakeClient(members={"account": 1, "person": 1, "third": 1})
@@ -101,6 +114,47 @@ class UrgentAlertsTest(unittest.TestCase):
 		with self.assertRaisesRegex(RuntimeError, "拒绝"):
 			send_urgent(failed, {"chat_id": "chat", "user_id": "person", "text": "告警"}, build_packet=lambda *_: object(), request_id=lambda: "request")
 		self.assertFalse(failed.send_gate.calls[-1][2]["ok"])
+
+	def test_gateway_failure_envelope_finishes_failed_without_history_or_urgent(self):
+		client = FakeClient(gateway_response={"payloadType": 4012, "sid": "拒绝发送"})
+		fake = bridge(client)
+		with self.assertRaisesRegex(Exception, "拒绝发送"):
+			send_urgent(fake, {"chat_id": "chat", "user_id": "person", "text": "告警"}, build_packet=lambda *_: object(), request_id=lambda: "request")
+		self.assertEqual(client.history_calls, [])
+		self.assertEqual([name for name, _payload in client.api_calls if name == "urgent.PutUrgentRequest"], [])
+		self.assertFalse(any(call[0] == "finish" and call[2]["ok"] for call in fake.send_gate.calls))
+
+	def test_send_searches_positions_after_pre_send_position_for_exact_text(self):
+		client = FakeClient(messages=[
+			{"msg_id": "interleaving", "from_id": "account", "content": "另一条", "position": 11},
+			{"msg_id": "sent", "from_id": "account", "content": "告警", "position": 13},
+		], positions=(10, 13))
+		fake = bridge(client)
+		result = send_urgent(fake, {"chat_id": "chat", "user_id": "person", "text": "告警"}, build_packet=lambda *_: object(), request_id=lambda: "request")
+		self.assertEqual(result["message_id"], "sent")
+		self.assertEqual(client.api_calls[-1][1]["messageId"], "sent")
+
+	def test_missing_exact_message_finishes_failed_without_marking_urgent(self):
+		client = FakeClient(messages=[{"msg_id": "other", "from_id": "account", "content": "别的告警", "position": 13}], positions=(10, 13))
+		fake = bridge(client)
+		with self.assertRaisesRegex(RuntimeError, "唯一"):
+			send_urgent(fake, {"chat_id": "chat", "user_id": "person", "text": "告警"}, build_packet=lambda *_: object(), request_id=lambda: "request")
+		self.assertEqual([name for name, _payload in client.api_calls if name == "urgent.PutUrgentRequest"], [])
+		self.assertFalse(fake.send_gate.calls[-1][2]["ok"])
+
+	def test_concurrent_reservations_admit_only_six(self):
+		fake = SimpleNamespace(_urgent_alert_timestamps=[])
+		with ThreadPoolExecutor(max_workers=7) as pool:
+			results = list(pool.map(lambda _item: self._reserve(fake), range(7)))
+		self.assertEqual(sum(results), 6)
+
+	@staticmethod
+	def _reserve(bridge):
+		try:
+			reserve_urgent_slot(bridge, now=1_000)
+			return 1
+		except SendRateLimited:
+			return 0
 
 
 if __name__ == "__main__":

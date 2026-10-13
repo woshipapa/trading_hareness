@@ -1,8 +1,24 @@
 const SETTING_KEY = 'default';
 const DEFAULT_SETTINGS = { enabled: false, chat_id: '', user_id: '', name: '' };
+const DECIMAL_ID = /^\d+$/;
+const MAX_NAME_LENGTH = 120;
 
 function settingsValue(value) {
 	return { ...DEFAULT_SETTINGS, ...(value && typeof value === 'object' ? value : {}) };
+}
+
+function validateSettings(body) {
+	if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('加急设置格式无效');
+	if (typeof body.enabled !== 'boolean') throw new Error('enabled 必须是布尔值');
+	for (const key of ['chat_id', 'user_id', 'name']) if (typeof body[key] !== 'string') throw new Error(`${key} 必须是字符串`);
+	const chatId = body.chat_id;
+	const userId = body.user_id;
+	const name = body.name.trim();
+	if ((chatId === '') !== (userId === '')) throw new Error('chat_id 和 user_id 必须同时填写或同时留空');
+	if (chatId && (!DECIMAL_ID.test(chatId) || !DECIMAL_ID.test(userId))) throw new Error('接收会话 id 必须是纯数字');
+	if (chatId && !name) throw new Error('接收人名称不能为空');
+	if (name.length > MAX_NAME_LENGTH) throw new Error('接收人名称过长');
+	return { enabled: body.enabled, chat_id: chatId, user_id: userId, name };
 }
 
 export function createUrgentAlerts({ ledger, bridgePost, now = () => new Date() }) {
@@ -14,12 +30,12 @@ export function createUrgentAlerts({ ledger, bridgePost, now = () => new Date() 
 	}
 
 	async function saveSettings(body) {
-		const settings = {
-			enabled: Boolean(body?.enabled),
-			chat_id: String(body?.chat_id ?? '').trim(),
-			user_id: String(body?.user_id ?? '').trim(),
-			name: String(body?.name ?? '').trim(),
-		};
+		const settings = validateSettings(body);
+		if (settings.chat_id) {
+			const response = await bridgePost('/alerts/recipients', {}, 30_000);
+			const matched = (response.recipients ?? []).some((recipient) => String(recipient.chat_id) === settings.chat_id && String(recipient.user_id) === settings.user_id);
+			if (!matched) throw new Error('接收人不在中继可用的两人会话列表中');
+		}
 		await ledger.query(`INSERT INTO feishu_group_relay_alert_settings(setting_key,value) VALUES($1,$2)
 			ON CONFLICT(setting_key) DO UPDATE SET value=EXCLUDED.value`, [SETTING_KEY, settings]);
 		return settings;

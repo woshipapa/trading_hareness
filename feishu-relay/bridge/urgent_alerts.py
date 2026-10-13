@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import threading
 from typing import Any, Callable, Iterable
 
 from chat_directory import pull_joined_groups
@@ -12,6 +13,7 @@ from send_gate import SendRateLimited
 
 URGENT_WINDOW_SECONDS = 3600
 URGENT_LIMIT = 6
+_URGENT_LIMIT_LOCK = threading.Lock()
 
 
 def other_member(member_ids: Iterable[str], account_id: str, user_id: str) -> bool:
@@ -45,11 +47,13 @@ def check_hourly_limit(timestamps: Iterable[float], now: float, *, limit: int = 
 	return [*active, now]
 
 
-def pick_sent_message(messages: Iterable[dict[str, Any]], account_id: str) -> str:
-	"""Pick the newest message authored by the account from a history window."""
+def pick_sent_message(messages: Iterable[dict[str, Any]], account_id: str, text: str) -> str:
+	"""Pick the only message authored by the account with the exact sent text."""
 	items = list(messages.values()) if isinstance(messages, dict) else list(messages)
-	owned = [message for message in items if str(message.get("from_id", message.get("fromId", ""))) == str(account_id)]
-	message = max(owned, key=lambda item: int(item.get("position") or 0))
+	owned = [message for message in items if str(message.get("from_id", message.get("fromId", ""))) == str(account_id) and str(message.get("content") or "") == text]
+	if len(owned) != 1:
+		raise RuntimeError("发送后未找到唯一的对应消息，未执行加急")
+	message = owned[0]
 	return str(message.get("msg_id") or message.get("message_id") or message.get("id") or "")
 
 
@@ -66,11 +70,45 @@ def pull_member_ids(client: Any, chat_id: str) -> set[str]:
 		cursor = next_cursor
 
 
-def _send_message_id(client: Any, chat_id: str, account_id: str) -> str:
+def _chat_last_position(client: Any, chat_id: str) -> int:
 	info = client.chat_infos([str(chat_id)]).get(str(chat_id)) or {}
-	last_position = int(info.get("lastMessagePosition") or 0)
-	positions = list(range(max(1, last_position - 1), last_position + 1))
-	return pick_sent_message(client.pull_history(str(chat_id), positions), account_id)
+	return int(info.get("lastMessagePosition") or 0)
+
+
+def _send_message_id(client: Any, chat_id: str, account_id: str, text: str, before_position: int) -> str:
+	after_position = _chat_last_position(client, chat_id)
+	positions = list(range(before_position + 1, after_position + 1))
+	return pick_sent_message(client.pull_history(str(chat_id), positions), account_id, text)
+
+
+def _decode_gateway_response(raw: bytes) -> dict[str, Any]:
+	from larkx.proto import proto_pb2
+
+	packet = proto_pb2.Packet()
+	packet.ParseFromString(raw)
+	return {"payloadType": int(packet.payloadType), "sid": str(packet.sid)}
+
+
+def checked_send_response(response: Any, decode: Callable[[bytes], dict[str, Any]] = _decode_gateway_response) -> dict[str, Any]:
+	envelope = response if isinstance(response, dict) else decode(response)
+	if int(envelope.get("payloadType") or 0) != 1:
+		raise RuntimeError(f"飞书网关拒绝发送：{envelope.get('sid') or '未知原因'}")
+	return envelope
+
+
+def reserve_urgent_slot(bridge: Any, now: float) -> float:
+	"""Reserve a slot atomically; the in-memory window resets when the bridge restarts."""
+	with _URGENT_LIMIT_LOCK:
+		active = check_hourly_limit(getattr(bridge, "_urgent_alert_timestamps", []), now)
+		bridge._urgent_alert_timestamps = active
+	return now
+
+
+def release_urgent_slot(bridge: Any, timestamp: float) -> None:
+	with _URGENT_LIMIT_LOCK:
+		remaining = list(getattr(bridge, "_urgent_alert_timestamps", []))
+		remaining.remove(timestamp)
+		bridge._urgent_alert_timestamps = remaining
 
 
 def resolve_recipients(bridge: Any, _payload: dict[str, Any]) -> dict[str, Any]:
@@ -96,21 +134,22 @@ def send_urgent(bridge: Any, payload: dict[str, Any], *, build_packet: Callable[
 	if not other_member(members, account_id, user_id):
 		raise GroupAdminError("接收会话必须恰好只有本账号和接收人")
 
-	previous = list(getattr(bridge, "_urgent_alert_timestamps", []))
-	reserved = check_hourly_limit(previous, time.time())
-	admitted = bridge.send_gate.begin(chat_id=chat_id, text=text, root_id=None, idempotency_key=None)
-	audit_id = admitted["audit_id"]
-	bridge._urgent_alert_timestamps = reserved
+	reservation = reserve_urgent_slot(bridge, time.time())
+	audit_id = None
 	try:
+		admitted = bridge.send_gate.begin(chat_id=chat_id, text=text, root_id=None, idempotency_key=None)
+		audit_id = admitted["audit_id"]
+		before_position = _chat_last_position(client, chat_id)
 		packet = build_packet(text, chat_id, request_id())
-		client._gateway_post(packet)
-		message_id = _send_message_id(client, chat_id, account_id)
+		checked_send_response(client._gateway_post(packet))
+		message_id = _send_message_id(client, chat_id, account_id, text, before_position)
 		if not message_id:
 			raise RuntimeError("未找到刚发送的消息")
 		checked(client.api("urgent.PutUrgentRequest", {"messageId": message_id, "chatterIds": [user_id], "urgentType": "APP", "chatId": chat_id}))
 	except Exception as error:
-		bridge._urgent_alert_timestamps = previous
-		bridge.send_gate.finish(audit_id, ok=False, error=str(error))
+		release_urgent_slot(bridge, reservation)
+		if audit_id is not None:
+			bridge.send_gate.finish(audit_id, ok=False, error=str(error))
 		raise
 	bridge.send_gate.finish(audit_id, ok=True)
 	return {"status": "ok", "message_id": message_id, "urgent": True}

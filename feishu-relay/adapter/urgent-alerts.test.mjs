@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createUrgentAlerts } from './urgent-alerts.mjs';
 
-function setup(initial = null, bridgeError = null) {
+function setup(initial = null, bridgeError = null, recipients = []) {
 	const rows = initial ? [{ value: initial }] : [];
 	const calls = [];
 	const ledger = {
@@ -18,17 +18,36 @@ function setup(initial = null, bridgeError = null) {
 	const bridgePost = async (...args) => {
 		bridgeCalls.push(args);
 		if (bridgeError) throw new Error(bridgeError);
-		return { status: 'ok', recipients: [] };
+		return args[0] === '/alerts/recipients' ? { recipients } : { status: 'ok' };
 	};
-	return { alerts: createUrgentAlerts({ ledger, bridgePost, now: () => new Date('2026-10-13T06:00:00Z') }), bridgeCalls, calls };
+	return { alerts: createUrgentAlerts({ ledger, bridgePost, now: () => new Date('2026-10-13T06:00:00Z') }), bridgeCalls, calls, ledger };
 }
 
+test('settings reject coerced booleans, malformed ids, long names, and unknown recipients', async () => {
+	const { alerts } = setup();
+	await assert.rejects(() => alerts.routes[1].handle({ body: { enabled: 'false', chat_id: '', user_id: '', name: '' } }), /enabled/);
+	await assert.rejects(() => alerts.routes[1].handle({ body: { enabled: false, chat_id: 'chat', user_id: 'person', name: '' } }), /数字/);
+	await assert.rejects(() => alerts.routes[1].handle({ body: { enabled: false, chat_id: ' 123', user_id: '456', name: '' } }), /数字/);
+	await assert.rejects(() => alerts.routes[1].handle({ body: { enabled: false, chat_id: '', user_id: '', name: 'x'.repeat(201) } }), /名称/);
+});
+
+test('saving a recipient verifies the pair with the bridge', async () => {
+	const { alerts, bridgeCalls } = setup();
+	await assert.rejects(() => alerts.routes[1].handle({ body: { enabled: true, chat_id: '123', user_id: '456', name: '接收人' } }), /接收人/);
+	assert.deepEqual(bridgeCalls, [['/alerts/recipients', {}, 30_000]]);
+
+	const verified = setup(null, null, [{ chat_id: '123', user_id: '456', name: '接收人' }]);
+	await verified.alerts.routes[1].handle({ body: { enabled: true, chat_id: '123', user_id: '456', name: '接收人' } });
+	const disabled = setup();
+	await disabled.alerts.routes[1].handle({ body: { enabled: false, chat_id: '', user_id: '', name: '' } });
+});
+
 test('settings are persisted and returned in the configured shape', async () => {
-	const { alerts, calls } = setup();
+	const { alerts, calls } = setup(null, null, [{ chat_id: '123', user_id: '456', name: '接收人' }]);
 	assert.deepEqual(await alerts.routes[0].handle({}), { settings: { enabled: false, chat_id: '', user_id: '', name: '' } });
-	const result = await alerts.routes[1].handle({ body: { enabled: true, chat_id: 'chat', user_id: 'person', name: '接收人' } });
-	assert.deepEqual(result, { settings: { enabled: true, chat_id: 'chat', user_id: 'person', name: '接收人' } });
-	assert.deepEqual(calls.at(-1)[1], ['default', { enabled: true, chat_id: 'chat', user_id: 'person', name: '接收人' }]);
+	const result = await alerts.routes[1].handle({ body: { enabled: true, chat_id: '123', user_id: '456', name: '接收人' } });
+	assert.deepEqual(result, { settings: { enabled: true, chat_id: '123', user_id: '456', name: '接收人' } });
+	assert.deepEqual(calls.at(-1)[1], ['default', { enabled: true, chat_id: '123', user_id: '456', name: '接收人' }]);
 });
 
 test('notify does nothing when disabled or without a recipient', async () => {
@@ -55,6 +74,6 @@ test('the test route lets a bridge failure surface', async () => {
 
 test('recipient route proxies the bridge response', async () => {
 	const { alerts, bridgeCalls } = setup();
-	assert.deepEqual(await alerts.routes[2].handle({}), { status: 'ok', recipients: [] });
+	assert.deepEqual(await alerts.routes[2].handle({}), { recipients: [] });
 	assert.deepEqual(bridgeCalls, [['/alerts/recipients', {}, 30_000]]);
 });
