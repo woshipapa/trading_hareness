@@ -50,7 +50,9 @@ export function createFeatureRoutes({ routes, readJsonBody, token }) {
 			return true;
 		}
 		try {
-			const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await readJsonBody(request);
+			// The dashboard sends DELETE, and a POST with nothing to say, without a body: that is an empty object, not invalid JSON.
+			const sent = Number(request.headers?.['content-length'] ?? 0) > 0 || request.headers?.['transfer-encoding'] !== undefined;
+			const body = sent ? await readJsonBody(request) : {};
 			const result = await route.handle({ params, query: url.searchParams, body });
 			writeJson(response, 200, result ?? {});
 		} catch (error) {

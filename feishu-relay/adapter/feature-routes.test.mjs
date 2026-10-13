@@ -25,7 +25,7 @@ test('dispatches string and regexp routes with params and query', async () => {
 	assert.equal(getResponse.status, 200);
 	assert.deepEqual(seen, [['abc', 'needle']]);
 	const postResponse = response();
-	await dispatch({ method: 'POST', url: '/items/one', headers: {} }, postResponse);
+	await dispatch({ method: 'POST', url: '/items/one', headers: { 'content-length': '11' } }, postResponse);
 	assert.deepEqual(JSON.parse(postResponse.body), { item: 'one', body: { value: 3 } });
 	assert.equal(dispatch.matches('POST', '/items/two'), true);
 	assert.equal(dispatch.matches('GET', '/missing'), false);
@@ -55,4 +55,18 @@ test('handler errors become 400 and unmatched requests are reported unhandled', 
 	assert.equal(failed.status, 400);
 	assert.deepEqual(JSON.parse(failed.body), { status: 'error', message: 'broken' });
 	assert.equal(await dispatch({ method: 'GET', url: '/missing', headers: {} }, response()), false);
+});
+
+test('a request without a body reaches its handler with an empty object', async () => {
+	const dispatch = createFeatureRoutes({
+		routes: [{ method: 'DELETE', path: '/items/:id', handle: async ({ params, body }) => ({ removed: params.id, body }) }],
+		readJsonBody: async () => { throw new Error('请求不是有效 JSON'); }, token: 'secret',
+	});
+	const answer = response();
+	await dispatch({ method: 'DELETE', url: '/items/7', headers: { accept: 'application/json' } }, answer);
+	assert.equal(answer.status, 200);
+	assert.deepEqual(JSON.parse(answer.body), { removed: '7', body: {} });
+	const chunked = response();
+	await dispatch({ method: 'DELETE', url: '/items/7', headers: { 'transfer-encoding': 'chunked' } }, chunked);
+	assert.equal(chunked.status, 400);
 });
