@@ -21,5 +21,6 @@ test('selects the standalone Feishu shell for relay routes', () => {
 	assert.equal(resolveFrontendAssetPath('/dashboard', '/feishu', '/quant', exists), '/feishu/index.html');
 	assert.equal(resolveFrontendAssetPath('/workbench', '/feishu', '/quant', exists), '/feishu/index.html');
 	assert.equal(resolveFrontendAssetPath('/relay', '/feishu', '/quant', exists), '/feishu/index.html');
+	assert.equal(resolveFrontendAssetPath('/targets', '/feishu', '/quant', exists), '/feishu/index.html');
 	assert.equal(resolveFrontendAssetPath('/assets/feishu.js', '/feishu', '/quant', exists), '/feishu/assets/feishu.js');
 });

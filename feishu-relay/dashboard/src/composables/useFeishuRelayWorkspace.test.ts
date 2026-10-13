@@ -159,4 +159,18 @@ describe('useFeishuRelayWorkspace', () => {
     workspace.openTargetDialog({ chat_id: 'wh_b', name: '手动的', keyword: 'x', origin: 'dashboard', usable: true });
     expect(workspace.targetForm.value.mode).toBe('manual');
   });
+
+  it('reloads joined groups and selects a group joined by link', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse({
+      observed_at: '', live: true, error: null,
+      groups: [{ chat_id: 'oc_joined', name: '链接群', member_count: 2, in_directory: true, source_key: null, route_tag: null, membership: 'member', left_at: null, is_new: false, first_seen_at: null, history: null }],
+      sync: {},
+    })));
+    const workspace = useFeishuRelayWorkspace();
+
+    await workspace.onJoinedByLink('oc_joined');
+
+    expect(workspace.groupRelayRouteForm.value.websocket_chat_id).toBe('oc_joined');
+    expect(workspace.groupRelayRouteForm.value.chat_name).toBe('链接群');
+  });
 });

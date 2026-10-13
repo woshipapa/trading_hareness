@@ -1,5 +1,6 @@
 import type { ComputedRef, InjectionKey, Ref } from 'vue';
 import type { useFeishuRelayWorkspace } from './composables/useFeishuRelayWorkspace';
+import type { TargetRegistryRow } from './api/target-registry';
 
 /**
  * Feature context for the independently deployed Feishu dashboard.
@@ -37,3 +38,7 @@ export type GroupRelayMonitorContext = ReturnType<typeof useFeishuRelayWorkspace
 };
 
 export const groupRelayMonitorContextKey: InjectionKey<GroupRelayMonitorContext> = Symbol('group-relay-monitor-context');
+
+export type TargetGroupsContext = { selectedTarget: Ref<TargetRegistryRow | null> };
+
+export const targetGroupsContextKey: InjectionKey<TargetGroupsContext> = Symbol('target-groups-context');
