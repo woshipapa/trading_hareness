@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import unittest
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -120,6 +121,29 @@ class PeerCloseLoopTests(unittest.TestCase):
         self.assertEqual([name for name, _ in calls], ["roll", "outcome", "watch", "xiaojie", "digest"])
         self.assertEqual({day for _, day in calls}, {date(2026, 10, 9)})
         self.assertEqual(delays, [600])
+
+    def test_the_daily_products_follow_the_teacher_stages_and_yesterday_is_repaired_last(self):
+        calls = []
+        deps = dataclasses.replace(peer_deps(now=datetime(2026, 10, 9, 8, 30, tzinfo=timezone.utc), calls=calls),
+                                   call_longhu=object())
+
+        def products(_deps):
+            def stage(name):
+                async def run(day: date):
+                    calls.append((name, day))
+                    return {"status": "completed"}
+                return run
+            return {name: stage(name) for name in
+                    ("peer_limit_performance_lists", "peer_limit_up_risk", "peer_market_temperature")}
+
+        with patch.object(peer, "daily_bars_ready", return_value=True), patch.object(peer, "_product_stages", products):
+            with self.assertRaises(Stop):
+                asyncio.run(run_peer_close_loop(deps))
+        today, yesterday = date(2026, 10, 9), date(2026, 10, 8)
+        self.assertEqual(calls, [
+            ("roll", today), ("outcome", today), ("watch", today), ("xiaojie", today), ("digest", today),
+            ("peer_limit_performance_lists", today), ("peer_limit_up_risk", today), ("peer_market_temperature", today),
+            ("peer_limit_performance_lists", yesterday), ("peer_limit_up_risk", yesterday)])
 
     def test_nothing_runs_until_the_bars_have_landed(self):
         calls = []
