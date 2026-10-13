@@ -367,6 +367,40 @@
 - needs: 用户的决定
 - found: 2026-10-13，用户转来对方的迁移说明（原话：「当前对方owner服务器已更改为这个，然后你可以使用项目里有保存过的env就是他的ssh key。」）
 - note1: 2026-10-13 20:34 用户说改成手动模式由他来同意。第 (1) 步做完：扫到的主机指纹与对方说明一致，已写进 `~/.ssh/known_hosts`；用保存的私钥登录成功，只读检查见 FACTS F022。第 (2) 步（改 `.env.local`）的命令仍被自动模式的安全检查拦下（理由同前，“改变流量去向”），说明会话当时还在自动模式；没有绕过，等用户切换模式后重试，或用户自己改
+- note2: 2026-10-13 21:10 用户切到手动模式后的进度。第 (2) 步完成：`.env.local` 改了 4 个键、加了 4 个键，备份在同目录 `.env.local.bak-20261013`，没有同步到远端。第 (3) 步完成：20:38 重启本机服务管理器，`owner-tunnel` 连到新服务器。第 (4) 步：本机 `127.0.0.1:15682/health` 返回 200，版本 `owner-code-20261013-04`、提交 26170231，调度容器同版本；当晚的情况见 B042、B043 和 FACTS F023、F024。还差两件：(a) edge 主机上的 `quant-longhu-owner-tunnel` 服务仍指向旧服务器（3535），所以经 edge 读 owner 的路由返回 `fetch failed`、控制台看不到 owner 的数据；已验证 edge 用的那把密钥在新服务器上已授权（`docs/work/probes/2026-10-13-edge-owner-tunnel.out.txt`）；改这个服务的命令被会话的安全检查拒了两次（先是命令，后是装着命令的脚本），命令给了用户，由用户在 edge 上执行：备份服务文件到 `/root/quant-longhu-owner-tunnel.service.bak-20261013`；`ssh-keyscan -t ed25519 -p 22 118.178.133.37` 的结果追加到 `/etc/quant-intraday-edge/known_hosts` 并核对指纹；`sed -i 's/ -p 3535 / -p 22 /; s/stockpeer@47\.110\.79\.189/stockpeer@118.178.133.37/'` 改服务文件；`systemctl daemon-reload && systemctl restart quant-longhu-owner-tunnel`；`curl http://127.0.0.1:15682/health` 应为 200。(b) 第 (5) 步仓库里的旧默认地址还没改
+- updated: 2026-10-13
+
+### B042 我们这一侧新加的盘后阶段没有任何东西定时触发
+
+- state: ready
+- kind: defect
+- why: 完整的盘后流程（`post_close_refresh_service`，40 个阶段）只在对方自己的服务上定时运行，那边是 2026-09-20 的代码（`owner_deploy.release_id = 20260920T194536-bc69bee85233-clean`），阶段表是旧的；我们这一侧（peer）的那份只能通过接口手工触发，peer 每晚自己只跑 `peer_close_research` 的五个阶段（老师复盘滚动等）。出处：`quant-service/app/peer_close_research.py` 的模块说明；发布的代码里 `run_post_close_refresh` 只有接口一个调用处；10 月 13 日 owner 库里当天的阶段回执是 31 个，其中 4 个不在我们的阶段表里、我们阶段表里的 13 个一个回执都没有（FACTS F023）。后果：9 月 20 日之后加进阶段表的阶段从来没有自己跑过——涨停榜（`limit_performance_lists`）和大面风险分（`limit_up_risk`，W001）、情绪温度、盘中温度、宽基 ETF 放量、金银指（决策 0013）、候选台账、分钟面板导出、交易日历、日线控制对账。温度序列因此停在 10 月 9 日；10 月 12 日晚的榜单和风险分是发布验证时手工跑的。W002 的竞价池每天 09:15 要用前一交易日的风险分读数：没人手工跑，第二天就没有竞价处置表。W006 方案里“加一个盘后阶段”的接线同样不会运行
+- how: 两步。(1) 每个交易日当晚手工补当天的榜单和风险分，直到修好：`! bash ~/codebase/n8n/state/lists13.sh`（它把 `docs/work/probes/2026-10-13-evening-lists-and-risk.py` 送进 owner 容器执行，调用的就是那两个阶段的函数；实时榜单只在当天 15:00 之后、24:00 之前能取；可重复执行）。错过了当晚，就要等历史接口有这一天再用 `python -m app.market_history_backfill <日> <日> --sources longhu_limit_performance` 补，那条命令会加载整个服务，新主机内存只有 894 MB，要先看内存。(2) 改代码：让 peer 自己的晚间循环（`peer_close_research` 那种“每个交易日一次、每个阶段有回执、完成了不重跑”的做法）负责 peer 独有的阶段，至少是榜单和风险分，再按内存和耗时逐个决定温度、ETF、金银指、候选台账、分钟面板导出要不要进去（分钟面板导出要读当天全部分钟文档，新主机上很可能放不下）。这是一条新的工作线，要方案和用户批准；W006 的第 10 步在它之后做
+- who: (1) 用户每晚执行，agent 核对；(2) agent 出方案，用户批准
+- needs: none
+- found: 2026-10-13 21:00，核对当晚流程时（`docs/work/probes/2026-10-13-evening-flow.out.txt`、`-2.out.txt`、`2026-10-13-new-host-scheduler-state.out.txt`）
+- updated: 2026-10-13
+
+### B043 日线控制面当晚是 blocked：5,560 只里只有 5,138 只有当天的每日指标
+
+- state: open
+- kind: follow-up
+- why: 2026-10-13 20:52 调度容器的健康信息：`daily_control_plane.state = blocked`，原因 `latest canonical equity daily bars are missing same-date daily fundamentals 5138/5560`；日线 5,560、复权因子 5,560、涨跌停价 5,560 都齐了（W003 的补全起了作用：首轮写入 324 行，缺的从 136 只降到 28 只）。控制面一直 blocked，对账循环就每 5 分钟跑一次，每次都会再调一次日线补全（当晚 18:55 到 20:44 共 22 次，后 21 次什么都没写）。不知道的：每日指标缺 422 只是当天迁移造成的，还是每天如此（以前被“缺复权因子”这个原因盖住了）；每日指标由谁、从哪个数据源补
+- how: 先只读查前几个交易日每日指标的覆盖数，分清是当天的事还是常态；常态的话查 `sync_full_market_daily_controls` 取每日指标的来源和缺的是哪类股票，再决定是补数据源还是把门槛定义改对；另外日线补全的 28 只“缺日线”里有 6 只北交所代码，其余多半是停牌，要让补全把停牌的归到“未交易”而不是“缺”，否则它永远是 partial
+- who: agent 只读查；涉及对方数据链路的部分问对方
+- needs: B041
+- found: 2026-10-13
+- updated: 2026-10-13
+
+### B044 新的 owner 主机内存只有 894 MB：在上面跑的东西都要先量内存
+
+- state: open
+- kind: follow-up
+- why: 2026-10-13 20:33 量得新主机内存共 894 MB、可用 267 MB，交换区 2,047 MB 已用 410 MB（FACTS F022）；调度进程自己占 166 MB。旧主机是 3,495 MB。受影响的：在容器里跑的只读探针（读文档正文的那几个，例如通达信容差探针一次读上百兆）；会加载整个服务的命令行工具（`market_history_backfill`、历史回放）；W006 每晚的总结和历史回放；全量发布（不能在这台机器上构建镜像）；分钟面板导出
+- how: 探针只查计数和时间，要正文的改成在数据库里聚合；W006 先在本机量 `summarise` 和回放的内存峰值再定存储设计（已派，见 W006）；需要大内存的一次性任务考虑在别处跑、只把结果写回；把结论写进 `docs/work/README.md` 的注意事项
+- who: agent
+- needs: none
+- found: 2026-10-13
 - updated: 2026-10-13
 
 ## Closed

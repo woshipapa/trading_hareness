@@ -1,0 +1,15 @@
+now (database): 2026-10-13 20:49:15.941906
+  auction_open_desk_daily      2026-10-13 local_derived      documents   1 newest 10-13 09:25
+  broad_etf_flow_daily         2026-10-09 local_derived      documents   1 newest 10-10 11:51
+  limit_performance_history    2026-10-09 longhuvip_history  documents   5 newest 10-12 22:28
+  limit_performance_live       2026-10-12 longhuvip          documents   5 newest 10-12 22:28
+  limit_up_risk_daily          2026-10-09 local_derived      documents   1 newest 10-12 22:34
+  limit_up_risk_daily          2026-10-12 local_derived      documents   1 newest 10-12 22:34
+  market_temperature_daily     2026-10-09 local_derived      documents   2 newest 10-12 15:23
+completion receipts today: 22; first 18:55:10, last 20:44:03
+  first (partial): {"errors": 0, "missing": 136, "written": 324, "outcomes": 6, "agreement": 1.0, "bar_rejected": 0, "factor_pending": 0, "limits_pending": 0, "unusable_existing": 0}
+  last (partial): {"errors": 0, "missing": 28, "written": 0, "outcomes": 6, "agreement": 1.0, "bar_rejected": 0, "factor_pending": 0, "limits_pending": 0, "unusable_existing": 0}
+  missing symbols in the last receipt: 000004.SZ, 000016.SZ, 001381.SZ, 002388.SZ, 002717.SZ, 002731.SZ, 002813.SZ, 002860.SZ, 300344.SZ, 300379.SZ, 300773.SZ, 301314.SZ, 301569.SZ, 301660.SZ, 301718.SZ, 600225.SH, 600293.SH, 600825.SH, 601059.SH, 601198.SH, 605081.SH, 688496.SH, 871263.BJ, 872953.BJ, 873806.BJ, 920162.BJ, 920196.BJ, 920296.BJ
+fetch runs of the day started after 18:30, by capability and status:
+  daily_close_completion               partial    runs  22  18:55 .. 20:44
+bars of the day flagged suspended: 0

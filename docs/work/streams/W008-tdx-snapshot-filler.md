@@ -5,8 +5,8 @@
 - goal: 主数据源（同花顺）某一分钟缺了或出错时，用通达信的全市场快照补上并带来源标记；不把通达信变成主数据源
 - plan: docs/work/plans/tdx-live-snapshot-fallback.md
 - branch: codex/tdx-promote-gate
-- head: 61f09555
-- next: 等 Codex 实现者交回评审第 1 轮的修正（线程 01a1349e-01a9-7172-9d3f-d63b744c9bcb；四条见 Log），在工作区跑验收（发布路径测试、`pytest scripts -q`、`git diff --check 26170231 HEAD`）并读 diff，再送同一评审者线程 01a134c8-e142-7ba2-b4a0-7f41b86c2562 复审（最多三轮）；通过后 `--no-ff` 合并进 main、回收工作区，再开 `tdx-live-snapshot-fallback` 派工 6。注意：修正给当日汇总加了两个字段，改的是 owner 运行时文件，随下一次 owner 发布带上；发布目标已换服务器，见 BACKLOG B041
+- head: ee89a50e
+- next: 等 Codex 评审者第 2 轮的结论（线程 01a134c8-e142-7ba2-b4a0-7f41b86c2562；主会话用 `docs/work/probes/2026-10-13-wait-codex.py 01a134c8` 等）。APPROVED 就 `--no-ff` 合并 `codex/tdx-promote-gate` 进 main、回收工作区，再开 `tdx-live-snapshot-fallback` 派工 6；还有发现就核实后回派实现者线程 01a1349e-01a9-7172-9d3f-d63b744c9bcb（第 3 轮是最后一轮）。合并后的发布要等 BACKLOG B041 第 (5) 步把发布脚本的默认地址改到新服务器
 - updated: 2026-10-13
 
 ## Requirements
@@ -106,7 +106,8 @@
 - [x] 2026-10-13 17:37 派工 4 → 交回 4889ff76，验收通过（2026-10-13 17:55）
 - [x] 2026-10-13 17:57 派工 5 → 交回 61f09555，验收通过（2026-10-13 18:24）
 - [x] 2026-10-13 评审第 1 轮 → WARNING，一条高、一条中（2026-10-13 20:30；中途被本机休眠切断，20:20 续上）
-- [ ] 2026-10-13 20:30 Codex 实现者在修评审第 1 轮的四条（线程 01a1349e-01a9-7172-9d3f-d63b744c9bcb，工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate`）。结束标志：分支在 61f09555 之后有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上。
+- [x] 2026-10-13 20:30 Codex 实现者在修评审第 1 轮的四条（线程 01a1349e-01a9-7172-9d3f-d63b744c9bcb，工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate`）。结束标志：分支在 61f09555 之后有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上。 → 交回 ee89a50e；主会话复跑 `Ran 3050 tests ... OK (skipped=2)`、`pytest scripts -q` → `1 failed, 355 passed`（失败的是 B035）、`git diff --check` 干净，读过 diff（2026-10-13 21:10）
+- [ ] 2026-10-13 21:10 Codex 评审者在做第 2 轮复审（线程 01a134c8-e142-7ba2-b4a0-7f41b86c2562）。结束标志：它交回 APPROVED / WARNING / BLOCKED。之后见 next。
 
 - [x] 2026-10-13 13:50 主会话派出的接手 agent 在做：查清四个前置问题（只读）、把方案改到第 3 版、送 Codex 审查（最多三轮）、更新本记录并提交。结束标志：它交回最终方案和待用户批准的问题，本记录的 Plan 一节写了各轮审查结果。之后：主会话把方案转给用户请批准。该 agent 挂在主会话上，主会话结束它就停：接手者看本记录的 Log 和方案文件的修订说明，从没做完的那一步继续。 → 2026-10-13 15:25 做完交回：方案第 3 版、三轮审查、待批准的问题都在本记录里；没做成的只有收盘后重跑容差探针（见 Due）。
 
