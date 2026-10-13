@@ -10,7 +10,7 @@
 | [W002](streams/W002-auction-capture-and-desk.md) | 竞价池采集与 09:25 处置表 | verified | none | W006 的竞价看板上线后，决定处置表自己的页签和中继路由是否还要做（BACKLOG B017）；不做就关闭本记录 | 2026-10-13 |
 | [W003](streams/W003-daily-close-completion.md) | 日线收盘补全 | released | Claude Code 会话 93ba6e1d，2026-10-13 | 10 月 13 日 18:45 之后核对该阶段的第一次自动运行（见 Due），通过后改成 `verified` | 2026-10-13 |
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
-| [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | building | Claude Code 会话 93ba6e1d（主会话，负责验收与派工），2026-10-13 | 等 Codex 交回第 5a、5b 步（`tactic_exits.py`），在工作区复跑发布路径测试，读卖出规则的实现和它报告的“方案留了选择的地方”，通过后派第 6、7 步（战法、战绩、每日总结） | 2026-10-13 |
+| [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | building | Claude Code 会话 93ba6e1d（主会话，负责验收与派工），2026-10-13 | 等 Codex 交回“卖出规则改名＋第 6 步”（`tactic_trials.py` 上半：战法、组合逻辑、选股、格内当日结果），复跑发布路径测试，核对二十个组合的定义与方案的表一致，通过后派第 7 步（战绩、标签、两两组合、每日总结） | 2026-10-13 |
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | proposed | Claude Code 会话 93ba6e1d，2026-10-13 | 取数脚本跑完后（看 `state/research/vshape_20261013/data/fetch.log` 末行是 FINISHED），核对每个代码的天数，写研究登记并派给 Codex 研究任务 | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | planned | 主会话 93ba6e1d 派出的接手 agent（只做到“方案审完、待批准”），2026-10-13 | 用 10 月 13 日首个影子交易日的实测更新方案（四个前置修复、完整性门槛、盘中一致性容差的取值），交 Codex 审查，然后请用户批准 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源并且该路由 healthy；通过后把状态改成 `verified` | 2026-10-13 |
@@ -30,8 +30,8 @@
 ## 正在运行
 
 - W008 2026-10-13 13:50 主会话派出的接手 agent 在做：查清四个前置问题（只读）、把方案改到第 3 版、送 Codex 审查（最多三轮）、更新本记录并提交。结束标志：它交回最终方案和待用户批准的问题，本记录的 Plan 一节写了各轮审查结果。之后：主会话把方案转给用户请批准。该 agent 挂在主会话上，主会话结束它就停：接手者看本记录的 Log 和方案文件的修订说明，从没做完的那一步继续。
-- W006 2026-10-13 14:10 Codex 实现者在做第 5a、5b 步（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 9f17026a 之后有两个提交且 `git status --short` 为空。之后：复跑验收；读 `tactic_exits.py` 的规则实现对照方案的卖出规则表；勾掉 Steps；派第 6、7 步。该任务挂在主会话上，主会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从最后一个完成的步骤接着派。
 - W007 2026-10-13 14:57 后台脚本 `docs/work/probes/2026-10-13-index-minute-fetch.py` 在取数：15:10 起先存当天全天雷达，再取 `SH000001`、`SZ399001`、`SZ399006`、`SH000852`、510300、512100 自 2023-09-01 起每个交易日的分钟线，约 4,500 次只读请求。输出和日志在本机 `state/research/vshape_20261013/data/`（`<代码>.jsonl`、`fetch.log`）。结束标志：日志末行 `FINISHED <次数> calls`；出现 `ABORT` 是连续 20 次请求失败。可断点续取：重跑同一脚本会跳过已有的日子。脚本挂在主会话上，主会话结束它就停，重跑即可。之后：数每个文件的行数（应接近 750），再做 Steps 的“研究登记与派工”。
+- W006 2026-10-13 15:05 Codex 实现者在做“卖出规则改名＋第 6 步”（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 0ddc86b3 之后有两个提交且 `git status --short` 为空。之后：复跑验收；核对 `TACTICS` 二十个组合的定义；勾掉 Steps；派第 7 步。该任务挂在主会话上，主会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从最后一个完成的步骤接着派。
 
 ## 待办清单
 
