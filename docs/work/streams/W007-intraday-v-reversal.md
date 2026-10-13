@@ -1,10 +1,12 @@
 # W007 盘中止跌放量（V 形反转）的识别
 
-- state: planned
+- state: building
 - holder: Claude Code 会话 93ba6e1d，2026-10-13
 - goal: 研究盘中“到底、放量、资金进场”的 V 形反转能否从我们的数据里实时识别、真假 V 怎么区分、反转后哪类股票领先，并把成立的部分做成研究用的提示
 - plan: docs/work/plans/intraday-v-reversal-study.md
-- next: 取数在 18:35 自己暂停（日志末行 PAUSED）；盘后流程结束后（10 月 13 日 20:30 以后，或次日非交易时段）重跑同一条命令续取余下的 ETF 并补上失败的 7 天：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（要限时就加 `--until=HH:MM`）。五个指数的文件齐了（各约 749 行）就可以按登记派第 1 步：照 `codex-flow` 建 harvest 工作区 `v-reversal-study`，提示词指向 `docs/work/plans/intraday-v-reversal-study.md`
+- branch: codex/v-reversal-study
+- head: 2703af84
+- next: 两件事并行。(1) 等 Codex 交回研究第 1 步（数据核对、等权线、K 线与指标、两张事件表、深跌日的描述；只用五个指数文件），读它的 `01-notes.md` 并抽查：等权线与日线面板的吻合、有没有用到事件时刻之后的数据、深跌日的数量与日线定义的 193 天的差异说明；通过后等基金文件取齐再派第 2 步。(2) 取数 18:35 自己暂停，盘后流程结束后（10 月 13 日 20:30 以后，或次日非交易时段）重跑同一条命令续取余下的 ETF 并补 `SZ399001` 缺的 7 天：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（要限时就加 `--until=HH:MM`）
 - updated: 2026-10-13
 
 ## Requirements
@@ -42,7 +44,8 @@
 - [x] 探明授权接口的历史分钟线能取指数和 ETF，每分钟有价格、均价、成交量 — `docs/work/probes/2026-10-13-index-minute-probe.*`
 - [x] 当天个股层面的第一眼 — `docs/work/probes/2026-10-13-today-stock-level.py` 与 `.out.txt`（数据：`2026-10-13-today-snapshots.py` 从 owner 只读取的 14 个关键分钟的全市场快照，本机 `state/research/vshape_20261013/data/today_snapshots.json`）
 - [ ] 取历史分钟线；存当天全天雷达 — 雷达已存（17:30）；分钟线在取，见 Running。10 月 13 日当天的分钟线 17:30 时历史接口还没有（返回空），续取时会再请求
-- [ ] 研究登记与派工 — 登记已写：`docs/work/plans/intraday-v-reversal-study.md`；派工等五个指数文件齐
+- [x] 研究登记与派工 — 登记 `docs/work/plans/intraday-v-reversal-study.md`；18:28 派第 1 步（2026-10-13）
+- [ ] 研究四步（登记的 Dispatches 表）：1 数据核对与事件表（已派）；2 五类因素各自对照基准；3 组合、两段时期、7 月以来逐日表；4 报告与三张清单
 - [ ] 复核与结论
 - [ ] 提示功能的方案
 
@@ -76,11 +79,15 @@
 - 2026-10-13 18:08 correction: 17:41 发布重启服务时取数有 7 次请求失败（`SZ399001` 的 2023-12-28 到 2024-01-08），那 7 天没有写入；续取时会补。
 - 2026-10-13 18:22 correction: 写研究登记时没有先查项目里已有的东西。决策 0013 已经定义并每天存着“情绪温度”（8 个分量、0–100，40 以下为冷、20 以下为冰点）和“宽基 ETF 篮子成交额相对前 20 日均值”的比值（1.5 以上算放量），并有一条回测结论：冷日加放量之后 1、3、5 日上涨占 90%（10 天、四五段行情）。已把温度的历史从 owner 导到本机（`docs/work/probes/2026-10-13-temperature-export.py`，两次只读请求；`state/research/vshape_20261013/owner/temperature_daily.json`，2025-02-14 到 2026-10-09 共 400 天，之前没有存，10 月 12 日的也还没有），登记改为在有温度的日子沿用它的定义，并把这条已有结论列为要对照的已知结果。另：分钟线只取了篮子 12 只里的 6 只，登记里写明了。
 
+- 2026-10-13 18:28 五个指数文件取齐（`SH000001`、`SZ399006`、`SH000852`、`SH000300` 各 749 天，`SZ399001` 742 天）。照 `codex-flow` 建了 harvest 工作区并派研究第 1 步；基金文件还在取，第 1 步不读它们。研究由用户 10 月 13 日的三条要求发起（见 Requirements），只读本机文件，产出只进 `docs/archive/`，不合并进主线的代码。
+
 ## Waiting on the user
 
 - [x] 2026-10-13 owner 恢复后，是否同意跑指数和宽基 ETF 的历史分钟线取数（约 8,250 次只读请求，非交易时段） → 用户 2026-10-13 17:27：「对方已经修好了，你如果有需要采集的可以进行了」（2026-10-13）
 
 ## Running
+
+- [ ] 2026-10-13 18:28 Codex 在做研究第 1 步，新线程（交回时才知道线程号），harvest 工作区 `/Users/papa/codebase/.codex-wt/n8n-v-reversal-study`，分支 `codex/v-reversal-study`，基点 2703af84。产出：`docs/archive/2026-10-13-v-reversal-study/`（脚本、输出、`01-notes.md`、事件表 CSV），派生表在本机 `state/research/vshape_20261013/derived/`。结束标志：分支有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上；主会话结束它就停，判断死活的办法见 `docs/work/README.md`，续派用 `codex-reply` 接同一线程（线程号用 `codex-trace.py --list` 按工作区找）。
 
 - [ ] 2026-10-13 17:30 取数脚本在跑（主会话的后台命令）：11 个代码顺序取，每次请求后停 0.3 秒，带 `--until=18:35`，到点自己停并在日志里写 PAUSED（避开 18:45 开始的盘后流程）。日志 `state/research/vshape_20261013/data/fetch.log`，数据 `<代码>.jsonl`。结束标志：日志末行 FINISHED 或 PAUSED；ABORT 是连续 20 次请求失败。挂在主会话 93ba6e1d 上；主会话结束它就停，重跑同一条命令即续取。
 
