@@ -79,8 +79,9 @@ continue without the previous conversation.
    `scripts/CATALOG.md` says what every script is for, which component owns it
    and which host runs it; a new script needs a rule in
    `scripts/generate_scripts_catalog.py`, then regenerate the catalog.
-9. Syncing or releasing to the two 47 hosts (edge `47.114.113.152`, owner
-   `47.110.79.189`) follows `docs/RELEASE_SYNC_47.md` step by step. Start and end
+9. Syncing or releasing to the two hosts (edge `47.114.113.152`; the owner quant
+   service on `118.178.133.37`, SSH port 22, since 2026-10-13: the old owner host
+   `47.110.79.189:3535` no longer runs it and must not be restored) follows `docs/RELEASE_SYNC_47.md` step by step. Start and end
    with the read-only `scripts/release-sync-status.sh`. The edge relay and owner
    quant service are independent release units: use `--edge-source-sha` and
    `--owner-source-sha` when their runtime SHAs differ; never force one SHA into
