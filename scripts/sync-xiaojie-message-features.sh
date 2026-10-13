@@ -14,8 +14,8 @@ set -euo pipefail
 
 edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
 edge_key="${RELAY_EDGE_SSH_KEY:-$HOME/.ssh/feishu_relay_edge_ed25519}"
-peer_host="${PEER_SSH_HOST:-stockpeer@118.178.133.37}"
-peer_port="${PEER_SSH_PORT:-22}"
+peer_host="${PEER_SSH_HOST:-stockpeer@47.110.79.189}"
+peer_port="${PEER_SSH_PORT:-3535}"
 peer_key="${PEER_SSH_KEY:-$HOME/.ssh/stockpeer_ed25519}"
 peer_container="${PEER_CONTAINER:-trading-hareness-peer-quant-research-scheduler-1}"
 peer_app_dir="${PEER_APP_DIR:-/app/hotfix/current}"

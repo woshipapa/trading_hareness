@@ -7,7 +7,7 @@ if [[ "$(id -u)" -eq 0 ]]; then
 fi
 
 ssh_host="${1:?lightServer SSH host is required}"
-ssh_port="${2:-22}"
+ssh_port="${2:-3535}"
 ssh_dir="${HOME}/.ssh"
 key_path="${ssh_dir}/peer_tunnel_ed25519"
 known_hosts="${ssh_dir}/known_hosts"
