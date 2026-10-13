@@ -140,7 +140,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
         <div class="radar-headline-main">
           <span class="tone-down">卖 {{ yi(headline.cumDown) }}</span>
           <span class="tone-up">买 {{ yi(headline.cumUp) }}</span>
-          <span :class="`tone-${tone(headline.mainNet)}`">主力净额 {{ yi(headline.mainNet) }}</span>
+          <span :class="['radar-headline-net', `tone-${tone(headline.mainNet)}`]">主力净额 {{ yi(headline.mainNet) }}</span>
         </div>
         <el-text type="info" size="small">较上一点 卖 {{ deltaText(headline.downDelta) }} · 买 {{ deltaText(headline.upDelta) }}</el-text>
         <el-text v-if="headline.auctionUp !== null && headline.auctionDown !== null" type="info" size="small">竞买 {{ yi(headline.auctionUp) }} · 竞砸 {{ yi(headline.auctionDown) }}</el-text>
@@ -309,6 +309,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .radar-visual { display: grid; grid-template-columns: minmax(180px, 230px) minmax(0, 1fr); align-items: center; }
 .radar-headline { display: flex; flex-direction: column; gap: 6px; }
 .radar-headline-main { display: flex; flex-direction: column; gap: 4px; font-size: 28px; font-weight: 700; line-height: 1.2; }
+.radar-headline-main span { white-space: nowrap; }
+.radar-headline-net { font-size: 20px; }
 .radar-chart { height: 380px; width: 100%; min-width: 0; }
 .radar-counts { display: flex; flex-wrap: wrap; gap: 16px; margin: 4px 0; }
 .tone-up { color: #d93026; }
