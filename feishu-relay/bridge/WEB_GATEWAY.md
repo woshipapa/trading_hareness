@@ -59,8 +59,16 @@ it has `type` TEXT, `fromId` equal to the bot's `bot_id` (the id `bridge.client.
 The text of a relayed post or card as read back has not been compared with what was sent; see probe P0-8 in
 the plan before relying on it.
 
+## Mentioning a member through a custom bot's webhook
+
+A custom bot's webhook mentions a member by the numeric id the member list gives (the keys of
+`chatterJoinTimeSec`). Both forms were accepted and read back with the member in the message's `atUserIdList`:
+text `{"msg_type": "text", "content": {"text": "… <at user_id=\"<id>\">name</at> …"}}`, and a post line
+containing `{"tag": "at", "user_id": "<id>"}`. The server replaces the name written inside `<at>` with the
+member's display name. Tried with a member of the account's own tenant only (the account itself).
+
 ## Not observed
 
 A successful join by link; a join request row and deciding one; `ownerChatter` / `inviterChatter` of a link;
-SMS or phone urgent; how a relayed post or card reads back; any of these commands in a group the account
+SMS or phone urgent; how a relayed post or card reads back; a webhook mention of a member from another tenant; how many members one message can mention; any of these commands in a group the account
 does not own.
