@@ -1,5 +1,6 @@
+import asyncio
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest import mock
 
 from app import tactic_trial_runtime as runtime
@@ -307,6 +308,68 @@ class EveningTests(unittest.TestCase):
         self.assertEqual(calls, ["auction", "close", "settle", "summarise"])
         self.assertEqual((result["status"], result["close"], result["summary"]), ("completed", "already_stored", {"lines": 80}))
         self.assertTrue(result["research_only"])
+
+
+class _Stop(Exception):
+    pass
+
+
+class AuctionLoopTests(unittest.TestCase):
+    """The loop on a clock that only moves when it sleeps."""
+
+    def _run(self, start, statuses, *, session=True, long_sleeps=1):
+        clock = {"now": datetime.fromisoformat(start).replace(tzinfo=runtime.CN_TZ)}
+        calls, sleeps, lines = [], [], []
+
+        async def run_database(action, _database, day, *, timeout_seconds):
+            self.assertIs(action, runtime.refresh_auction)
+            self.assertEqual(timeout_seconds, 10)
+            calls.append((clock["now"].strftime("%H:%M:%S"), day))
+            status = statuses[min(len(calls), len(statuses)) - 1]
+            if isinstance(status, Exception):
+                raise status
+            return {"status": status}
+
+        async def session_open(_day):
+            return session
+
+        async def sleep(seconds):
+            sleeps.append(seconds)
+            if sum(item > 3600 for item in sleeps) == long_sleeps:   # the sleep to the next morning ends the test
+                raise _Stop
+            clock["now"] += timedelta(seconds=seconds)
+
+        deps = runtime.TacticAuctionDependencies(database=Database(), run_database=run_database, session_open=session_open,
+                                                 now=lambda: clock["now"], sleep=sleep)
+        with self.assertRaises(_Stop):
+            asyncio.run(runtime.run_tactic_auction_loop(deps, log=lines.append))
+        return calls, sleeps, lines
+
+    def test_it_waits_for_the_table_and_stores_once(self):
+        calls, sleeps, lines = self._run("2026-10-14T08:00:00", ["not_ready", "not_ready", "completed"], long_sleeps=2)
+        self.assertEqual(sleeps[0], 5105.0, "from 08:00 it sleeps to 09:25:05")
+        self.assertEqual([at for at, _day in calls], ["09:25:05", "09:25:10", "09:25:15"])
+        self.assertEqual(lines, ["tactic_auction trade_date=2026-10-14 status=completed"])
+        self.assertEqual(sleeps[-1], 86390.0, "then to 09:25:05 of the next day")
+
+    def test_a_table_that_never_appears_ends_the_morning_at_0945(self):
+        calls, _sleeps, lines = self._run("2026-10-14T09:25:05", ["not_ready"])
+        self.assertEqual(calls[-1][0], "09:45:00")
+        self.assertEqual(lines, ["tactic_auction trade_date=2026-10-14 status=no_table"])
+
+    def test_a_busy_database_is_waited_out(self):
+        busy = runtime.ExecutorSaturatedError("database executor saturated")
+        calls, _sleeps, lines = self._run("2026-10-14T09:25:05", [busy, TimeoutError(), "completed"])
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(lines, ["tactic_auction trade_date=2026-10-14 status=completed"])
+
+    def test_no_reading_on_a_closed_day_or_outside_the_window(self):
+        calls, _sleeps, lines = self._run("2026-10-14T09:30:00", ["completed"], session=False)
+        self.assertEqual((calls, lines), ([], ["tactic_auction trade_date=2026-10-14 status=not_a_session"]))
+        calls, sleeps, lines = self._run("2026-10-17T09:30:00", ["completed"])   # a Saturday
+        self.assertEqual((calls, lines), ([], []))
+        calls, sleeps, lines = self._run("2026-10-14T10:00:00", ["completed"])
+        self.assertEqual((calls, lines, sleeps), ([], [], [84305.0]))
 
 
 if __name__ == "__main__":

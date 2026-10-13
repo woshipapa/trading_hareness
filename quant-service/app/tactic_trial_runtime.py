@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
-from datetime import date, datetime, time, timedelta
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
 from statistics import median
 from typing import Any, Mapping, Sequence
 
 from . import derived_daily_readings, limit_up_risk_repository, tactic_trial_repository
 from .derived_daily_readings import CN_TZ, session_close
 from .limit_up_risk import decode_limit_rows
+from .runtime_executors import ExecutorSaturatedError
 from .tactic_conditions import (
     build_auction_row, build_day_context, build_trial_row, evaluate_conditions, history_features,
 )
@@ -288,6 +292,53 @@ def evening(database: Any, trade_date: date) -> dict[str, Any]:
                       "auction": auction["status"], "settled": settled["days"], "summary": summary["summary"]})
 
 
+DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
+AUCTION_FROM, AUCTION_UNTIL = time(9, 25, 5), time(9, 45)
+
+
+@dataclass(frozen=True)
+class TacticAuctionDependencies:
+    database: Any
+    run_database: Callable[..., Awaitable[Any]]
+    session_open: Callable[[date], Awaitable[bool]]
+    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+    sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
+
+
+async def auction_reading(deps: TacticAuctionDependencies, trade_date: date) -> str:
+    """Wait for the day's stored 09:25 table, then store the auction reading.
+
+    The stored table is the only interface to the auction capture. A busy database is waited out, not an exit.
+    """
+    while deps.now().astimezone(CN_TZ).time() <= AUCTION_UNTIL:
+        try:
+            if not await deps.session_open(trade_date):
+                return "not_a_session"
+            status = (await deps.run_database(refresh_auction, deps.database, trade_date, timeout_seconds=10))["status"]
+        except DATABASE_UNAVAILABLE:
+            status = "database_busy"
+        if status not in ("not_ready", "database_busy"):
+            return status
+        await deps.sleep(5)
+    return "no_table"
+
+
+async def run_tactic_auction_loop(deps: TacticAuctionDependencies, *, log: Callable[[str], None] = print) -> None:
+    """Every session morning from 09:25:05: the auction reading of the tactic ledger, built once.
+
+    A morning this loop misses (the service was down) is made up by the evening run, from the same stored table.
+    """
+    while True:
+        now = deps.now().astimezone(CN_TZ)
+        start = datetime.combine(now.date(), AUCTION_FROM, tzinfo=CN_TZ)
+        if now.weekday() < 5 and AUCTION_FROM <= now.time() <= AUCTION_UNTIL:
+            log(f"tactic_auction trade_date={now.date().isoformat()} status={await auction_reading(deps, now.date())}")
+            now = deps.now().astimezone(CN_TZ)
+        if now >= start:
+            start += timedelta(days=1)
+        await deps.sleep((start - now).total_seconds())
+
+
 def _report_view(report: Mapping[str, Mapping[str, int]]) -> dict[str, dict[str, Any]]:
     return {year: {"days_built": value["days"], "rows": value["rows"],
                    "skipped_days": value["skipped_days"],
@@ -459,4 +510,7 @@ if __name__ == "__main__":
     main()
 
 
-__all__ = ["refresh_auction", "evening", "refresh_close", "replay", "settle", "summarise"]
+__all__ = [
+    "TacticAuctionDependencies", "auction_reading", "evening", "refresh_auction", "refresh_close", "replay",
+    "run_tactic_auction_loop", "settle", "summarise",
+]

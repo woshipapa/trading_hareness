@@ -132,6 +132,7 @@ SETTINGS: dict[str, Setting] = {item.name: item for item in [
         ("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED", "true", "archive public evidence after the close"),
         ("STORAGE_TIERING_MOVER_ENABLED", "true", "move cold data out of the hot database"),
         ("PEER_CLOSE_RESEARCH_ENABLED", "true", "run the peer close research loop"),
+        ("TACTIC_AUCTION_ENABLED", "true", "build the tactic ledger's auction reading from the stored 09:25 table"),
         ("THS_CONCEPT_MEMBER_BACKFILL_ENABLED", "true", "run the post-close Fuyao THS membership refresh loop"),
         ("THS_CONCEPT_MEMBER_BACKFILL_BATCH_SIZE", "25", "THS boards per Fuyao membership refresh batch"),
         ("ALL_BOARD_MEMBER_BACKFILL_ENABLED", "true", "run the all-board member backfill loop"),

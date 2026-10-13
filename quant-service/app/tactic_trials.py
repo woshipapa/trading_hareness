@@ -219,9 +219,9 @@ def _summary(
 
 def day_result(
     tactic: Tactic, rows: Sequence[Mapping[str, Any]], day: Mapping[str, Any],
-    outcomes: Mapping[str, Mapping[str, Any]],
+    outcomes: Mapping[str, Mapping[str, Any]], keys: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """Score one tactic's picks against non-picked rows in the same cells."""
+    """Score one tactic's picks against non-picked rows in the same cells, on every outcome or on ``keys``."""
     statuses = [(row, evaluate_tactic(tactic, row, day)) for row in rows]
     picks = [row for row, value in statuses if value is True]
     unknown = [row for row, value in statuses if value is None]
@@ -238,7 +238,7 @@ def day_result(
         _value, status = _outcome_value(outcomes.get(row["symbol"], {}), primary_status)
         counts["picks_no_trade"] += status == "no_trade"
         counts["picks_not_resolved"] += status == "not_resolved"
-    scored = {key: _summary(picks, comparisons, outcomes, key) for key in _outcome_keys()}
+    scored = {key: _summary(picks, comparisons, outcomes, key) for key in keys or _outcome_keys()}
     return {"primary": scored[tactic.primary], "outcomes": scored, "counts": counts}
 
 
@@ -386,9 +386,9 @@ def day_digest(day: Mapping[str, Any], tactics: Sequence[Tactic] = TACTICS) -> d
     for tactic in tactics:
         if tactic.slot != slot:
             continue
-        result = day_result(tactic, rows, day.get("day", {}), outcomes)
+        result = day_result(tactic, rows, day.get("day", {}), outcomes, _record_outcomes(tactic))
         results[tactic.key] = {"picks": result["counts"]["picks"], "outcomes": {
-            key: [result["outcomes"][key]["pick_mean"], result["outcomes"][key]["difference"]] for key in _record_outcomes(tactic)}}
+            key: [item["pick_mean"], item["difference"]] for key, item in result["outcomes"].items()}}
     digest = {"trade_date": _date(day["trade_date"]), "slot": slot, "rows": len(rows), "tactics": results,
               "sell": _sell_scope_sums(day), "seal": _seal_counts(day)}
     if slot == "close":

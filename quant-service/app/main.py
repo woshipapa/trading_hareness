@@ -3176,6 +3176,14 @@ async def peer_close_research_loop() -> None:
     ))
 
 
+async def tactic_auction_loop() -> None:
+    """The tactic trial ledger's auction reading, from the 09:25 table the auction capture stores (decision 0022)."""
+    from .tactic_trial_runtime import TacticAuctionDependencies, run_tactic_auction_loop
+    await run_tactic_auction_loop(TacticAuctionDependencies(
+        database=db, run_database=run_database_blocking, session_open=sse_calendar_open_async,
+    ))
+
+
 async def post_close_public_archive_loop() -> None:
     """Archive the short-lived and post-close public evidence once per session."""
     await _datasource_loops()["post_close_public_archive"]()
@@ -4212,6 +4220,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "post_close_public_archive": settings.flag("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED"),
             "storage_tiering_mover": settings.flag("STORAGE_TIERING_MOVER_ENABLED"),
             "peer_close_research": settings.flag("PEER_CLOSE_RESEARCH_ENABLED"),
+            "tactic_auction": settings.flag("TACTIC_AUCTION_ENABLED"),
         },
         loops={
             "intraday_monitor": lambda: intraday_monitor_loop(interval_seconds),
@@ -4230,6 +4239,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "post_close_public_archive": post_close_public_archive_loop,
             "storage_tiering_mover": storage_tiering_mover_loop,
             "peer_close_research": peer_close_research_loop,
+            "tactic_auction": tactic_auction_loop,
         },
     )
     validate_runtime_task_specs(specs)
