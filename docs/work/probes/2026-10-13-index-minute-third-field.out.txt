@@ -1,0 +1,15 @@
+[SH000001] sessions 749 | minutes where the third value lies outside the prices seen so far that day: mean share 0.639 | sessions where the stored day low is nearer the third value's low than the price's low: 480
+  against the all stocks (749 sessions): | corr(third, mean stock return) 0.9957 | corr(price, mean) 0.8316 | corr(third, median stock return) 0.9843 | corr(price, median) 0.8063 | mean abs gap third - mean stock return 0.155 pt | corr(third's intraday low, median stock low) 0.9732
+  against the SH stocks (749 sessions): | corr(third, mean stock return) 0.9994 | corr(price, mean) 0.8558 | corr(third, median stock return) 0.9863 | corr(price, median) 0.8338 | mean abs gap third - mean stock return 0.026 pt | corr(third's intraday low, median stock low) 0.9751
+  20261009: index close +0.05% | third value at close +0.45% | mean SH stock +0.46% | median +0.40%
+  20261012: index close -0.43% | third value at close -1.58% | mean SH stock -1.59% | median -1.61%
+[SZ399001] sessions 742 | minutes where the third value lies outside the prices seen so far that day: mean share 0.487 | sessions where the stored day low is nearer the third value's low than the price's low: 399
+  against the all stocks (742 sessions): | corr(third, mean stock return) 0.9898 | corr(price, mean) 0.8045 | corr(third, median stock return) 0.9806 | corr(price, median) 0.7614 | mean abs gap third - mean stock return 0.119 pt | corr(third's intraday low, median stock low) 0.9631
+  against the SZ stocks (742 sessions): | corr(third, mean stock return) 0.9915 | corr(price, mean) 0.7871 | corr(third, median stock return) 0.9820 | corr(price, median) 0.7485 | mean abs gap third - mean stock return 0.033 pt | corr(third's intraday low, median stock low) 0.9625
+  20261009: index close +0.17% | third value at close +0.54% | mean SZ stock +0.55% | median +0.56%
+  20261012: index close -2.03% | third value at close -1.59% | mean SZ stock -1.60% | median -1.73%
+[SZ399006] sessions 749 | minutes where the third value lies outside the prices seen so far that day: mean share 0.486 | sessions where the stored day low is nearer the third value's low than the price's low: 381
+  against the all stocks (749 sessions): | corr(third, mean stock return) 0.9852 | corr(price, mean) 0.7286 | corr(third, median stock return) 0.9710 | corr(price, median) 0.6784 | mean abs gap third - mean stock return 0.368 pt | corr(third's intraday low, median stock low) 0.9586
+  against the SZ stocks (749 sessions): | corr(third, mean stock return) 0.9900 | corr(price, mean) 0.7130 | corr(third, median stock return) 0.9765 | corr(price, median) 0.6702 | mean abs gap third - mean stock return 0.288 pt | corr(third's intraday low, median stock low) 0.9603
+  20261009: index close +0.22% | third value at close +0.28% | mean SZ stock +0.55% | median +0.56%
+  20261012: index close -2.61% | third value at close -1.48% | mean SZ stock -1.60% | median -1.73%
