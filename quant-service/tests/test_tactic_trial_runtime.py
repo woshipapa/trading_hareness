@@ -73,25 +73,26 @@ class TacticTrialRuntimeTests(unittest.TestCase):
         desk = {"trade_date": day.isoformat(), "rows": [{
             "symbol": "000001.SZ", "name": "A", "open": 10.5, "gap": 0.05,
             "opens_at_limit": False, "bucket": "3-5", "boards": 2, "amount": 100,
-        }]}
+        }], "decided_at": "2026-10-13T09:25:00+08:00"}
         with mock.patch.object(runtime.tactic_trial_repository, "read_capability", side_effect=[[], [desk], []]), \
              mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=[]), \
-             mock.patch.object(runtime.derived_daily_readings, "store", return_value={"stored": 1, "unchanged": 0}):
+             mock.patch.object(runtime.derived_daily_readings, "store", return_value={"stored": 1, "unchanged": 0}) as store:
             result = runtime.refresh_auction(database, day)
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["rows"], 1)
+        self.assertEqual(store.call_args.args[2][0]["decided_at"], desk["decided_at"])
 
     def test_settle_splits_prior_closes_from_pick_path(self):
         reading = {"trade_date": "2026-10-13", "slot": "close", "rows": [{"symbol": "000001.SZ"}]}
         bars = [
-            {"symbol": "000001.SZ", "pick_day": date(2026, 10, 13), "trading_date": date(2026, 10, 10), "close": 9},
-            {"symbol": "000001.SZ", "pick_day": date(2026, 10, 13), "trading_date": date(2026, 10, 13), "close": 10},
-            {"symbol": "000001.SZ", "pick_day": date(2026, 10, 13), "trading_date": date(2026, 10, 14), "close": 11},
+            {"symbol": "000001.SZ", "pick_day": date(2026, 10, 13), "trading_date": date(2026, 10, 10), "close": 9, "adj_factor": 2},
+            {"symbol": "000001.SZ", "pick_day": date(2026, 10, 13), "trading_date": date(2026, 10, 13), "close": 10, "adj_factor": 1},
+            {"symbol": "000001.SZ", "pick_day": date(2026, 10, 13), "trading_date": date(2026, 10, 14), "close": 11, "adj_factor": 1},
         ]
         outcome = {"entries": {"held": {"close": {"status": "settled"}}, "buy_open": {"close": {"status": "no_trade"}}}}
         with mock.patch.object(runtime, "evaluate_pick", return_value=outcome) as evaluate:
             document = runtime._settle_reading(reading, {"000001.SZ": bars})
-        evaluate.assert_called_once_with("000001.SZ", "close", bars[1:], None, [9])
+        evaluate.assert_called_once_with("000001.SZ", "close", bars[1:], None, [18.0])
         self.assertTrue(document["complete"])
 
     def test_replay_keeps_missing_session_slots_in_previous_roles(self):
@@ -180,6 +181,29 @@ class TacticTrialRuntimeTests(unittest.TestCase):
         self.assertEqual(result["years"]["2026"]["disagreement_share"], 1.0)
         store.assert_not_called()
 
+    def test_auction_replay_uses_yesterday_close_pool(self):
+        day1, day2 = date(2026, 5, 4), date(2026, 5, 5)
+        previous_rows = [{"symbol": "000001.SZ", "name": "A", "boards": 2, "board_bucket": "2", "sector": "x",
+                          "sealed_from_open": False, "flags": [], "unknown": []},
+                         {"symbol": "000002.SZ", "name": "B", "boards": 1, "board_bucket": "1", "sector": "x",
+                          "sealed_from_open": False, "flags": [], "unknown": []}]
+        close = {"trade_date": day1.isoformat(), "slot": "close", "complete": True,
+                 "rows": previous_rows, "day": {"flags": [], "unknown": []}}
+        auction_list = [{"trade_date": day2, "rows": [{"symbol": "000001.SZ", "amount": 900, "position": 0}]}]
+        bars = [self._bar(day2, "000001.SZ", close=11, limit_up=11), self._bar(day2, "000002.SZ", close=10, limit_up=11)]
+        with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", side_effect=[[day1, day2], [day1]]), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_auction_lists", return_value=auction_list), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_capability", return_value=[close]), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_day_bars", return_value=bars), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_exit_bars", return_value=[]), \
+             mock.patch.object(runtime.derived_daily_readings, "store") as store:
+            result = runtime.replay(Database(), "auction", day2, day2, apply=True)
+        stored = store.call_args_list[0].args[2][0]
+        self.assertEqual(result["rows"], 2)
+        self.assertEqual(stored["decided_at"], "2026-05-05T09:25:00+08:00")
+        self.assertEqual(stored["rows"][0]["amount"], 900)
+        self.assertIsNone(stored["rows"][1]["amount"])
+
     def test_settle_becomes_complete_on_the_next_evening(self):
         pick_day, next_day = date(2026, 4, 1), date(2026, 4, 2)
         reading = {"trade_date": pick_day.isoformat(), "slot": "close", "complete": True,
@@ -224,16 +248,6 @@ class TacticTrialRuntimeTests(unittest.TestCase):
             result = runtime.summarise(database, date(2026, 10, 13))
         self.assertEqual(calls, [runtime.CLOSE_CAPABILITY, runtime.AUCTION_CAPABILITY, runtime.SETTLED_CAPABILITY])
         self.assertEqual(result["status"], "completed")
-
-    def test_replay_refuses_a_year_over_the_disagreement_limit(self):
-        database = Database()
-        with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=[]), \
-             mock.patch.object(runtime, "_year_report", return_value={"2026": {"days_built": 1, "rows": 1, "disagreement_share": 0.01, "raw_basis_share": 0.0}}), \
-             mock.patch.object(runtime.derived_daily_readings, "store") as store:
-            result = runtime.replay(database, "close", date(2026, 1, 1), date(2026, 1, 3), apply=True)
-        self.assertEqual(result["status"], "refused")
-        store.assert_not_called()
-
 
 if __name__ == "__main__":
     unittest.main()

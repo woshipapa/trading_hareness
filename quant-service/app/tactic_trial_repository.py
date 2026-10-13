@@ -82,7 +82,7 @@ def read_market_turnover(connection: Any, start: date, end: date) -> list[dict[s
         """SELECT trading_date,sum(amount)*1000 AS market_turnover
              FROM quant.canonical_bars_daily
             WHERE trading_date BETWEEN %s AND %s AND NOT coalesce(is_suspended,false)
-            GROUP BY trading_date ORDER BY trading_date""", (start - timedelta(days=120), end),
+            GROUP BY trading_date ORDER BY trading_date""", (start, end),
     ).fetchall()]
 
 
