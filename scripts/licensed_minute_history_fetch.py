@@ -21,6 +21,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:15682"
 MAX_WORKERS = 8
 DEFAULT_WORKERS = 6
 NO_DATA_ERROR = "1020"
+RECENT_SESSIONS = 3   # an empty answer for one of the last sessions asked is not stored
 CN = ZoneInfo("Asia/Shanghai")
 UTC = timezone.utc
 Call = Callable[[str, str], Mapping[str, Any]]
@@ -155,56 +156,48 @@ def fetch(codes: list[str], days: list[str], out: Path, *, workers: int, call: C
     durations: list[float] = []
     mark = time.monotonic()
     mark_calls = 0
+    # The history interface serves a session a day or more after it closes: "no data" for a recent session is not
+    # a fact yet, so it is not written and the next run asks again. Older empty sessions (before a listing, a
+    # suspension) are written, so a resumed batch does not ask for them forever.
+    recent = set(days[-RECENT_SESSIONS:])
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for code in codes:
             path = out / f"{code}.jsonl"
             pending = pending_days(path, days)
-            futures = {index: pool.submit(_fetch_one, code, day, call, calendar, allow_session, now, sleep, log)
-                       for index, day in enumerate(pending[:workers])}
-            next_index = len(futures)
+            futures: dict[int, Any] = {}
+
+            def submit(index: int) -> None:
+                if index < len(pending):
+                    futures[index] = pool.submit(_fetch_one, code, pending[index], call, calendar, allow_session,
+                                                 now, sleep, log)
+
+            def stop(reason: str) -> str:
+                for item in futures.values():
+                    item.cancel()
+                log(reason)
+                return reason
+
+            for index in range(workers):
+                submit(index)
             with path.open("a", encoding="utf-8") as handle:
                 for index, day in enumerate(pending):
                     if _until_reached(until, now):
-                        for item in futures.values():
-                            item.cancel()
-                        reason = f"PAUSED at {until.strftime('%H:%M')} after {calls} calls; {code} at {day}"
-                        log(reason)
-                        return reason
-                    future = futures.pop(index)
-                    payload, elapsed = future.result()
+                        return stop(f"PAUSED at {until.strftime('%H:%M')} after {calls} calls; {code} at {day}")
+                    payload, elapsed = futures.pop(index).result()
+                    submit(index + workers)
                     calls += 1
                     durations.append(elapsed)
-                    if isinstance(payload, Exception):
+                    status = "failed" if isinstance(payload, Exception) else classify_payload(payload)
+                    if status in ("failed", "refusal"):
                         failures += 1
-                        log(f"{code} {day} request failed: {type(payload).__name__} {str(payload)[:80]}")
+                        detail = (f"request failed: {type(payload).__name__} {str(payload)[:80]}" if status == "failed" else
+                                  f"upstream refusal errcode {payload.get('errcode')} {str(payload.get('errmsg'))[:40]}")
+                        log(f"{code} {day} {detail}")
                         if failures >= 20:
-                            for item in futures.values():
-                                item.cancel()
-                            reason = "ABORT: 20 consecutive failed requests"
-                            log(reason)
-                            return reason
-                        if next_index < len(pending):
-                            futures[next_index] = pool.submit(_fetch_one, code, pending[next_index], call, calendar,
-                                                             allow_session, now, sleep, log)
-                            next_index += 1
-                        continue
-                    status = classify_payload(payload)
-                    if status == "refusal":
-                        failures += 1
-                        log(f"{code} {day} upstream refusal errcode {payload.get('errcode')} {str(payload.get('errmsg'))[:40]}")
-                        if failures >= 20:
-                            for item in futures.values():
-                                item.cancel()
-                            reason = "ABORT: 20 consecutive failed requests"
-                            log(reason)
-                            return reason
-                        if next_index < len(pending):
-                            futures[next_index] = pool.submit(_fetch_one, code, pending[next_index], call, calendar,
-                                                             allow_session, now, sleep, log)
-                            next_index += 1
+                            return stop("ABORT: 20 consecutive failed requests")
                         continue
                     failures = 0
-                    if status in ("data", "no data"):
+                    if status == "data" or day not in recent:
                         handle.write(json.dumps(_record(day, payload), ensure_ascii=False) + "\n")
                         handle.flush()
                     if calls - mark_calls >= 200:
@@ -213,10 +206,6 @@ def fetch(codes: list[str], days: list[str], out: Path, *, workers: int, call: C
                         log(f"{calls} calls; {code} at {day}; {(calls - mark_calls) / (time.monotonic() - mark):.1f} calls/s "
                             f"with {workers} worker(s); seconds per call median {statistics.median(ordered):.2f} p90 {p90:.2f}")
                         mark, mark_calls, durations = time.monotonic(), calls, []
-                    if next_index < len(pending):
-                        futures[next_index] = pool.submit(_fetch_one, code, pending[next_index], call, calendar,
-                                                         allow_session, now, sleep, log)
-                        next_index += 1
     reason = f"FINISHED {calls} calls ({' '.join(codes)})"
     log(reason)
     return reason

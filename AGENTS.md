@@ -49,6 +49,14 @@ continue without the previous conversation.
 - Fail closed on missing bars, stale providers, incomplete sector mappings and
   insufficient samples. Do not invent Top10s, prices or regression coefficients.
 - Keep author replay outcomes separate from strategy-available outcomes.
+- Batch reads of the licensed interface (thousands of read calls, such as minute
+  history) go through `scripts/licensed_minute_history_fetch.py` or keep to its
+  limits: 6 requests in flight by default, never more than 8, not between 09:00
+  and 15:10 Asia/Shanghai on a session. Measured 2026-10-13: the path tops out
+  near 7.4 calls a second at 8 in flight, gains nothing beyond and is refused by
+  the owner's gateway at 16 (`docs/work/FACTS.md` F027). More than 5,000 calls
+  still need the user's explicit consent. Do not raise the service's own worker
+  settings for a batch: the ceiling is not there.
 
 ## Agent workflow
 

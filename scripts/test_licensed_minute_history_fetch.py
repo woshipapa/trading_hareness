@@ -40,36 +40,32 @@ class LicensedMinuteHistoryFetchTests(unittest.TestCase):
         self.assertEqual(MODULE.classify_payload({"errcode": 1020, "trend": []}), "no data")
         self.assertEqual(MODULE.classify_payload({"errcode": 2001, "trend": []}), "refusal")
 
-    def test_pending_days_and_session_order_with_out_of_order_returns(self):
-        calendar = Calendar({"2026-10-09", "2026-10-12"})
+    def test_resume_session_order_and_which_empty_answers_are_kept(self):
+        days = ["20260929", "20260930", "20261008", "20261009", "20261012"]
+        calendar = Calendar({"2026-09-29", "2026-09-30", "2026-10-08", "2026-10-09", "2026-10-12"})
         with tempfile.TemporaryDirectory() as root:
             out = Path(root)
             (out / "AAA.jsonl").write_text(json.dumps({"day": "20261009"}) + "\n", encoding="utf-8")
             asked = []
-            returned = []
 
             def call(code, day):
-                asked.append(day)
-                if day == "20261009":
-                    time.sleep(0.02)
-                returned.append(day)
-                if code == "BBB" and day == "20261012":
+                asked.append((code, day))
+                if day == "20260929":
+                    time.sleep(0.02)   # the first session returns last: the file must still be in session order
+                if code == "BBB" and day in ("20260929", "20261012"):
                     return {"trend": [], "errcode": 1020}
                 return {"trend": [["09:31", day, 1, 2, 0]], "errcode": 0}
 
-            MODULE.fetch(["AAA", "BBB"], ["20261009", "20261012"], out, workers=2, call=call, calendar=calendar,
-                         allow_session=True)
-            self.assertEqual(sorted(asked), ["20261009", "20261012", "20261012"])
-            self.assertEqual(returned[:2], ["20261012", "20261012"])
-            self.assertEqual(returned[2], "20261009")
-            rows = [json.loads(line) for line in (out / "AAA.jsonl").read_text(encoding="utf-8").splitlines()]
-            self.assertEqual([row["day"] for row in rows], ["20261009", "20261012"])
-            rows = [json.loads(line) for line in (out / "BBB.jsonl").read_text(encoding="utf-8").splitlines()]
-            self.assertEqual([row["day"] for row in rows], ["20261009", "20261012"])
-            before = len(asked)
-            MODULE.fetch(["AAA", "BBB"], ["20261009", "20261012"], out, workers=2, call=call, calendar=calendar,
-                         allow_session=True)
-            self.assertEqual(len(asked), before)
+            MODULE.fetch(["AAA", "BBB"], days, out, workers=2, call=call, calendar=calendar, allow_session=True)
+            self.assertNotIn(("AAA", "20261009"), asked, "a session already in the file is not asked again")
+            stored = {code: [json.loads(line)["day"] for line in (out / f"{code}.jsonl").read_text(encoding="utf-8").splitlines()]
+                      for code in ("AAA", "BBB")}
+            self.assertEqual(stored["AAA"], ["20261009", "20260929", "20260930", "20261008", "20261012"])
+            self.assertEqual(stored["BBB"], ["20260929", "20260930", "20261008", "20261009"],
+                             "an old empty session is kept; an empty answer for one of the last sessions is not")
+            asked.clear()
+            MODULE.fetch(["AAA", "BBB"], days, out, workers=2, call=call, calendar=calendar, allow_session=True)
+            self.assertEqual(asked, [("BBB", "20261012")], "only the recent session without data is asked again")
 
     def test_port_5681_is_refused(self):
         with self.assertRaisesRegex(ValueError, "local service"):
