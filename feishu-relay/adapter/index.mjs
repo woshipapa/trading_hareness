@@ -281,6 +281,7 @@ const webhookTargets = createWebhookTargets({
 	bots: {
 		ensure: ({ chatId, keyword }) => bridgePostJson('/chat-bots/ensure', { chat_id: chatId, keyword }, 60_000),
 		remove: ({ chatId, botId }) => bridgePostJson('/chat-bots/remove', { chat_id: chatId, bot_id: botId }, 30_000),
+		adopt: ({ chatId, botId }) => bridgePostJson('/chat-bots/adopt', { chat_id: chatId, bot_id: botId }, 30_000),
 	},
 });
 const webhookTargetsLoaded = await webhookTargets.load();

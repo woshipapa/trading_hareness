@@ -16,7 +16,12 @@ export type TargetRegistryRow = {
 
 type TargetRegistryResponse = { targets: TargetRegistryRow[] };
 
+/** A custom bot that is already in a group; `usable` says whether the relay can send through it as it is set up. */
+export type ExistingBot = { bot_id: string; name: string; key_words: string[]; usable: boolean; reason: string | null };
+
 export const targetRegistryApi = {
   list: () => getJson<TargetRegistryResponse>('/api/group-relay/target-groups'),
   resolve: () => postJson<TargetRegistryResponse>('/api/group-relay/target-groups/resolve', {}),
+  bots: (chatId: string) => getJson<{ bots: ExistingBot[] }>(`/api/group-relay/target-groups/${encodeURIComponent(chatId)}/bots`),
+  useBot: (chatId: string, botId: string) => postJson<{ target: TargetRegistryRow }>(`/api/group-relay/target-groups/${encodeURIComponent(chatId)}/bots/${encodeURIComponent(botId)}/use`, {}),
 };

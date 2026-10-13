@@ -51,8 +51,38 @@ describe('target group panels render what their composables hold', () => {
     expect(rows[1].text()).toContain('擒龙内参更新群1');
     expect(rows[1].text()).toContain('仅管理');
     expect(rows[1].text()).toContain('未接入');
-    expect(rows[1].find('button').text()).toBe('建机器人');
-    expect(rows[1].find('button').classes()).not.toContain('is-loading');
+    expect(rows[1].findAll('button').map((button) => button.text())).toEqual(['用已有机器人', '建机器人']);
+    expect(rows[1].findAll('button').some((button) => button.classes().includes('is-loading'))).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('lets an owned group use a bot it already has: the bots are listed, one is taken, and the new row is selected', async () => {
+    const owned: TargetRegistryRow = { chat_id: '7680753363566234587', name: '擒龙内参更新群1', keyword: null, origin: 'owned', usable: false, managed: false, websocket_chat_id: '7680753363566234587', bot_id: null, bot_name: null, owned: true };
+    const connected: TargetRegistryRow = { ...owned, chat_id: 'wh_new', keyword: '', origin: 'dashboard', usable: true, bot_id: '41', bot_name: 'dragon' };
+    let listed = [target, owned];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith('/bots')) return jsonResponse({ bots: [{ bot_id: '41', name: 'dragon', key_words: [], usable: true, reason: null }, { bot_id: '42', name: '签名机器人', key_words: ['x'], usable: false, reason: '这个机器人开了签名校验，中继不带签名发送' }] });
+      if (path.endsWith('/bots/41/use') && init?.method === 'POST') { listed = [target, connected]; return jsonResponse({ target: connected }); }
+      return jsonResponse({ targets: listed });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const selected = ref<TargetRegistryRow | null>(null);
+    const host = defineComponent({ setup() { provide(targetGroupsContextKey, { selectedTarget: selected }); return () => h(TargetRegistryPanel); } });
+    const wrapper = mount(host, { global: { plugins: [ElementPlus] }, attachTo: document.body });
+    await flushPromises();
+    await wrapper.findAll('.el-table__body tbody tr')[1].findAll('button')[0].trigger('click');
+    await flushPromises();
+    const dialog = document.body.querySelector('.el-dialog') as HTMLElement;
+    expect(dialog.textContent).toContain('dragon');
+    expect(dialog.textContent).toContain('签名校验');
+    const use = [...dialog.querySelectorAll('button')].filter((button) => button.textContent?.includes('用它发提醒'));
+    expect(use).toHaveLength(1);
+    use[0].click();
+    await flushPromises();
+    expect(selected.value?.chat_id).toBe('wh_new');
+    expect(wrapper.findAll('.el-table__body tbody tr')[1].text()).toContain('dragon');
+    expect(wrapper.findAll('.el-table__body tbody tr')[1].text()).not.toContain('未接入');
     wrapper.unmount();
   });
 

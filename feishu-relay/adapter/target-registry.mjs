@@ -123,6 +123,29 @@ export function createTargetRegistry({ ledger, bridgePost, webhookTargets, now =
 		return (await groups()).find((target) => target.chat_id === String(chatId)) ?? null;
 	}
 
+	// A group the account owns that is not a relay target yet: the only kind that takes an existing bot.
+	async function unconnected(chatId) {
+		const found = await get(chatId);
+		if (!found) throw new Error('群不存在');
+		if (found.origin !== 'owned') throw new Error('这个群已经是转发目标，已有可用的机器人');
+		return found;
+	}
+
+	// The custom bots already in the group: names and keywords, never an address.
+	async function existingBots(chatId) {
+		const found = await unconnected(chatId);
+		const response = await bridgePost('/chat-bots/list', { chat_id: found.websocket_chat_id }, 30_000);
+		return response.bots ?? [];
+	}
+
+	// Makes the group a relay target that sends through a bot it already has. Nothing is posted in the group.
+	async function useBot(chatId, botId) {
+		const found = await unconnected(chatId);
+		const target = await webhookTargets.addExisting({ name: found.name, websocketChatId: found.websocket_chat_id, botId });
+		await record({ chat_id: target.chat_id, websocket_chat_id: found.websocket_chat_id, chat_name: found.name, bot_id: String(botId), bot_name: target.bot_name, owned: true });
+		return get(target.chat_id);
+	}
+
 	async function resolveIfUnknown() {
 		try {
 			const result = await ledger.query(`SELECT count(*)::int AS count FROM ${TARGET_TABLE} WHERE chat_id = websocket_chat_id`);
@@ -153,7 +176,9 @@ export function createTargetRegistry({ ledger, bridgePost, webhookTargets, now =
 	const routes = [
 		{ method: 'GET', path: '/api/group-relay/target-groups', handle: async () => ({ targets: await groups() }) },
 		{ method: 'POST', path: '/api/group-relay/target-groups/resolve', handle: async () => ({ targets: await resolve() }) },
+		{ method: 'GET', path: '/api/group-relay/target-groups/:chatId/bots', handle: async ({ params }) => ({ bots: await existingBots(params.chatId) }) },
+		{ method: 'POST', path: '/api/group-relay/target-groups/:chatId/bots/:botId/use', handle: async ({ params }) => ({ target: await useBot(params.chatId, params.botId) }) },
 	];
 
-	return { schema, routes, start, resolve, record, forget, list, groups, get, onChange };
+	return { schema, routes, start, resolve, record, forget, list, groups, get, existingBots, useBot, onChange };
 }

@@ -1,6 +1,6 @@
 import unittest
 
-from chat_bots import ChatBotError, custom_bot_template, custom_bots, ensure_custom_bot, remove_custom_bot
+from chat_bots import ChatBotError, adopt_custom_bot, custom_bot_template, custom_bots, ensure_custom_bot, existing_custom_bots, remove_custom_bot
 
 ME = "7551451231416434716"
 HOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/11111111-2222-3333-4444-555555555555"
@@ -138,6 +138,36 @@ class RemoveCustomBotTests(unittest.TestCase):
 				self.remove(feishu, other)
 		self.assertEqual(sorted(feishu.bots), ["7", "8"])
 		self.assertEqual(self.remove(feishu, "12345")["status"], "not_found")
+
+
+class ExistingBotTests(unittest.TestCase):
+	"""A bot someone made by hand (the one a listener already posts through) can be used as it is."""
+
+	def setUp(self):
+		self.feishu = FakeFeishu(bots=[("41", "dragon", ME, 1), ("42", "签名机器人", ME, 1), ("43", "papa-bot", ME, 2)])
+		self.feishu.bots["41"]["webhook"] = HOOK
+		self.feishu.bots["42"].update({"webhook": HOOK, "signature_status": True})
+
+	def test_the_list_names_each_custom_bot_and_says_which_can_be_used_without_an_address(self):
+		bots = existing_custom_bots(chat_id="7680", pull_chat_bots=self.feishu.pull_chat_bots, call=self.feishu.call)
+		self.assertEqual([(bot["bot_id"], bot["name"], bot["usable"]) for bot in bots], [("41", "dragon", True), ("42", "签名机器人", False)])
+		self.assertIn("签名", bots[1]["reason"])
+		self.assertNotIn(HOOK, repr(bots))
+
+	def test_adopting_reads_the_bot_and_changes_nothing(self):
+		before = len(self.feishu.calls)
+		bot = adopt_custom_bot(chat_id="7680", bot_id="41", pull_chat_bots=self.feishu.pull_chat_bots, call=self.feishu.call)
+		self.assertEqual((bot["bot_id"], bot["name"], bot["key_words"], bot["webhook"]), ("41", "dragon", [], HOOK))
+		self.assertEqual({name for name, _ in self.feishu.calls[before:]}, {"GetWebhookBotInfo"})
+
+	def test_a_signing_bot_an_app_bot_and_a_bot_of_another_group_are_refused(self):
+		with self.assertRaisesRegex(ChatBotError, "签名"):
+			adopt_custom_bot(chat_id="7680", bot_id="42", pull_chat_bots=self.feishu.pull_chat_bots, call=self.feishu.call)
+		for bot_id in ("43", "99"):
+			with self.assertRaisesRegex(ChatBotError, "没有这个自定义机器人"):
+				adopt_custom_bot(chat_id="7680", bot_id=bot_id, pull_chat_bots=self.feishu.pull_chat_bots, call=self.feishu.call)
+		with self.assertRaises(ValueError):
+			adopt_custom_bot(chat_id="oc_x", bot_id="41", pull_chat_bots=self.feishu.pull_chat_bots, call=self.feishu.call)
 
 
 class ListingTests(unittest.TestCase):
