@@ -29,11 +29,13 @@ TDX_ROW = {
 FUYAO_ROW = {
     "symbol": "000001.SZ", "price": 11.73, "pct_change": 1.2079,
     "volume": 10000, "turnover": 117300.0,
+    "snapshot_metadata": {"age_seconds": 20.0},
 }
 
 
 def evidence():
-    return CapabilityEvidence(rows=[TDX_ROW] * 5301, warnings=("tdx_host=test",))
+    return CapabilityEvidence(rows=[TDX_ROW] * 5301, warnings=("tdx_host=test",),
+                              available_at_max=NOW + timedelta(seconds=3))
 
 
 class TdxShadowCaptureTests(unittest.TestCase):
@@ -89,12 +91,13 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertEqual(persisted[0][4]["capability"], AGREEMENT_CAPABILITY)
         self.assertTrue(persisted[0][3]["completeness"]["complete"])
         self.assertTrue(persisted[0][4]["completeness"]["complete"])
+        self.assertEqual(persisted[0][4]["shadow_data_at"], (NOW + timedelta(seconds=3)).isoformat())
 
     def test_empty_snapshot_is_stored_as_incomplete(self):
         persisted = []
 
         async def empty():
-            return CapabilityEvidence(rows=[], warnings=("no_trade_rows=5579",))
+            return CapabilityEvidence(rows=[], warnings=("no_trade_rows=5579",), available_at_max=NOW)
 
         runtime, _ = self.dependencies(fetch=empty, persisted=persisted)
         result = asyncio.run(runtime.capture(NOW))
@@ -307,6 +310,43 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertEqual(latest_main_total(Connection()), 5580)
         self.assertNotIn("normalized", calls[0][0])
         self.assertIn("payload", calls[0][0])
+
+    def test_data_gap_uses_shadow_available_time_and_reference_cache_age(self):
+        from app.all_a_snapshot_sources import project_tdx_snapshot_rows
+        from app.tdx_shadow_snapshot_runtime import _comparison_row
+
+        observed = datetime(2026, 10, 12, 2, 0, tzinfo=timezone.utc)
+        reference_at = observed - timedelta(seconds=18)
+        result = _comparison_row(
+            observed, project_tdx_snapshot_rows([TDX_ROW], observed), (reference_at, [FUYAO_ROW]),
+            {"complete": True}, observed + timedelta(seconds=3),
+        )
+
+        self.assertEqual(result["data_seconds_apart"], 41.0)
+        self.assertEqual(result["reference_data_at"], (observed - timedelta(seconds=38)).isoformat())
+        self.assertTrue(result["same_continuous_segment"])
+        self.assertEqual(result["comparison"]["seconds_apart"], 18.0)
+
+    def test_data_times_across_open_or_before_continuous_session_are_not_same_segment(self):
+        from app.all_a_snapshot_sources import project_tdx_snapshot_rows
+        from app.tdx_shadow_snapshot_runtime import _comparison_row
+
+        reference = datetime(2026, 10, 12, 1, 29, 50, tzinfo=timezone.utc)
+        shadow = datetime(2026, 10, 12, 1, 30, 3, tzinfo=timezone.utc)
+        result = _comparison_row(
+            shadow, project_tdx_snapshot_rows([TDX_ROW], shadow),
+            (reference, [{**FUYAO_ROW, "snapshot_metadata": {"age_seconds": 0}}]),
+            {"complete": True}, shadow,
+        )
+        self.assertFalse(result["same_continuous_segment"])
+
+        before_open = datetime(2026, 10, 12, 1, 29, 0, tzinfo=timezone.utc)
+        result = _comparison_row(
+            before_open, project_tdx_snapshot_rows([TDX_ROW], before_open),
+            (before_open - timedelta(seconds=2), [{**FUYAO_ROW, "snapshot_metadata": {"age_seconds": 0}}]),
+            {"complete": True}, before_open,
+        )
+        self.assertFalse(result["same_continuous_segment"])
 
 
 class TdxShadowSummaryTests(unittest.TestCase):

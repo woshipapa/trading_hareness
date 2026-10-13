@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from .all_a_snapshot_sources import compare, project_tdx_snapshot_rows, tdx_snapshot_completeness
 from .datasources.contracts import CapabilityEvidence
 from .error_detail import safe_error_detail
+from .intraday_clock import continuous_auction_bounds
 from .market_session_repository import market_observation_session
 from .minute_cross_section import persist_document
 from .public_market_repository import persist_timed_observations
@@ -42,33 +43,53 @@ def _database_busy(error: BaseException) -> dict[str, Any]:
     return {"status": "database_busy", "error": str(error) or type(error).__name__, "stored": 0}
 
 
-def _as_rows_and_metadata(result: CapabilityEvidence | list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _as_rows_and_metadata(result: CapabilityEvidence | list[dict[str, Any]],
+                          observed_at: datetime) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if isinstance(result, CapabilityEvidence):
         return list(result.rows), {"warnings": list(result.warnings), "available_at": result.available_at_max}
-    return list(result), {}
+    return list(result), {"available_at": observed_at}
 
 
 def _comparison_row(observed_at: datetime, tdx_rows: list[dict[str, Any]],
                    reference: tuple[datetime, list[dict[str, Any]]] | None,
-                   completeness: Mapping[str, Any]) -> dict[str, Any]:
+                   completeness: Mapping[str, Any], shadow_data_at: datetime) -> dict[str, Any]:
     row: dict[str, Any] = {
         "provider_key": AGREEMENT_PROVIDER,
         "capability": AGREEMENT_CAPABILITY,
         "observed_at": observed_at.isoformat(),
         "completeness": dict(completeness),
+        "shadow_data_at": shadow_data_at.isoformat(),
         "research_only": True,
         "live_effect": "none",
     }
-    if not completeness["complete"]:
-        return {**row, "status": "incomplete", "reference_observed_at": None, "comparison": None}
     if reference is None:
-        return {**row, "status": "no_reference", "reference_observed_at": None, "comparison": None}
+        return {
+            **row, "status": "incomplete" if not completeness["complete"] else "no_reference",
+            "reference_observed_at": None, "reference_data_at": None,
+            "data_seconds_apart": None, "same_continuous_segment": False, "comparison": None,
+        }
     reference_at, reference_rows = reference
+    reference_data_at = reference_at - timedelta(
+        seconds=float(reference_rows[0]["snapshot_metadata"]["age_seconds"]),
+    )
+    data_seconds_apart = abs((shadow_data_at - reference_data_at).total_seconds())
+    shadow_bounds = continuous_auction_bounds(shadow_data_at)
+    reference_bounds = continuous_auction_bounds(reference_data_at)
+    same_continuous_segment = shadow_bounds is not None and shadow_bounds == reference_bounds
+    if not completeness["complete"]:
+        return {
+            **row, "status": "incomplete", "reference_observed_at": reference_at.isoformat(),
+            "reference_data_at": reference_data_at.isoformat(), "data_seconds_apart": data_seconds_apart,
+            "same_continuous_segment": same_continuous_segment, "comparison": None,
+        }
     seconds_apart = abs((observed_at - reference_at).total_seconds())
     return {
         **row,
         "status": "compared",
         "reference_observed_at": reference_at.isoformat(),
+        "reference_data_at": reference_data_at.isoformat(),
+        "data_seconds_apart": data_seconds_apart,
+        "same_continuous_segment": same_continuous_segment,
         "comparison": compare(reference_rows, tdx_rows, seconds_apart),
     }
 
@@ -164,7 +185,7 @@ class TdxShadowSnapshotRuntime:
             self._read_task = None
             return {"status": "failed", "error": safe_error_detail(str(error), 300), "stored": 0}
         self._read_task = None
-        rows, metadata = _as_rows_and_metadata(result)
+        rows, metadata = _as_rows_and_metadata(result, observed)
         projected = project_tdx_snapshot_rows(rows, observed)
         completeness = tdx_snapshot_completeness(
             len(rows), metadata.get("warnings") or (), await self._roster_total(observed),
@@ -181,7 +202,9 @@ class TdxShadowSnapshotRuntime:
         reference = self.deps.recent_reference(observed)
         if reference is not None and abs((observed - reference[0]).total_seconds()) > REFERENCE_MAX_AGE_SECONDS:
             reference = None
-        comparison_row = _comparison_row(observed, projected, reference, completeness)
+        comparison_row = _comparison_row(
+            observed, projected, reference, completeness, metadata["available_at"],
+        )
         try:
             stored = await self.deps.run_database(
                 self.deps.persist_capture, self.deps.database, observed, projected,
