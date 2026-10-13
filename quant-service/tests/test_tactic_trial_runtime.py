@@ -150,21 +150,28 @@ class TacticTrialRuntimeTests(unittest.TestCase):
                 return risks if capability == runtime.RISK_CAPABILITY else []
             captured = []
             builder = runtime._build_close_reading
+
+            def read_windows(_connection, symbol_days):
+                window_calls.append(symbol_days)
+                return windows
             with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=session_days), \
                  mock.patch.object(runtime.tactic_trial_repository, "read_limit_lists", return_value=lists), \
                  mock.patch.object(runtime.tactic_trial_repository, "read_capability", side_effect=capability), \
                  mock.patch.object(runtime.tactic_trial_repository, "read_day_bars", return_value=bars), \
-                 mock.patch.object(runtime.tactic_trial_repository, "read_history_windows", return_value=windows), \
+                 mock.patch.object(runtime.tactic_trial_repository, "read_history_windows", side_effect=read_windows), \
                  mock.patch.object(runtime.tactic_trial_repository, "read_market_turnover", return_value=[{"trading_date": day1, "market_turnover": 1}]), \
                  mock.patch.object(runtime.tactic_trial_repository, "read_exit_bars", return_value=[]), \
                  mock.patch.object(runtime, "_build_close_reading", side_effect=lambda *args, **kwargs: (captured.append(builder(*args, **kwargs)) or captured[-1])), \
                  mock.patch.object(runtime.derived_daily_readings, "store"):
                 result = runtime.replay(Database(), "close", day1, session_days[-1])
             return result, captured
+        window_calls = []
         with mock.patch.object(runtime, "_settle_reading", return_value={}):
             one, one_readings = run([day1])
             two, two_readings = run([day1, day2])
         self.assertEqual(one_readings[0]["rows"][0]["runup_20"], two_readings[0]["rows"][0]["runup_20"])
+        self.assertEqual(window_calls, [[("000001.SZ", day1)], [("000001.SZ", day1)], [("000001.SZ", day2)]],
+                         "the windows are read one day at a time: a chunk's would not fit the owner host")
 
     def test_replay_refusal_uses_decoder_coverage(self):
         day = date(2026, 3, 3)

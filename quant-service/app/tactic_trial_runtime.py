@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import resource
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -39,6 +40,9 @@ SUMMARY_CAPABILITY = "tactic_trials_summary_daily"
 RISK_CAPABILITY = "limit_up_risk_daily"
 DESK_CAPABILITY = "auction_open_desk_daily"
 REPLAY_DISAGREEMENT_LIMIT = 0.005
+# Sessions a replay holds at once. The owner host has 894 MB: a chunk's bars, exit paths and settled documents
+# are tens of megabytes at 20 sessions; the 250-session windows are read one day at a time.
+REPLAY_CHUNK_SESSIONS = 20
 
 
 def _research(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -427,7 +431,7 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
     if slot not in {"close", "auction"}:
         raise ValueError("slot must be close or auction")
     sessions = _read(database, tactic_trial_repository.read_open_sessions, start, end)
-    chunks = [sessions[index:index + tactic_trial_repository.CHUNK_SESSIONS] for index in range(0, len(sessions), tactic_trial_repository.CHUNK_SESSIONS)]
+    chunks = [sessions[index:index + REPLAY_CHUNK_SESSIONS] for index in range(0, len(sessions), REPLAY_CHUNK_SESSIONS)]
     report: dict[str, dict[str, int]] = {}
     recent: list[tuple[date, Mapping[str, Any] | None]] = []
     skipped: dict[str, int] = {}
@@ -450,18 +454,13 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
             lists_by_day = {item["trade_date"]: item for item in lists["days"]}
             symbols_by_day = {day: limit_up_risk_repository.symbols(item["lists"])
                               for day, item in lists_by_day.items()}
-            symbol_days = [(symbol, day) for day, day_symbols in symbols_by_day.items() for symbol in day_symbols]
-            symbols = sorted({symbol for symbol, _day in symbol_days})
-            if symbol_days:
+            symbols = sorted({symbol for day_symbols in symbols_by_day.values() for symbol in day_symbols})
+            if symbols:
                 with database.transaction() as connection:
                     bar_rows = tactic_trial_repository.read_day_bars(connection, first, last, symbols)
-                    window_rows = tactic_trial_repository.read_history_windows(connection, symbol_days)
                     turnover = tactic_trial_repository.read_market_turnover(connection, first - timedelta(days=120), last)
             else:
-                bar_rows, window_rows, turnover = [], [], []
-            windows: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
-            for row in window_rows:
-                windows.setdefault((str(row["symbol"]), row["pick_day"]), []).append(row)
+                bar_rows, turnover = [], []
             bars_by_day: dict[date, dict[str, Mapping[str, Any]]] = {}
             for row in bar_rows:
                 bars_by_day.setdefault(row["trading_date"], {})[str(row["symbol"])] = row
@@ -472,6 +471,10 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
                     recent.append((day, None))
                     recent = recent[-3:]
                     continue
+                windows: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
+                for row in _read(database, tactic_trial_repository.read_history_windows,
+                                 [(symbol, day) for symbol in symbols_by_day[day]]):
+                    windows.setdefault((str(row["symbol"]), row["pick_day"]), []).append(row)
                 reading = _build_close_reading(
                     day, item["lists"], risk.get(day.isoformat(), {}), bars_by_day.get(day, {}), windows,
                     turnover, previous, replayed=True,
@@ -560,7 +563,8 @@ def main() -> None:  # pragma: no cover
     from .database import Database
     database = Database(); database.open()
     result = summarise(database, args.summarise, apply=args.apply) if args.summarise else replay(database, args.slot, args.start, args.end, apply=args.apply)
-    print(json.dumps(result, ensure_ascii=False, default=str))
+    # ru_maxrss is in kilobytes on Linux, where this runs: the run's peak memory beside its result.
+    print(json.dumps({**result, "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024}, ensure_ascii=False, default=str))
 
 
 if __name__ == "__main__":
