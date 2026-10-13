@@ -62,6 +62,19 @@ Measured on 2026-10-13 (`docs/work/probes/2026-10-13-index-minute-third-field.py
   today, percent), `open_gap`, `intraday`, `promotion` (share sealing again), `big_loss` (share closing 5% or more
   lower), `n`.
 
+### The platform's stored sentiment temperature: `/Users/papa/codebase/n8n/state/research/vshape_20261013/owner/temperature_daily.json`
+
+Exported from the owner on 2026-10-13 (`docs/work/probes/2026-10-13-temperature-export.py`): `rows`, one per
+session, 2025-02-14 .. 2026-10-09 (400 sessions; nothing is stored before, and 2026-10-12 was not stored yet).
+Decision 0013 (`docs/decisions/0013-sentiment-temperature-and-flows.md`) defines it. Per row: `temperature`
+(0-100, eight components each ranked against its own 250 sessions), `band`, `scores` and `values` of the
+components (limit-up and limit-down counts, seal rate, share rising, premium and promotion of yesterday's
+limit-ups, highest board, turnover ratio), `etf_flow` (turnover of a basket of twelve broad index funds over its
+mean of the previous 20 sessions), `marker` (the cold-day fund-surge marker) and `timing`. The platform's
+thresholds: cold at 40 or under, freezing at 20 or under, a fund surge at a ratio of 1.5 or more.
+This is the project's existing definition of an ice point and of heavy fund turnover, on days. Use it where it
+exists; it covers about half of the minute data's span.
+
 ### Our own minute radar: `/Users/papa/codebase/n8n/state/research/vshape_20261013/radar/`
 
 `radar_2026-10-09.json` (afternoon only), `radar_2026-10-12.json`, `radar_2026-10-13.full.json` (244 minutes):
@@ -80,6 +93,10 @@ From `docs/work/probes/2026-10-13-vday-history.out.txt` (daily data, each stock'
   on average.
 - "The weakest rebound most" holds within the day and is given back overnight; buying the close of a V day shows
   nothing in any group. On 2026-10-13 it was stronger than in history.
+- Decision 0013's backtest (2025-04 .. 2026-10, daily): cold days (temperature 40 or under) with a fund-basket
+  ratio of 1.5 or more rose over the next 1, 3 and 5 days 90% of the time; that is ten days in four or five
+  episodes. This study asks the same of the minute: does heavy fund turnover inside a deep-low session say more
+  than the day's total does after the close?
 - 2026-10-13: the median stock bottomed at 09:45 and made higher lows, while the main net amount bottomed at 11:18.
   This divergence is what the minute data can now test.
 
@@ -118,12 +135,17 @@ bars on each side) is reported next to it, not instead of it.
 named tail of its own trailing 250 sessions: `limit_up_prev` in the lowest fifth; the limit-down count of the
 previous session in the highest fifth; `premium` under zero; `promotion` in the lowest fifth; `big_loss` in the
 highest fifth; the share of rising stocks under 30% on each of the last two sessions; `avg` down 5% or more over
-the last five sessions; three or more falling sessions in a row.
+the last five sessions; three or more falling sessions in a row. And, from 2025-02 on, the platform's own reading
+of the previous session: `temperature` at 40 or under, at 20 or under, and its fall over the last three sessions.
+Report how the hand-built conditions agree with the stored temperature on the sessions that have both.
 
 **Index-fund volume.** For a fund and minute, traded value (volume times price) over the mean of the same minute
 across the previous 20 sessions. Report for each fund and for the six together: the ratio over the last 5 minutes
 and from 09:30 to `t`; "heavy" at 2 and at 3; and whether the first heavy 5-minute window came before or after
-the running low. The data cannot say who bought. Write "宽基 ETF 放量", never "国家队".
+the running low. Also the daily view the platform already stores: the previous session's `etf_flow` ratio and
+`marker`. The six funds fetched by the minute are half of decision 0013's basket of twelve (the other six are
+more CSI 300 and A500 funds); say so wherever the two are compared. The data cannot say who bought. Write
+"宽基 ETF 放量", never "国家队".
 
 **Volume on the rebound leg.** `SH000001` plus `SZ399001` volume per minute from the running low to `t`, over the
 same number of minutes before the low, each divided by its mean at those minutes across the previous 20 sessions.
