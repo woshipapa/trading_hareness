@@ -303,6 +303,27 @@
 - needs: 无
 - updated: 2026-10-13
 
+### B034 公开内容抓取能力：从候选清单里挑工具接入
+
+- state: open
+- kind: idea
+- why: 用户 2026-10-13 要求把公众号、雪球、微博、淘股吧、抖音/B站的开源抓取工具登记到 n8n 下，作为以后可抓取的能力；候选和边界在 `docs/PUBLIC_CONTENT_COLLECTOR_CANDIDATES.md`，工具都未核实
+- how: 先逐个核实仓库、许可证、cookie 要求并小批量试跑，再决定接哪几个、落到数据源层还是 video harness；只抓公开内容，不碰付费圈子和网盘转存资料
+- who: agent 核实和试跑；平台 cookie 由用户提供，写库由用户执行
+- needs: 用户给出优先抓取的老师名单和平台 cookie
+- updated: 2026-10-13
+
+### B035 `scripts/test_runtime_hosts.py` 有一项失败：supervisor 任务 `s2-gateway-tunnel` 没有主机归属
+
+- state: open
+- kind: defect
+- why: 提交前要过的脚本测试（`python3 -m pytest scripts -q`）因此有 1 项失败，后面真正的失败容易被当成“已知的那一项”放过。失败信息：`supervisor task s2-gateway-tunnel is not classified in hosts[workstation].supervisor_tasks; say whether it writes to the owner, reads it, talks to the edge or stays local`。来自提交 9c70389d（2026-10-12，另一条工作线给 supervisor 加了 S2 网关隧道），在已发布的 26170231 的干净检出里同样失败，与 W006、W008 的改动无关
+- how: 在主机登记表里给 `s2-gateway-tunnel` 填上归属（写 owner、读 owner、连 edge 还是只在本机），由加这个任务的那条工作线来填：它连到哪里只有那边清楚。验收：`/Users/papa/.venvs/svc/bin/python -m pytest scripts/test_runtime_hosts.py -q` 全过
+- who: 加这个任务的会话（主检出里 `scripts/svc_supervisor.py` 还有那边未提交的修改，本会话没有动）
+- needs: none
+- found: 2026-10-13，W008 派工 4 的实现者跑脚本测试时报出，主会话在主检出和发布检出 `/Users/papa/codebase/.codex-wt/n8n-release-26170231` 各复现一次（1 failed, 8 passed）
+- updated: 2026-10-13
+
 ## Closed
 
 ### B011 回看接口日历上界的修复待发布
