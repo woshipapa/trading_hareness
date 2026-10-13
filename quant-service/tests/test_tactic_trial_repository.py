@@ -34,7 +34,7 @@ class TacticTrialRepositoryTests(unittest.TestCase):
         start, end = date(2025, 1, 1), date(2025, 7, 19)
         read_limit_lists(connection, start, end)
         read_day_bars(connection, start, end, ["000001.SZ"])
-        read_history_windows(connection, start, end, [("000001.SZ", end)])
+        read_history_windows(connection, [("000001.SZ", end)])
         read_market_turnover(connection, start, end)
         read_exit_bars(connection, [("000001.SZ", end)])
         read_auction_lists(connection, start, end)
@@ -79,6 +79,20 @@ class TacticTrialRepositoryTests(unittest.TestCase):
         self.assertEqual(result["days"][0]["source"], "history")
         self.assertEqual(result["days"][0]["lists"]["pid:1"], [["a"]])
         self.assertEqual(result["days"][0]["lists"]["pid:2"], [])
+
+    def test_history_window_is_bounded_by_each_pick_day(self):
+        connection = Connection()
+        read_history_windows(connection, [("000001.SZ", date(2025, 7, 19))])
+        sql, params = connection.calls[-1]
+        self.assertIn("b.trading_date BETWEEN w.pick_day - 400 AND w.pick_day", sql)
+        self.assertEqual(len(params), 2)
+
+    def test_exit_limits_use_one_latest_limit_row(self):
+        connection = Connection()
+        read_exit_bars(connection, [("000001.SZ", date(2025, 7, 19))])
+        sql, _params = connection.calls[-1]
+        self.assertIn("LEFT JOIN LATERAL", sql)
+        self.assertIn("ORDER BY available_at DESC LIMIT 1", sql)
 
 
 if __name__ == "__main__":

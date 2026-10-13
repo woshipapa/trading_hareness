@@ -41,7 +41,7 @@ def read_lists(connection: Any, day: date) -> tuple[dict[str, list[list[Any]]], 
     return {key: live.get(key, []) for key in LIST_KEYS}, "live"
 
 
-def _symbols(lists: dict[str, list[list[Any]]]) -> list[str]:
+def symbols(lists: dict[str, list[list[Any]]]) -> list[str]:
     symbols: list[str] = []
     for key in LIST_KEYS:
         for row in lists[key]:
@@ -54,7 +54,7 @@ def _symbols(lists: dict[str, list[list[Any]]]) -> list[str]:
 
 def read_inputs(connection: Any, day: date) -> dict[str, Any]:
     lists, list_source = read_lists(connection, day)
-    symbols = _symbols(lists)
+    requested_symbols = symbols(lists)
     bars = {}
     for row in connection.execute(
             """SELECT b.symbol,b.open,b.close,b.pre_close,
@@ -69,7 +69,7 @@ def read_inputs(connection: Any, day: date) -> dict[str, Any]:
                  ) limits ON true
                 WHERE b.trading_date=%s AND b.symbol=ANY(%s)
                   AND NOT coalesce(b.is_suspended, false) AND b.pre_close > 0 AND b.open > 0 AND b.close > 0""",
-            (UNIT_RATIO, day, symbols),
+            (UNIT_RATIO, day, requested_symbols),
         ).fetchall():
         bars[str(row["symbol"])] = {**dict(row), "prior_amounts": []}
     prior = connection.execute(
@@ -83,7 +83,7 @@ def read_inputs(connection: Any, day: date) -> dict[str, Any]:
                     AND NOT coalesce(is_suspended, false) AND pre_close > 0 AND open > 0
                     AND close > 0
              ) recent WHERE position<=20 ORDER BY symbol,position""",
-        (UNIT_RATIO, symbols, day - timedelta(days=90), day - timedelta(days=1)),
+        (UNIT_RATIO, requested_symbols, day - timedelta(days=90), day - timedelta(days=1)),
     ).fetchall()
     for row in prior:
         if str(row["symbol"]) in bars:
@@ -91,4 +91,4 @@ def read_inputs(connection: Any, day: date) -> dict[str, Any]:
     return {"lists": lists, "list_source": list_source, "bars": bars}
 
 
-__all__ = ["LIST_KEYS", "read_inputs", "read_lists"]
+__all__ = ["LIST_KEYS", "read_inputs", "read_lists", "symbols"]

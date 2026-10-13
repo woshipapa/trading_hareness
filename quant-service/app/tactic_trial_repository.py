@@ -63,7 +63,7 @@ def read_day_bars(connection: Any, start: date, end: date, symbols: Sequence[str
     ).fetchall()]
 
 
-def read_history_windows(connection: Any, start: date, end: date, symbol_days: Sequence[tuple[str, date]]) -> list[dict[str, Any]]:
+def read_history_windows(connection: Any, symbol_days: Sequence[tuple[str, date]]) -> list[dict[str, Any]]:
     if not symbol_days:
         return []
     symbols, days = zip(*symbol_days)
@@ -71,9 +71,9 @@ def read_history_windows(connection: Any, start: date, end: date, symbol_days: S
         """WITH wanted(symbol,pick_day) AS (SELECT * FROM unnest(%s::text[],%s::date[]))
            SELECT w.symbol,w.pick_day,b.trading_date,b.close,b.high,b.volume,b.amount,b.adj_factor
              FROM wanted w JOIN quant.canonical_bars_daily b ON b.symbol=w.symbol
-            WHERE b.trading_date BETWEEN %s AND %s
+            WHERE b.trading_date BETWEEN w.pick_day - 400 AND w.pick_day
             ORDER BY w.symbol,w.pick_day,b.trading_date""",
-        (list(symbols), list(days), start, end),
+        (list(symbols), list(days)),
     ).fetchall()]
 
 
@@ -93,10 +93,11 @@ def read_exit_bars(connection: Any, symbol_days: Sequence[tuple[str, date]]) -> 
     return [dict(row) for row in connection.execute(
         """WITH wanted(symbol,pick_day) AS (SELECT * FROM unnest(%s::text[],%s::date[]))
            SELECT w.symbol,w.pick_day,b.trading_date,b.open,b.high,b.low,b.close,b.pre_close,b.adj_factor,
-                  b.is_suspended,coalesce(nullif(b.limit_up,0),l.limit_up) AS limit_up,
-                  coalesce(nullif(b.limit_down,0),l.limit_down) AS limit_down
+                  b.is_suspended,limits.limit_up,limits.limit_down
              FROM wanted w JOIN quant.canonical_bars_daily b ON b.symbol=w.symbol
-             LEFT JOIN quant.daily_trade_limits l ON l.symbol=b.symbol AND l.trading_date=b.trading_date
+             LEFT JOIN LATERAL (SELECT limit_up,limit_down FROM quant.daily_trade_limits
+                                  WHERE symbol=b.symbol AND trading_date=b.trading_date AND limit_up>0
+                                  ORDER BY available_at DESC LIMIT 1) limits ON true
             WHERE b.trading_date BETWEEN w.pick_day-30 AND w.pick_day+30
             ORDER BY w.symbol,w.pick_day,b.trading_date""",
         (list(symbols), list(days)),
