@@ -375,7 +375,8 @@
 
 ### B042 我们这一侧新加的盘后阶段没有任何东西定时触发
 
-- state: ready
+- state: doing
+- stream: W011
 - kind: defect
 - why: 完整的盘后流程（`post_close_refresh_service`，40 个阶段）只在对方自己的服务上定时运行，那边是 2026-09-20 的代码（`owner_deploy.release_id = 20260920T194536-bc69bee85233-clean`），阶段表是旧的；我们这一侧（peer）的那份只能通过接口手工触发，peer 每晚自己只跑 `peer_close_research` 的五个阶段（老师复盘滚动等）。出处：`quant-service/app/peer_close_research.py` 的模块说明；发布的代码里 `run_post_close_refresh` 只有接口一个调用处；10 月 13 日 owner 库里当天的阶段回执是 31 个，其中 4 个不在我们的阶段表里、我们阶段表里的 13 个一个回执都没有（FACTS F023）。后果：9 月 20 日之后加进阶段表的阶段从来没有自己跑过——涨停榜（`limit_performance_lists`）和大面风险分（`limit_up_risk`，W001）、情绪温度、盘中温度、宽基 ETF 放量、金银指（决策 0013）、候选台账、分钟面板导出、交易日历、日线控制对账。温度序列因此停在 10 月 9 日；10 月 12 日晚的榜单和风险分是发布验证时手工跑的。W002 的竞价池每天 09:15 要用前一交易日的风险分读数：没人手工跑，第二天就没有竞价处置表。W006 方案里“加一个盘后阶段”的接线同样不会运行
 - how: 两步。(1) 每个交易日当晚手工补当天的榜单和风险分，直到修好：`! bash ~/codebase/n8n/state/lists13.sh`（它把 `docs/work/probes/2026-10-13-evening-lists-and-risk.py` 送进 owner 容器执行，调用的就是那两个阶段的函数；实时榜单只在当天 15:00 之后、24:00 之前能取；可重复执行）。错过了当晚，就要等历史接口有这一天再用 `python -m app.market_history_backfill <日> <日> --sources longhu_limit_performance` 补，那条命令会加载整个服务，新主机内存只有 894 MB，要先看内存。(2) 改代码：让 peer 自己的晚间循环（`peer_close_research` 那种“每个交易日一次、每个阶段有回执、完成了不重跑”的做法）负责 peer 独有的阶段，至少是榜单和风险分，再按内存和耗时逐个决定温度、ETF、金银指、候选台账、分钟面板导出要不要进去（分钟面板导出要读当天全部分钟文档，新主机上很可能放不下）。这是一条新的工作线，要方案和用户批准；W006 的第 10 步在它之后做
@@ -457,6 +458,17 @@
 - how: 补测试；把取请求字典的那一行改成同时看位置参数和 `data` 关键字
 - who: agent
 - needs: 无
+- updated: 2026-10-13
+
+### B050 owner 上只用一套镜像，以后的发布都是代码覆盖
+
+- state: open
+- kind: follow-up
+- why: 用户 2026-10-13：「对于后续owner侧的这个内存问题，你看看能否统一都用一套镜像，以后都是代码上的hotfix啊」。新 owner 主机只有 894 MB 内存，全量发布（`scripts/shared-peer/deploy-full-release.sh`）要在主机上用 wheelhouse 构建镜像，不能再这么做。现状：主机上量化服务只有一个镜像 `trading-hareness-peer-quant-research:latest`（`58da6ff8766c`，1.12 GB，来自 `owner-full-20261012-20`），两个容器都用它，日常发布已经是在它上面盖源码（`owner-code-*`）。还会把发布变成“全量”的有三类：(1) 真的要换镜像的改动（`requirements.txt`、Dockerfile、系统包），很少；(2) 不需要换镜像、只是主机上那棵发布树要更新的改动（`deploy/shared-peer/compose.yaml`、会在主机上执行的脚本、迁移文件）；(3) 分类规则不认识、按保守处理的路径（新加的或没登记的 `scripts/` 文件）。2026-10-13 第 (3) 类就发生了一次：改两个手工脚本的默认地址，下一次发布被判成全量，只好把改动撤回（提交 e8cb8dbf）
+- how: 出一个小方案，三件事。(a) 给第 (2) 类一条不构建镜像的发布路径：只更新主机上的发布树和 compose、用现有镜像重建容器，迁移单独执行。(b) 第 (1) 类改成在别处构建（本机或 CI，linux/amd64）后把镜像传到主机加载，主机上只做加载和切换；并约定平时尽量不动依赖。(c) 把只在工作站或由人手在主机上执行的脚本在分类规则里登记为“不属于 owner 运行时”，新脚本进仓库时同时登记，减少第 (3) 类。先做 (c)，它最小；(a)(b) 要读 `docs/RELEASE_SYNC_47.md` 的 F5、F6 两节再定
+- who: agent 出方案，用户批准
+- needs: none
+- found: 2026-10-13
 - updated: 2026-10-13
 
 ## Closed

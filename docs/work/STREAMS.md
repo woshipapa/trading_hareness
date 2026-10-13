@@ -15,6 +15,7 @@
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | merged | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 两件事。(1) 准备第二次 owner 纯代码发布（从 26170231 到主线当前提交；`scripts/release plan` 判为纯代码、2 个运行时文件：目录和通达信并行采集的当日汇总），窗口是 10 月 13 日 22:05 之后或 10 月 14 日 11:30–13:00、15:10–18:45；这是迁到新服务器后的第一次发布，脚本的默认目标已是新主机（提交 4bb8c7ff），包装脚本备好后交给用户执行。(2) 从 main 建 `tdx-live-snapshot-fallback` 工作区派工 6（B1 的读取链）。先做 (1) 还是先攒着和 B1、B2 一起发，问用户；明早 09:16 的核对（见 Due）不依赖这次发布 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户在看板上试用后按反馈改；用户第一次真实使用时核对三件没在线上看到的事：(1) 会员到期提醒真的 @ 到别的租户的成员；(2) 一条文字转发被核对上、源头撤回后目标群同步撤回；(3) 一键建同步群走通全程。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
+| [W011](streams/W011-peer-evening-stages.md) | 每晚该跑的阶段由我们这一侧自己触发 | planned | Claude Code 会话 93ba6e1d（主会话），2026-10-13 | 等 Codex 对方案的只读审计（新线程，主会话的后台调用；结论是 SOUND 或逐条异议），按异议改方案，把最终方案的要点给用户看一眼后建工作区 `peer-evening-stages` 派工（两次）。目标是 10 月 14 日 15:10–18:45 的窗口发布，当晚第一次自动运行 | 2026-10-13 |
 
 ## 已结束、暂停或放弃
 
