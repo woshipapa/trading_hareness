@@ -3165,6 +3165,10 @@ async def peer_close_research_loop() -> None:
         settle_xiaojie=lambda day: settle_xiaojie_recent_sessions(day),
         daily_digest=lambda day: run_daily_research_digest(day, _teacher_review_dependencies()),
         record_stage=record_stage_with_receipt, safe_error=safe_error_detail,
+        # Decision 0021: the daily products the stage table holds but nothing starts on the peer.
+        call_longhu=(lambda request: shared_stock_api_call(request)) if longhu_vendor_configured() else None,
+        refresh_broad_etf_flow=lambda day: refresh_broad_etf_flow(db, day, run_database=run_database_blocking),
+        refresh_market_timing=lambda day: refresh_market_timing(db, day, run_database=run_database_blocking),
     ))
 
 
