@@ -17,6 +17,7 @@
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户在看板上改完 anqiang 群剩下的 7 个会员后，按用户的意思打开或不打开每天自动审查；用户第一次真实使用时核对没在线上看到的事（Open questions）。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
 | [W011](streams/W011-peer-evening-stages.md) | 每晚该跑的阶段由我们这一侧自己触发 | planned | Claude Code 会话 93ba6e1d（主会话），2026-10-13 | 等 Codex 对方案的只读审计（新线程，主会话的后台调用；结论是 SOUND 或逐条异议），按异议改方案，把最终方案的要点给用户看一眼后建工作区 `peer-evening-stages` 派工（两次）。目标是 10 月 14 日 15:10–18:45 的窗口发布，当晚第一次自动运行 | 2026-10-13 |
 | [W012](streams/W012-owner-hot-releases.md) | owner 只用一套镜像，其余改动全部热部署 | planned | Claude Code 会话 93ba6e1d（主会话），2026-10-13 | 送 Codex 做方案审计（只读，新线程；W011 的审计也还在跑，两个都回来后一起处理），按异议改方案，把最终方案的要点给用户看，然后建工作区 `owner-hot-releases` 派工（四次）。这条线改的是发布安全规则，合并前要双评审，第一次真实使用要用户在场并演练一次回滚 | 2026-10-13 |
+| [W013](streams/W013-licensed-batch-fetch.md) | 授权接口的批量取数：一个工具、一条并发规矩 | approved | Claude Code 会话 93ba6e1d（主会话），2026-10-13 | 等 Codex 交回工具和测试（工作区 `/Users/papa/codebase/.codex-wt/n8n-licensed-batch-fetch`，分支 `codex/licensed-batch-fetch`），在工作区跑验收（`pytest scripts -q`、`node scripts/shared-peer/deploy-code-only.test.mjs`、`python3 scripts/generate_scripts_catalog.py --check`、`git diff --check`）并读 diff，送只读评审，通过后合并进 main 并回收工作区 | 2026-10-13 |
 
 ## 等用户处理
 
@@ -36,6 +37,7 @@
 ## 正在运行
 
 - W011 2026-10-13 22:20 Codex 方案审计在跑（只读，新线程）。结束标志：它交回 SOUND 或编号的异议。之后见 next。挂在主会话 93ba6e1d 上。
+- W013 2026-10-13 23:09 Codex 实现者在写工具和测试（新线程，工作区 `/Users/papa/codebase/.codex-wt/n8n-licensed-batch-fetch`）。结束标志：分支有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上。
 
 ## 待办清单
 
