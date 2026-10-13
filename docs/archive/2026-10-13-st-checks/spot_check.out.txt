@@ -1,0 +1,18 @@
+stock-days: first_break 86546 touch_fail 380091
+
+[1] first break of the 20-day high, next close minus the day's all-stock mean (dev | hold-out)
+  vr<1 all                             n=  4892  ret1_x +1.66% t=+9.9 d=470 | +1.69% t=+5.8 d=155  o2o_x -0.51% t=-2.9 d=449 | -0.79% t=-3.0 d=148
+  vr<1 one-word boards                 n=   446  ret1_x +5.91% t=+15.0 d=227 | +8.13% t=+11.2 d=77  o2o_x -2.69% t=-3.3 d=119 | -1.64% t=-1.3 d=40
+  vr<1 limit-up close, not one-word    n=   598  ret1_x +2.97% t=+8.5 d=219 | +1.79% t=+3.8 d=112  o2o_x -1.90% t=-4.3 d=185 | -1.62% t=-3.5 d=104
+  vr<1 not limit-up close              n=  3848  ret1_x +0.12% t=+1.0 d=381 | -0.00% t=-0.0 d=119  o2o_x +0.16% t=+1.3 d=380 | -0.03% t=-0.1 d=117
+  vr 1-2 not limit-up                  n= 33365  ret1_x -0.11% t=-1.6 d=544 | +0.04% t=+0.4 d=171  o2o_x -0.10% t=-1.5 d=544 | +0.11% t=+1.0 d=169
+  vr 2-4 not limit-up                  n= 28231  ret1_x -0.35% t=-5.7 d=552 | -0.33% t=-2.8 d=172  o2o_x -0.20% t=-3.6 d=552 | -0.13% t=-1.1 d=170
+  vr>=4 not limit-up                   n=  7299  ret1_x -0.85% t=-9.2 d=547 | -0.69% t=-3.7 d=170  o2o_x -0.17% t=-2.0 d=547 | -0.20% t=-1.1 d=168
+
+[2] touched the 20-day high and closed back below it, minus the day's all-stock mean (dev | hold-out)
+  vr<1     n= 98962  overnight_x +0.10% t=+3.9 d=542 | +0.04% t=+1.2 d=170  ret1_x +0.08% t=+1.4 d=542 | +0.09% t=+0.9 d=170  o2o_x +0.02% t=+0.3 d=541 | +0.06% t=+0.6 d=169
+  vr 1-2   n=205610  overnight_x -0.05% t=-4.1 d=558 | -0.11% t=-3.1 d=173  ret1_x -0.02% t=-0.6 d=558 | +0.00% t=+0.0 d=173  o2o_x -0.02% t=-0.4 d=558 | -0.03% t=-0.3 d=172
+  vr 2-4   n= 61964  overnight_x -0.46% t=-21.8 d=558 | -0.43% t=-9.9 d=172  ret1_x -0.19% t=-4.2 d=558 | -0.21% t=-2.6 d=172  o2o_x -0.04% t=-0.9 d=558 | -0.06% t=-0.8 d=170
+  vr>=4    n= 12795  overnight_x -1.58% t=-33.9 d=558 | -1.26% t=-12.7 d=172  ret1_x -0.99% t=-12.2 d=558 | -0.63% t=-3.4 d=172  o2o_x -0.31% t=-3.6 d=558 | -0.25% t=-1.4 d=170
+
+list columns: ['symbol', 'trading_date', 'pid', 'seal_hm', 'seal_same_day', 'sector', 'seal_money', 'seal_max', 'lh_net', 'lh_buy', 'lh_sell', 'lh_turnover', 'float_cap', 'turnover_rate', 'boards', 'f16', 'f17', 'f20', 'price', 'pct']

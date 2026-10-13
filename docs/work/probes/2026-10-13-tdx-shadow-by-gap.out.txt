@@ -1,0 +1,9 @@
+compared 162 in continuous trading 149
+  gap under 5 s: n 15  within one tick median 0.581 min 0.310  within 0.5% median 0.986 min 0.855
+  gap 5-15 s: n 24  within one tick median 0.595 min 0.332  within 0.5% median 0.987 min 0.879
+  gap 15-30 s: n 40  within one tick median 0.492 min 0.195  within 0.5% median 0.970 min 0.598
+  gap 30 s and more: n 70  within one tick median 0.421 min 0.110  within 0.5% median 0.954 min 0.348
+  symbols in both: min 0 max 5560 | only in TDX max 33 | only in main max 5444
+  largest relative price gaps: [(0.0951, '09:33'), (0.1041, '09:30'), (0.1081, '09:54')]
+fuyao_ths: minutes with a document 167; missing of 173 expected (09:15-11:30, 13:00-13:36): 8 ['09:15', '09:35', '10:01', '10:31', '10:59', '11:27', '11:30', '13:13']
+tdx_public: minutes with a document 163; missing of 173 expected (09:15-11:30, 13:00-13:36): 13 ['09:28', '09:45', '10:01', '10:17', '10:34', '10:50', '11:04', '11:18', '11:29', '11:30', '13:07', '13:24', '13:36']

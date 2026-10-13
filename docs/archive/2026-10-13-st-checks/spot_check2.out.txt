@@ -1,0 +1,27 @@
+[A] theme leader = earliest seal, leader minus followers, day means, % (dev | hold-out); stock-days 40051
+  all boards         overnight1 +1.75 t=+24.6 d=565 | +1.71 t=+14.9 d=172
+  all boards         ret1       +1.17 t=+11.4 d=565 | +1.19 t=+6.3 d=172
+  all boards         seal_next  +14.83 t=+21.8 d=565 | +14.39 t=+11.9 d=172
+  all boards         o2o_buy    -0.48 t=-3.2 d=565 | -0.06 t=-0.3 d=171
+  first boards only  overnight1 +0.91 t=+9.8 d=561 | +1.21 t=+8.5 d=172
+  first boards only  ret1       +0.53 t=+4.2 d=561 | +0.73 t=+3.3 d=172
+  first boards only  seal_next  +5.63 t=+6.3 d=561 | +9.02 t=+6.4 d=172
+  first boards only  o2o_buy    -0.29 t=-1.8 d=559 | +0.01 t=+0.1 d=170
+
+[B] yesterday's limit-up pool, rule group minus the rest inside day x gap bucket x board bucket, % (dev | hold-out); pool stock-days 39288 on list 18595
+  pool top 5 by auction amount   n=2795
+     seal_next +12.12 t=+5.9 d=342 | +6.09 t=+2.0 d=159
+     hold_close +1.18 t=+4.5 d=342 | +0.12 t=+0.3 d=159
+     o2c_buy +0.60 t=+1.3 d=172 | -0.18 t=-0.4 d=125
+     o2o_buy +0.42 t=+0.6 d=172 | +0.01 t=+0.0 d=124
+  pool top 10 by auction amount  n=5588
+     seal_next +5.86 t=+3.9 d=384 | +5.36 t=+2.8 d=171
+     hold_close +0.98 t=+4.5 d=384 | +0.41 t=+1.5 d=171
+     o2c_buy +0.17 t=+0.7 d=344 | -0.15 t=-0.6 d=167
+     o2o_buy +0.07 t=+0.2 d=344 | -0.48 t=-1.4 d=165
+  vendor list rank <= 10         n=3470
+     seal_next +10.10 t=+4.9 d=348 | +7.95 t=+2.6 d=151
+     hold_close +1.26 t=+4.5 d=348 | +0.53 t=+1.3 d=151
+     o2c_buy +0.41 t=+1.0 d=235 | -0.24 t=-0.5 d=131
+     o2o_buy +0.21 t=+0.3 d=235 | +0.05 t=+0.1 d=129
+  pool top 5, absolute day means: seal_next +77.05 t=+69.7 d=387 | +64.19 t=+31.9 d=172 ; hold_close +8.12 t=+56.2 d=387 | +6.93 t=+26.2 d=172 ; o2c_buy -0.49 t=-1.4 d=211 | -0.82 t=-2.1 d=140 ; o2o_buy -0.63 t=-1.1 d=211 | -0.69 t=-1.1 d=139

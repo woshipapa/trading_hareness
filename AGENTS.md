@@ -7,6 +7,19 @@ All analyst scoring, regression, calibration, pattern mining and recommendations
 are evidence-only until an explicit promotion record says otherwise. Never add a
 provider response directly to a live threshold or order path.
 
+## Working notes (read first)
+
+The state of ongoing work lives in `docs/work/`, kept under the `dev-notes` skill so that a new agent can
+continue without the previous conversation.
+
+- At session start read `docs/work/STATUS.md` (generated; never edit it), then the record of the line you were
+  asked about under `docs/work/streams/`. `docs/work/README.md` holds this project's specifics: the commands, the
+  dates (the notes use Asia/Shanghai; this machine's clock and `git log` are US Pacific), what only the user runs.
+- Load the `dev-notes` skill before starting, planning, dispatching, merging, releasing or closing a line of
+  work, when the user changes a requirement or asks to record something, and at wrap-up or hand-off.
+- New work, follow-ups and data to backfill get an id in a record or in `docs/work/BACKLOG.md`; a fact about the
+  live systems goes into `docs/work/FACTS.md` with its date and its probe. A sentence in the chat is not a record.
+
 ## Change map
 
 - `quant-service/app/routers/`: HTTP boundary and request validation.
