@@ -8,12 +8,14 @@ creates a trading decision.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from . import minute_cross_section
+from .intraday_schedule import seconds_until_slot
 
 
 async def capture_level1_snapshot(
@@ -107,16 +109,24 @@ async def run_level1_snapshot_loop(
     interval_seconds: int,
     capture: Callable[[], Awaitable[dict[str, Any]]],
     log: Callable[[str], None] = print,
+    clock: Callable[[], float] = time.time,
+    sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
 ) -> None:
-    """Run at a bounded ~60 second cadence; errors never stop future rounds."""
+    """Run on fixed wall-clock slots; errors never stop future rounds."""
+    interval = max(10, min(300, int(interval_seconds)))
     while True:
+        now = clock()
+        slot_wait = seconds_until_slot(now, interval, 50)
+        slot_at = now + slot_wait
+        await sleep(slot_wait)
         try:
             result = await capture()
             if result.get("status") not in {"completed", "empty", "outside_session"}:
                 log(f"all-A Level-1 capture degraded: {str(result)[:400]}")
         except Exception as error:  # noqa: BLE001 - next cadence is the retry
             log(f"all-A Level-1 capture failed: {str(error)[:300]}")
-        await asyncio.sleep(max(10, min(300, int(interval_seconds))))
+        if clock() >= slot_at + interval:
+            log("all-A Level-1 capture overran its slot; skipped to the next slot")
 
 
 @dataclass(frozen=True)

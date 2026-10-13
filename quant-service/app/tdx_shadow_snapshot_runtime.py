@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import time as clock_time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
@@ -20,6 +21,7 @@ from .minute_cross_section import persist_document
 from .public_market_repository import persist_timed_observations
 from .public_provider_rate_limits import PublicProviderRateLimited, acquire_public_provider_slot
 from .runtime_executors import ExecutorSaturatedError
+from .intraday_schedule import seconds_until_slot
 
 
 SHADOW_PROVIDER = "tdx_public"
@@ -177,13 +179,20 @@ class TdxShadowSnapshotRuntime:
 async def run_tdx_shadow_snapshot_loop(
     runtime: TdxShadowSnapshotRuntime, *, interval_seconds: int = 60, log: Callable[[str], None] = print,
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+    clock: Callable[[], float] = clock_time.time,
 ) -> None:
+    interval = max(10, min(300, int(interval_seconds)))
     while True:
+        now = clock()
+        slot_wait = seconds_until_slot(now, interval, 52)
+        slot_at = now + slot_wait
+        await sleep(slot_wait)
         result = await runtime.capture()
         if result.get("status") not in {"completed", "outside_session"}:
             suffix = f": {result.get('error')}" if result.get("error") else ""
             log(f"tdx_all_a_shadow {result['status']}{suffix}")
-        await sleep(max(10, min(300, int(interval_seconds))))
+        if clock() >= slot_at + interval:
+            log("tdx_all_a_shadow capture overran its slot; skipped to the next slot")
 
 
 def _day_bounds(trade_date: date) -> tuple[datetime, datetime]:
