@@ -212,6 +212,7 @@
 - note5: 2026-10-13 17:02 用户：在修的是 owner 的 Windows 工作站；代码这边先全部做完，等工作站修好就发布
 - note6: 2026-10-13 17:33 reality: 17:29 检查，中转服务器已恢复（`uptime` 显示开机 29 分钟，也就是 17:00 前后重启过；内存 3,495 MB 里可用 2,226 MB；四个 peer 容器健康）；owner 读路径 `/health` 返回 200，直接读 owner 的雷达正常。用户 17:27 说“对方已经修好了”。原因没有告知，agent 也没有查到。还没恢复的一处：经 edge 中继读 owner 的路由仍返回 `fetch failed`（控制台因此看不到 owner 的数据），edge 到 owner 的那段连接要在 edge 上重连；agent 从本机没有登录 edge 的凭据（部署脚本有自己的），没有动
 - note7: 2026-10-13 18:13 reality: 经 edge 中继读 owner 的路由恢复了：`curl http://127.0.0.1:18300/api/research/indicators/health` 返回当天的指标清单（第一次请求 20 秒超时，第二次在 20 秒内返回；这个接口本来就慢）。agent 没有动 edge；是它自己重连的还是有人处理的，不清楚。到此 owner 一侧的三条路径（中转服务器 SSH、owner 读路径、edge 中继）都通了；还不知道的只有下午那次不响应的原因
+- note8: 2026-10-13 18:15 reality: owner 的盘后阶段回执（`docs/work/probes/2026-10-13-post-close-stages.py`，读 owner 的 `automation/runs`）显示 10 月 13 日有 26 个阶段在 16:02:07–16:03:52 运行并写了回执（多数 completed，`adjustment_factors` failed，`research_snapshot` blocked），另 5 个在 17:04:13–17:04:50。也就是说在本机连不上的那段时间里（15:07 起），中转服务器上的调度容器和它到数据库的连接在 16:02 是工作的：不通的是从外面进来的那段（SSH 和端口转发），不是整台主机停了。16:03:52 到 17:04:13 之间没有回执，与 17:00 前后的重启对得上
 - updated: 2026-10-13
 
 ### B032 `dev-notes` 技能在 agent-skills 仓库里还没提交
