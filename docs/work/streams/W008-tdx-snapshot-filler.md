@@ -1,12 +1,12 @@
 # W008 通达信补主行情快照的缺口并作备用
 
-- state: building
+- state: reviewing
 - holder: Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13
 - goal: 主数据源（同花顺）某一分钟缺了或出错时，用通达信的全市场快照补上并带来源标记；不把通达信变成主数据源
 - plan: docs/work/plans/tdx-live-snapshot-fallback.md
 - branch: codex/tdx-promote-gate
-- head: 4889ff76
-- next: 等 Codex 交回派工 5（升级工具认 `min_share`、`--decision-eligible`、五份当日汇总的门槛；发布分类规则里登记 `scripts/tdx-promote.py`），在工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate` 跑验收（发布路径测试、`pytest scripts -q`、分类器的 node 测试）并读 diff，然后送 Codex 评审者（只读）做双评审；通过后 `--no-ff` 合并进 main、回收工作区，再开 `tdx-live-snapshot-fallback` 分支派工 6
+- head: 61f09555
+- next: 等 Codex 评审者（只读，新线程，交回时才知道线程号）对 `codex/tdx-promote-gate` 的结论；主会话自己的两条小发现见 Log。有高优先级发现就核实后回派实现者线程 01a1349e-01a9-7172-9d3f-d63b744c9bcb（最多三轮）；通过后 `--no-ff` 合并进 main、回收工作区，再从 main 建 `tdx-live-snapshot-fallback` 工作区派工 6。这个分支不需要单独发布：它只改目录里的比对声明、升级工具和发布分类规则，随下一次 owner 纯代码发布带上
 - updated: 2026-10-13
 
 ## Requirements
@@ -45,7 +45,7 @@
 - [x] P4 当日汇总不再读文档正文，并按一致性规则给出当天是否通过 — 派工 3 — ceae8a1a — 发布路径测试 3049 项通过（主会话复跑）
 - [x] 发布 A（owner 纯代码，用户执行） — `owner-code-20261013-04`，2026-10-13 17:41；下一个交易日的核对和五个交易日的汇总见 Due
 - [x] B3 目录部分：比对项的 `min_share`、本绑定对主源的比对声明、改写“通达信一律不可决策”的断言 — 派工 4 — 4889ff76；`Ran 3050 tests ... OK (skipped=2)`、`python -m app.datasources validate` → `{"problems": 0}`（主会话在分支末端复跑，2026-10-13）
-- [ ] B3 工具部分：`scripts/tdx-promote.py` 认 `min_share`、加 `--decision-eligible`、升级本绑定必须带五份通过的当日汇总；发布分类器给这个脚本加“只在工作站运行”的规则（要用户明确同意；不同意则这个分支等 B1、B2 的分支一起合并，发布 B 走全量） — 派工 5
+- [x] B3 工具部分：`scripts/tdx-promote.py` 认 `min_share`、加 `--decision-eligible`、升级本绑定必须带五份通过的当日汇总；发布分类规则登记这个脚本是工作站工具（用户 2026-10-13 同意） — 派工 5 — 88af7299、61f09555；`Ran 3050 tests ... OK (skipped=2)`；`pytest scripts -q` → `1 failed, 355 passed, 3 skipped`（失败的是 BACKLOG B035 那一项）；`node scripts/shared-peer/deploy-code-only.test.mjs` 通过；分支自己的分类器把 7 个文件判为 1 个运行时（`catalog.py`）、6 个跳过（主会话复跑，2026-10-13）
 - [ ] B1 读取链：主源报 `FuyaoProviderError` 时读一次通达信，过完整性门槛才用；影子循环和读取链共用一个读取器；影子比对的参照只认主源文档；快照元数据带 `provider_key`、`decision_eligible`、`fallback_for` — 派工 6、7
 - [ ] B2 约十处使用方按快照自带的来源判断（方案列了清单），两份文档 — 派工 8、9、10
 - [ ] 发布 B（owner 纯代码，用户执行）
@@ -83,6 +83,8 @@
 
 - 2026-10-13 18:02 派工 4 验收：4889ff76，三个文件（`datasources/catalog.py` +10 −2 和两份测试）。实现者按方案留给它的取值：`min_share` 可省、省略时等于 1（保持原来“每一行都要在容差内”的行为）；通达信全 A 快照对主源的比对项——价格容差 0.5%、占比 0.95，成交量和成交额容差 1%、占比 0.85；断言从“通达信一律不可决策”改成“可决策的绑定必须是 `live_verified`”，现有绑定仍断言为不可决策。没有改任何绑定的状态。实现者另报 `pytest scripts -q` 有 1 个与本分支无关的失败（`test_runtime_hosts.py`：`s2-gateway-tunnel` 没有主机归属），见 BACKLOG。派工 5 已发给同一线程。
 
+- 2026-10-13 18:24 派工 5 验收并送评审。实现者的取舍：五份当日汇总的门槛只校验汇总里有的三项（`trade_date` 互不相同、`session_passes` 为真、`agreement_rule` 与目录现在的规则完全相同），汇总里没有“发布 A 之后”的标记，时间界限靠操作者交的是发布后的汇总（发布前的汇总可判分钟为 0，本来就不通过）。主会话读 diff 的两条小发现（等评审者的结论一起处理）：带 `--decision-eligible` 时打印的提交说明把“每份证据通过了哪些门槛”那句整句换掉了，应保留；汇总文件路径来回转了两次相对路径，可以只算一次。评审提示词要点：能否用任何参数组合绕过五份汇总；按字节偏移改目录源码是否总是合法 Python；`min_share` 为 1 时与原行为完全一致；分类规则的位置和测试；不会失败的测试。注意：在主检出里跑 `scripts/release plan <分支末端>` 会说“全量发布”，因为用的是主检出里还没有新规则的分类器；合并后再跑才是准的。当日汇总文件以后存在 `docs/work/probes/` 下（`docs/` 不算 owner 运行时），不要放 `scripts/data/`。
+
 ## Waiting on the user
 
 - [x] 2026-10-13 执行第一个分支的发布（`! bash ~/codebase/n8n/state/rel04.sh --apply`） → 用户 17:41 执行，`owner-code-20261013-04` 生效（2026-10-13）；核对见 Log
@@ -100,7 +102,8 @@
 - [x] 2026-10-13 评审第 2 轮 → WARNING：缺数据时间的分支在快照不完整时仍带了比对结果（已核实）；实现者修正为先判完整性、不完整一律不比对，提交 02991577，发布路径测试 3050 项通过（2026-10-13 17:33）
 - [x] 2026-10-13 评审第 3 轮 → APPROVED，没有新发现（2026-10-13 17:37）
 - [x] 2026-10-13 17:37 派工 4 → 交回 4889ff76，验收通过（2026-10-13 17:55）
-- [ ] 2026-10-13 17:57 Codex 实现者在做派工 5（B3 的工具部分和分类规则），线程 01a1349e-01a9-7172-9d3f-d63b744c9bcb，工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate`，分支 `codex/tdx-promote-gate`。结束标志：分支在 4889ff76 之后有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上，判断死活和续派的办法同 W006 的 Resume here。
+- [x] 2026-10-13 17:57 派工 5 → 交回 61f09555，验收通过（2026-10-13 18:24）
+- [ ] 2026-10-13 18:24 Codex 评审者（只读）在评审 `codex/tdx-promote-gate`（`git diff 26170231...HEAD`，4 个提交、7 个文件），工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate`。结束标志：它交回 APPROVED / WARNING / BLOCKED。之后见 next。挂在主会话 93ba6e1d 上；主会话不在了就重新发起一次只读评审（提示词要点在 Log）。
 
 - [x] 2026-10-13 13:50 主会话派出的接手 agent 在做：查清四个前置问题（只读）、把方案改到第 3 版、送 Codex 审查（最多三轮）、更新本记录并提交。结束标志：它交回最终方案和待用户批准的问题，本记录的 Plan 一节写了各轮审查结果。之后：主会话把方案转给用户请批准。该 agent 挂在主会话上，主会话结束它就停：接手者看本记录的 Log 和方案文件的修订说明，从没做完的那一步继续。 → 2026-10-13 15:25 做完交回：方案第 3 版、三轮审查、待批准的问题都在本记录里；没做成的只有收盘后重跑容差探针（见 Due）。
 
