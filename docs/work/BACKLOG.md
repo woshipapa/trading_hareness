@@ -462,7 +462,8 @@
 
 ### B050 owner 上只用一套镜像，以后的发布都是代码覆盖
 
-- state: open
+- state: doing
+- stream: W012
 - kind: follow-up
 - why: 用户 2026-10-13：「对于后续owner侧的这个内存问题，你看看能否统一都用一套镜像，以后都是代码上的hotfix啊」。新 owner 主机只有 894 MB 内存，全量发布（`scripts/shared-peer/deploy-full-release.sh`）要在主机上用 wheelhouse 构建镜像，不能再这么做。现状：主机上量化服务只有一个镜像 `trading-hareness-peer-quant-research:latest`（`58da6ff8766c`，1.12 GB，来自 `owner-full-20261012-20`），两个容器都用它，日常发布已经是在它上面盖源码（`owner-code-*`）。还会把发布变成“全量”的有三类：(1) 真的要换镜像的改动（`requirements.txt`、Dockerfile、系统包），很少；(2) 不需要换镜像、只是主机上那棵发布树要更新的改动（`deploy/shared-peer/compose.yaml`、会在主机上执行的脚本、迁移文件）；(3) 分类规则不认识、按保守处理的路径（新加的或没登记的 `scripts/` 文件）。2026-10-13 第 (3) 类就发生了一次：改两个手工脚本的默认地址，下一次发布被判成全量，只好把改动撤回（提交 e8cb8dbf）
 - how: 出一个小方案，三件事。(a) 给第 (2) 类一条不构建镜像的发布路径：只更新主机上的发布树和 compose、用现有镜像重建容器，迁移单独执行。(b) 第 (1) 类改成在别处构建（本机或 CI，linux/amd64）后把镜像传到主机加载，主机上只做加载和切换；并约定平时尽量不动依赖。(c) 把只在工作站或由人手在主机上执行的脚本在分类规则里登记为“不属于 owner 运行时”，新脚本进仓库时同时登记，减少第 (3) 类。先做 (c)，它最小；(a)(b) 要读 `docs/RELEASE_SYNC_47.md` 的 F5、F6 两节再定
