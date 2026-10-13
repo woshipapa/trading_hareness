@@ -23,10 +23,12 @@ deviations, examples) and one verdict per gate, and exits 0 whatever the verdict
     intraday      every probe started and finished inside a session of the XSHG calendar of exchange_calendars (the
                   Mac's, which knows the holidays and the lunch break; the evidence names the calendar and its version)
 
-``apply`` takes the evidence files of one binding and moves the status token of that binding in catalog.py (never
-``decision_eligible``) one step when every file passed the gates of the step: UNSUPPORTED -> DECLARED needs owner_egress and
-agreement, DECLARED -> LIVE_VERIFIED also needs intraday. It prints the ``git commit -F - -- <catalog>`` command whose
-message cites the files and their hashes and commits nothing: commit the evidence first, the status change on its own.
+``apply`` takes the evidence files of one binding and moves the status token of that binding in catalog.py one step when
+every file passed the gates of the step: UNSUPPORTED -> DECLARED needs owner_egress and agreement, DECLARED ->
+LIVE_VERIFIED also needs intraday. The latter step also needs the catalog's passing session summaries; with
+``--decision-eligible <decision record>`` it sets that binding's eligibility and cites the record. Without the flag it
+never touches ``decision_eligible``. It prints the ``git commit -F - -- <catalog>`` command whose message cites the
+files and their hashes and commits nothing: commit the evidence first, the status change on its own.
 """
 
 from __future__ import annotations
