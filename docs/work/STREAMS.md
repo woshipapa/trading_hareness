@@ -6,7 +6,7 @@
 
 | 编号 | 标题 | 状态 | 持有者 | 下一步 | 更新 |
 |---|---|---|---|---|---|
-| [W001](streams/W001-limit-up-risk-score.md) | 涨停股次日大面风险分 | released | none | 用户执行 `! bash ~/codebase/n8n/state/lists13.sh`（今晚 24:00 前）之后，agent 只读核对：`curl -s http://127.0.0.1:15682/api/v1/market/limit-up-risk/daily` 的 `reading.trade_date` 是 2026-10-13、行数与当天榜单相符（试跑时 5 张榜共 71 行）。此后每个交易日晚上都要这样手工跑一次，直到 BACKLOG B042 的代码修好 | 2026-10-13 |
+| [W001](streams/W001-limit-up-risk-score.md) | 涨停股次日大面风险分 | released | none | 10 月 14 日 09:26 核对当天的竞价处置表已生成、股票与 10 月 13 日读数里的 67 只对得上（W002）。此后每个交易日 15:00 之后、24:00 之前要手工跑一次当天的榜单和读数（`bash ~/codebase/n8n/state/lists13.sh`，脚本按当天的交易日期取，不用改），直到 BACKLOG B042 的代码修好并发布 | 2026-10-13 |
 | [W002](streams/W002-auction-capture-and-desk.md) | 竞价池采集与 09:25 处置表 | verified | none | W006 的竞价看板上线后，决定处置表自己的页签和中继路由是否还要做（BACKLOG B017）；不做就关闭本记录 | 2026-10-13 |
 | [W003](streams/W003-daily-close-completion.md) | 日线收盘补全 | released | Claude Code 会话 93ba6e1d，2026-10-13 | 把剩下的两件事定下来再改状态：(1) 28 只一直“缺日线”的股票（6 只北交所，其余多半停牌）应归到“未交易”，否则这个阶段永远是 partial；(2) 控制面现在卡在每日指标 5,138/5,560 上，对账循环每 5 分钟调一次补全，后 21 次都是空跑（BACKLOG B043）。先只读查清每日指标的缺口是不是常态，再写修正方案 | 2026-10-13 |
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |

@@ -1,0 +1,32 @@
+2026-09-29 longhuvip_history  pid:3 rows   1 lengths {23: 1} first ['000678', '襄阳轴承', '0', '', '1790645100', '机器人概念']
+2026-09-29 longhuvip_history  pid:4 rows   1 lengths {23: 1} first ['603949', '雪龙集团', '0', '', '1790645146', '汽车类']
+2026-09-29 longhuvip_history  pid:5 rows   1 lengths {23: 1} first ['600825', '新华传媒', '0', '', '1790645151', '并购重组']
+2026-09-30 longhuvip_history  pid:3 rows   4 lengths {23: 4} first ['002242', '九阳股份', '0', '', '1790731500', '机器人概念']
+2026-09-30 longhuvip_history  pid:4 rows   1 lengths {23: 1} first ['000678', '襄阳轴承', '0', '', '1790733780', '机器人概念']
+2026-09-30 longhuvip_history  pid:5 rows   1 lengths {23: 1} first ['600825', '新华传媒', '0', '', '1790731533', '并购重组']
+2026-10-08 longhuvip_history  pid:3 rows   4 lengths {23: 4} first ['002058', '紫竹高科', '0', '', '1791422700', '锂电池']
+2026-10-08 longhuvip_history  pid:4 rows   2 lengths {23: 2} first ['002242', '九阳股份', '0', '', '1791422700', '机器人概念']
+2026-10-08 longhuvip_history  pid:5 rows   1 lengths {23: 1} first ['600825', '新华传媒', '0', '', '1791422751', '并购重组']
+2026-10-09 longhuvip_history  pid:3 rows   2 lengths {0: 1, 'str': 1} first []
+2026-10-09 longhuvip_history  pid:4 rows   1 lengths {23: 1} first ['002058', '紫竹高科', '0', '', '1791509100', '锂电池']
+2026-10-09 longhuvip_history  pid:5 rows   3 lengths {23: 3} first ['600825', '新华传媒', '0', '', '1791509154', '并购重组']
+2026-10-12 longhuvip          pid:1 rows  28 lengths {23: 28} first ['600693', '东百集团', '1', '', '1791768338', '并购重组']
+2026-10-12 longhuvip          pid:2 rows  14 lengths {23: 14} first ['605136', '丽人丽妆', '0', '', '1791768331', '平台经济']
+2026-10-12 longhuvip          pid:3 rows   1 lengths {23: 1} first ['600812', '华北制药', '1', '', '1791768343', '医药']
+2026-10-12 longhuvip          pid:4 rows   2 lengths {0: 1, 'str': 1} first []
+2026-10-12 longhuvip          pid:5 rows   3 lengths {23: 3} first ['600825', '新华传媒', '1', '', '1791768353', '并购重组']
+2026-10-13 longhuvip          pid:1 rows  57 lengths {23: 57} first ['000668', '荣丰控股', '0', '', '1791854700', '实控人变更']
+2026-10-13 longhuvip          pid:2 rows   5 lengths {23: 5} first ['600693', '东百集团', '1', '', '1791854731', '并购重组']
+2026-10-13 longhuvip          pid:3 rows   5 lengths {23: 5} first ['002343', '慈文传媒', '0', '', '1791854700', 'AI应用']
+2026-10-13 longhuvip          pid:4 rows   2 lengths {0: 1, 'str': 1} first []
+2026-10-13 longhuvip          pid:5 rows   2 lengths {0: 1, 'str': 1} first []
+risk reading 2026-09-22 rows 62 top board 6.0 coverage {'duplicate': 0, 'malformed': 0, 'limit_ratio': 0, 'missing_bar': 0, 'not_at_limit': 0, 'excluded_code': 1, 'insufficient_history': 0}
+risk reading 2026-09-23 rows 50 top board 4.0 coverage {'duplicate': 0, 'malformed': 2, 'limit_ratio': 0, 'missing_bar': 1, 'not_at_limit': 0, 'excluded_code': 0, 'insufficient_history': 0}
+risk reading 2026-09-24 rows 50 top board 5.0 coverage {'duplicate': 0, 'malformed': 0, 'limit_ratio': 0, 'missing_bar': 1, 'not_at_limit': 0, 'excluded_code': 1, 'insufficient_history': 0}
+risk reading 2026-09-28 rows 33 top board 5.0 coverage {'duplicate': 0, 'malformed': 2, 'limit_ratio': 0, 'missing_bar': 0, 'not_at_limit': 0, 'excluded_code': 0, 'insufficient_history': 0}
+risk reading 2026-09-29 rows 56 top board 6.0 coverage {'duplicate': 0, 'malformed': 0, 'limit_ratio': 0, 'missing_bar': 0, 'not_at_limit': 0, 'excluded_code': 1, 'insufficient_history': 0}
+risk reading 2026-09-30 rows 52 top board 7.0 coverage {'duplicate': 0, 'malformed': 0, 'limit_ratio': 0, 'missing_bar': 0, 'not_at_limit': 0, 'excluded_code': 0, 'insufficient_history': 0}
+risk reading 2026-10-08 rows 41 top board 8.0 coverage {'duplicate': 0, 'malformed': 0, 'limit_ratio': 0, 'missing_bar': 1, 'not_at_limit': 0, 'excluded_code': 1, 'insufficient_history': 0}
+risk reading 2026-10-09 rows 69 top board 9.0 coverage {'duplicate': 0, 'malformed': 2, 'limit_ratio': 0, 'missing_bar': 0, 'not_at_limit': 0, 'excluded_code': 0, 'insufficient_history': 0}
+risk reading 2026-10-12 rows 46 top board 10.0 coverage {'duplicate': 0, 'malformed': 2, 'limit_ratio': 0, 'missing_bar': 0, 'not_at_limit': 0, 'excluded_code': 0, 'insufficient_history': 0}
+risk reading 2026-10-13 rows 67 top board 3.0 coverage {'duplicate': 0, 'malformed': 4, 'limit_ratio': 0, 'missing_bar': 0, 'not_at_limit': 0, 'excluded_code': 0, 'insufficient_history': 0}

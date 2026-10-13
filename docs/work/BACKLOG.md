@@ -370,6 +370,7 @@
 - note2: 2026-10-13 21:10 用户切到手动模式后的进度。第 (2) 步完成：`.env.local` 改了 4 个键、加了 4 个键，备份在同目录 `.env.local.bak-20261013`，没有同步到远端。第 (3) 步完成：20:38 重启本机服务管理器，`owner-tunnel` 连到新服务器。第 (4) 步：本机 `127.0.0.1:15682/health` 返回 200，版本 `owner-code-20261013-04`、提交 26170231，调度容器同版本；当晚的情况见 B042、B043 和 FACTS F023、F024。还差两件：(a) edge 主机上的 `quant-longhu-owner-tunnel` 服务仍指向旧服务器（3535），所以经 edge 读 owner 的路由返回 `fetch failed`、控制台看不到 owner 的数据；已验证 edge 用的那把密钥在新服务器上已授权（`docs/work/probes/2026-10-13-edge-owner-tunnel.out.txt`）；改这个服务的命令被会话的安全检查拒了两次（先是命令，后是装着命令的脚本），命令给了用户，由用户在 edge 上执行：备份服务文件到 `/root/quant-longhu-owner-tunnel.service.bak-20261013`；`ssh-keyscan -t ed25519 -p 22 118.178.133.37` 的结果追加到 `/etc/quant-intraday-edge/known_hosts` 并核对指纹；`sed -i 's/ -p 3535 / -p 22 /; s/stockpeer@47\.110\.79\.189/stockpeer@118.178.133.37/'` 改服务文件；`systemctl daemon-reload && systemctl restart quant-longhu-owner-tunnel`；`curl http://127.0.0.1:15682/health` 应为 200。(b) 第 (5) 步仓库里的旧默认地址还没改
 - note3: 2026-10-13 21:14 第 (5) 步做了：发布工具、两个凭据脚本和消息特征同步脚本的默认地址改到新服务器（提交 4bb8c7ff；`pytest scripts -q` 361 项通过加已知的 B035 一项失败，两个 node 测试通过）；用新默认值跑 `scripts/release-sync-status.sh --owner-source-sha 26170231… --edge-source-sha 764ca2b2…`：ALL CHECKS PASSED（`docs/work/probes/2026-10-13-release-status-newhost.out.txt`；edge 中继当晚 21:10 被另一条工作线发布到了 `hotfix-20261013T131021Z-764ca2b22292-2811`）；`scripts/release plan` 能读到新主机。`AGENTS.md`（本仓库和上一级目录）与 `docs/work/README.md` 里的地址已改。还没做的：(a) edge 主机上的隧道服务，等用户执行（note2）；(b) `scripts/teacher_review_daily.py:43-44` 的默认地址还是旧的，这个文件有别的会话未提交的修改，本会话没动；本机每 20 分钟一次的 `teacher.cycle` 如果靠这个默认值连 owner，现在是连不上的；(c) `OPERATIONS.md`、`docs/RELEASE_SYNC_47.md`、`docs/SHARED_PEER_RUNTIME.md`、`docs/OWNER_READ_API_FOR_HARNESS.md`、`docs/SHARED_STOCK_DATA_API.md`、`docs/TEACHER_REVIEW_DAILY.md`、`docs/DATA_SOURCE_LAYER.md`、`docs/COMPONENT_CONTRACTS.md`、`feishu-relay/AGENTS.md` 里的旧地址（改说明、不改历史记录行）；(d) 下一次 `sync-secrets.sh owner` 之前，先把 `env-split.py` 生成的 `.env.owner` 和新主机上现有的配置按键名对一遍，保留对方的生产角色和写入开关；在那之前不要同步；(e) `deploy/shared-peer/compose.yaml` 里隧道端口的默认值仍是 3535，靠主机上的环境变量覆盖，没有改（改 compose 会让下一次发布变成全量）
 - note4: 2026-10-13 21:16 用户说需要对方在他的服务器上做的事要写成提示词交给他转发。提示词写好了：`docs/work/probes/2026-10-13-prompt-to-owner.md`（回报五项；请对方确认或处理六件：我们后加的盘后阶段由谁跑、每日指标 5,138/5,560、新机内存规格与重任务放哪里、下次凭据同步前要保留的键名、迁移后是否暂停发布、启动时那阵连接失败供知晓）。对方回复后把答复记到 B042、B043、B044 和本项
+- note5: 2026-10-13 21:24 用户转述：对方让我们自己在他的服务器上执行（「当前对方让我们都来执行，因为我们可以ssh」），会话改为手动逐条同意。随后做了：edge 主机的 `quant-longhu-owner-tunnel` 改到新服务器（备份在 edge 的 `/root/quant-longhu-owner-tunnel.service.bak-20261013`，核对过的主机密钥加进了它的 known_hosts，服务 active，edge 上 `127.0.0.1:15682/health` 返回 200，从本机经 edge 中继读 `limit-up-risk/daily` 返回 200）。到此连接都切完了。剩 note3 里的 (b)(c)(d)(e)；给对方的提示词因此多半不用发了，里面的问题改由我们自己只读查（每日指标缺口见 B043，凭据键名的核对见 note3 的 (d)）
 - updated: 2026-10-13
 
 ### B042 我们这一侧新加的盘后阶段没有任何东西定时触发
@@ -381,6 +382,7 @@
 - who: (1) 用户每晚执行，agent 核对；(2) agent 出方案，用户批准
 - needs: none
 - found: 2026-10-13 21:00，核对当晚流程时（`docs/work/probes/2026-10-13-evening-flow.out.txt`、`-2.out.txt`、`2026-10-13-new-host-scheduler-state.out.txt`）
+- note1: 2026-10-13 21:24 当晚的手工补做了（21:20，榜单 5 份、读数 67 行），10 月 14 日的竞价池有输入。`state/lists13.sh` 按“当天的交易日期”取，之后每晚直接重跑同一个脚本即可。改代码时要想清楚的两点：实时榜单只在当天能取，所以早上 09:00 前的补跑（循环对前一交易日的追赶）要走历史榜单；榜单阶段返回 `skipped` / `empty` 时回执怎么记，别让它当成已完成而不再重试
 - updated: 2026-10-13
 
 ### B043 日线控制面当晚是 blocked：5,560 只里只有 5,138 只有当天的每日指标
@@ -403,6 +405,17 @@
 - who: agent
 - needs: none
 - found: 2026-10-13
+- updated: 2026-10-13
+
+### B045 空的涨停榜被存成两行并计为“格式不对”
+
+- state: open
+- kind: defect
+- why: 供应商对空榜返回的 `info` 是“一个空列表加一个字符串”，`market_history_backfill._info_rows` 把它当成行列表，于是存下 2 个不是行的元素，解码器再把它们计进 `coverage.malformed`。2026-10-13 四板、五板以上两张榜是空的，读数因此显示 `malformed: 4`，看上去像丢了 4 只股票（实际没有）；10 月 9 日、12 日各有一张空榜，各记 2。不影响读数里的股票，但覆盖统计会误导人
+- how: `_info_rows` 认出“第一个元素是列表”的形状时只取第一个元素；加一条用这个真实形状的测试；已存的文档不用改（解码器照样跳过）
+- who: agent
+- needs: none
+- found: 2026-10-13（`docs/work/probes/2026-10-13-high-board-rows.py` 与 `.out.txt`）
 - updated: 2026-10-13
 
 ## Closed
