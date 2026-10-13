@@ -3,7 +3,7 @@ import { getJson, postJson, putJson } from './http';
 export type MembershipStatus = '正常' | '7 天内到期' | '已到期' | '已离群' | '已豁免';
 
 /** What the member's alias says about the membership; offered in the edit form, never applied by itself. */
-export type MembershipSuggestion = { started_on: string | null; term_months: number | null; expires_on: string | null; label: string };
+export type MembershipSuggestion = { started_on: string | null; term_months: number | null; expires_on: string | null; label: string; /** Where in the alias it was read. */ span?: [number, number] };
 
 export type MembershipRow = {
   target_chat_id: string;
@@ -47,6 +47,6 @@ export const membershipsApi = {
   sync: (chatId: string) => postJson<MembershipResponse>(path(chatId, '/sync'), {}),
   review: (chatId: string, dryRun: boolean) => postJson<MembershipResponse & { dry_run: boolean }>(path(chatId, '/review'), { dry_run: dryRun }),
   updateSettings: (chatId: string, body: { enabled: boolean; default_term_months: number; remind_text: string; exempt_user_ids: string[] }) => putJson<SettingsResponse>(settingsPath(chatId), body),
-  updateMember: (chatId: string, userId: string, body: { started_on: string; term_months: number; expires_on: string | null; note: string | null; exempt: boolean }) => putJson<{ member: MembershipRow }>(`${path(chatId, '')}/${encodeURIComponent(userId)}`, body),
+  updateMember: (chatId: string, userId: string, body: { started_on: string; term_months: number; expires_on: string | null; note: string | null; exempt: boolean; alias?: string }) => putJson<{ member: MembershipRow }>(`${path(chatId, '')}/${encodeURIComponent(userId)}`, body),
   remind: (chatId: string, userId: string) => postJson<{ member: MembershipRow }>(`${path(chatId, '')}/${encodeURIComponent(userId)}/remind`, {}),
 };

@@ -18,6 +18,7 @@ function fakeLedger({ members = [], settings = null } = {}) {
 		rows,
 		config,
 		async query(sql, params = []) {
+			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET alias=$2')) { for (const row of rows) if (row.user_id === params[0]) row.alias = params[1]; return { rows: [] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships m SET target_chat_id')) { for (const row of rows) if (row.target_chat_id === params[0]) row.target_chat_id = params[1]; return { rows: [] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_membership_settings s SET target_chat_id')) { if (config.target_chat_id === params[0]) config.target_chat_id = params[1]; return { rows: [] }; }
 			if (sql.startsWith('SELECT target_chat_id,enabled,last_review_on')) return config.enabled ? { rows: [{ target_chat_id: config.target_chat_id, enabled: true, last_review_on: pgDate(config.last_review_on) }] } : { rows: [] };
@@ -283,8 +284,18 @@ test('an alias written as month-day plus term is read into offers, never into mo
 	assert.deepEqual(offers('用户 三个月'), ['3 个月']);
 	assert.deepEqual(offers('用户777777 97三个鱼13'), ['09-07 起 3 个月']);
 	for (const plain of ['老王', '用户888888', '', null]) assert.deepEqual(offers(plain), []);
-	assert.deepEqual(aliasSuggestions('阿明 823三个月', '2026-10-13')[0], { started_on: '2026-08-23', term_months: 3, expires_on: null, label: '08-23 起 3 个月' });
-	assert.deepEqual(aliasSuggestions('到12月底', '2026-10-13')[0], { started_on: null, term_months: null, expires_on: '2026-12-31', label: '到 12-31' });
+	assert.deepEqual(aliasSuggestions('阿明 823三个月', '2026-10-13')[0], { started_on: '2026-08-23', term_months: 3, expires_on: null, label: '08-23 起 3 个月', span: [3, 9] });
+	assert.deepEqual(aliasSuggestions('到12月底', '2026-10-13')[0], { started_on: null, term_months: null, expires_on: '2026-12-31', label: '到 12-31', span: [0, 5] });
+	// A fixed end date written after the start, and what the page writes back for one, read as one offer.
+	assert.deepEqual(aliasSuggestions('佳佳 918到1030', '2026-10-13'), [{ started_on: '2026-09-18', term_months: null, expires_on: '2026-10-30', label: '09-18 起，到 10-30', span: [3, 11] }]);
+	assert.deepEqual(offers('阿明 到1030'), ['到 10-30']);
+	assert.deepEqual(offers('阿明 108十二个月'), ['10-08 起 12 个月']);
+	// The part of the alias an offer was read from, so that it can be rewritten: a term before its date belongs to it.
+	const spans = (alias) => aliasSuggestions(alias, '2026-10-13').map((item) => alias.slice(...item.span));
+	assert.deepEqual(spans('小华 三个月826'), ['三个月826']);
+	assert.deepEqual(spans('用户33安强827三个917一个'), ['827三个', '917一个']);
+	assert.deepEqual(spans('阳阳 98一个月一周'), ['98一个月一周']);
+	assert.deepEqual(spans('用户 三个月'), ['三个月']);
 	// In January a December date is last month's, not eleven months ahead.
 	assert.deepEqual(aliasSuggestions('阿明 1225一个月', '2027-01-05').map((item) => item.started_on), ['2026-12-25']);
 });
@@ -314,4 +325,28 @@ test('a typed expiry date wins over the term until the member is saved without o
 	assert.deepEqual([withExempt.expires_on, withExempt.expiry_fixed], ['2026-12-31', true]);
 	await assert.rejects(() => feature.updateMember(CHAT, 'u1', { started_on: '2026-09-20', term_months: 1, expires_on: '2026-09-01', note: null }), /到期日不能早于开始日期/);
 	await assert.rejects(() => feature.updateMember(CHAT, 'u1', { started_on: '2026-09-20', term_months: 1, expires_on: '10-30', note: null }), /到期日必须是 YYYY-MM-DD/);
+});
+
+test('saving a member with a new alias writes it to Feishu first and to every row of that person; an unchanged alias is not written', async () => {
+	const calls = [];
+	const roster = { status: 'ok', chat_id: WS, members: [] };
+	const { feature, ledger } = setup({ members: [{ ...expired, alias: '阿明 823三个月' }], bridgePost: async (route, body) => { calls.push([route, body]); return roster; } });
+	ledger.rows.push({ ...expired, target_chat_id: 'another-group', alias: '阿明 823三个月', created_at: date('2026-01-01'), updated_at: date('2026-01-01') });
+	const same = await feature.updateMember(CHAT, 'u1', { started_on: '2026-08-23', term_months: 3, note: null, alias: '阿明 823三个月' });
+	assert.equal(same.alias, '阿明 823三个月');
+	assert.deepEqual(calls, []);
+	const renewed = await feature.updateMember(CHAT, 'u1', { started_on: '2026-11-23', term_months: 3, note: null, alias: ' 阿明 1123三个月 ' });
+	assert.deepEqual(calls, [['/users/alias', { user_id: 'u1', alias: '阿明 1123三个月' }]]);
+	assert.deepEqual([renewed.alias, renewed.started_on, renewed.expires_on], ['阿明 1123三个月', '2026-11-23', '2027-02-23']);
+	assert.deepEqual(ledger.rows.map((row) => row.alias), ['阿明 1123三个月', '阿明 1123三个月']);
+});
+
+test('when Feishu refuses the alias nothing is saved, and a member not in the table is refused before anything is written', async () => {
+	const { feature, ledger } = setup({ members: [{ ...expired, alias: '阿明 823三个月' }], bridgePost: async (route) => { if (route === '/users/alias') throw new Error('飞书拒绝了备注名'); return { status: 'ok', members: [] }; } });
+	await assert.rejects(() => feature.updateMember(CHAT, 'u1', { started_on: '2026-11-23', term_months: 3, note: null, alias: '阿明 1123三个月' }), /飞书拒绝了备注名/);
+	assert.deepEqual([ledger.rows[0].alias, ledger.rows[0].started_on], ['阿明 823三个月', '2026-01-31']);
+	const calls = [];
+	const other = setup({ members: [expired], bridgePost: async (route) => { calls.push(route); return { status: 'ok', members: [] }; } });
+	await assert.rejects(() => other.feature.updateMember(CHAT, 'nobody', { started_on: '2026-11-23', term_months: 3, note: null, alias: 'x' }), /会员不存在/);
+	assert.deepEqual(calls, []);
 });
