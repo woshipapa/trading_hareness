@@ -1,6 +1,6 @@
 # Tactic trial ledger: register conditions, combine them into tactics, judge them from every day's summary
 
-Status: rev 7, 2026-10-13: APPROVED by the user ("可以，按这个方案开工"); in implementation on `codex/tactic-trials` (base `932f6b5c`). Rev 5 was audited in three rounds; the exit layer of rev 6 was audited once (ten objections, all accepted in rev 7). The user's words: "不一定要设立很严格的限制，有一些策略思路可以先注册，然后拿每天的样本
+Status: rev 8, 2026-10-14. Rev 7 was APPROVED by the user on 2026-10-13 ("可以，按这个方案开工"). Rev 8 keeps the product and changes how it is stored and scheduled, for the measured reasons in the paragraph "Rev 8" below; its key points were reported to the user on 2026-10-14, it has no approval of its own. In implementation on `codex/tactic-trials` (base `932f6b5c`). Rev 5 was audited in three rounds; the exit layer of rev 6 was audited once (ten objections, all accepted in rev 7). The user's words: "不一定要设立很严格的限制，有一些策略思路可以先注册，然后拿每天的样本
 去尝试"; "有几个不成立的你也要加入，可以组合成不同的策略战法，去做判断，咱们就是要从每天的总结出来". Earlier requests
 it also serves: a 09:25 board of picks and of stocks to avoid; a daily review of consecutive-board stocks with their
 success cases and the patterns found.
@@ -33,6 +33,23 @@ rule" +3.01% / +2.16%, a 3% stop +1.56% / +1.21% (worse than no stop); for a buy
 the following open gives -0.91% / -0.45% and "keep if it seals, else the close" -0.20% / +0.12%. The sell rule
 moves a result by 0.5 to 1 point, as much as most conditions.
 
+Rev 8 (2026-10-14; forced by three facts measured on 2026-10-13, not by a change of scope; the user on
+2026-10-13: "codex当前推进太慢了，全部交给你来处理现在，全部推进", so the main session wrote steps 10 to 14 itself):
+1. The full post-close stage table is not scheduled on the peer (FACTS F023, decision 0021). The evening run is
+   the stage `peer_tactic_trials` of the peer's own loop, after `peer_limit_up_risk`, which it depends on.
+2. The owner host has 894 MB. `summarise` over the whole stored history took 136 s and 1,211 MB on a synthetic
+   760 x 100 history. Every settled day now also stores a **digest** (what the records, the switch table, the sell
+   points and the sealing rates need from that day; about 25 KB) and its pairs (about 25 KB); the summary folds
+   the digests in chunks of 60 sessions and reads only the latest settled day of each slot in full: 3.6 s and
+   103 MB on the same history. The pure functions on full days are the same code driven through digests, and a
+   test compares the two paths. The mined pairs look at the last 250 sessions.
+3. The store keeps one document a session and capability, so the settled close and auction documents of a day
+   cannot share a capability: settled days, digests and pairs have one capability per slot.
+4. The replay holds 20 sessions at once and reads the history windows one day at a time (a 60-session chunk asked
+   for about two million bar rows); the CLI prints its peak memory.
+5. The decision record is 0023 (0021 and 0022 were taken on 2026-10-13).
+Where the body below still says otherwise, this paragraph and decision 0023 win.
+
 ## Goal
 
 1. Every rule we have (the teacher's, the studies', common practice), supported by history or not, is a
@@ -52,7 +69,7 @@ Research evidence only, `live_effect: none`.
 
 Tactics and conditions are **evidence observations**, not strategies: no `StrategyContract`, no row in
 `quant.strategy_promotion_registry`, no row in `quant.strategy_daily_candidates`, no weight. Decision 0006 keeps
-applying to strategies; decision 0021 (last step; 0019 and 0020 were taken by another workstream on 2026-10-13) records this classification and the rule that no strategy,
+applying to strategies; decision 0023 (0019 to 0022 were taken by other workstreams on 2026-10-13) records this classification and the rule that no strategy,
 decision, alert or order path may read the trial readings. No existing guard checks import direction inside the
 service, so a new static-import test under `quant-service/tests` pins it: the five trial modules
 (`tactic_conditions`, `tactic_exits`, `tactic_trials`, `tactic_trial_repository`, `tactic_trial_runtime`) import
@@ -269,19 +286,28 @@ For the evening of T, from the days settled that evening:
   Written once by the scheduled path: it reads `newest` for the day and skips when a reading of the current
   `version` exists. The CLI replay with `--apply` stores a newer document (`replayed: true`), which `newest` then
   returns.
-- `tactic_trials_settled_daily` (pick day, slot): each row's returns under every entry and sell rule, state
+- `tactic_trials_settled_close_daily` and `tactic_trials_settled_auction_daily` (pick day; rev 8: one capability
+  per slot, because the store keeps one document a session and capability): each row's returns under every entry and sell rule, state
   outcomes and room measures, with `complete` true once every rule is resolved. Every document is a full
   snapshot of the pick day (all rows, everything resolved so far), so reading only `newest` never loses a
   result. The stage stores a newer snapshot for a pick day until it is complete (usually two or three evenings;
   `store` keeps the older versions, there is no cap).
+- `tactic_trials_digest_{close,auction}_daily` and `tactic_trials_pairs_{close,auction}_daily` (pick day; rev 8):
+  stored with every settled snapshot of a day; what the summary folds instead of the rows.
 - `tactic_trials_summary_daily` (T): the daily summary (records, the day's cases, the kept pairs). The routes read
   this, never the whole history.
 - Size: about 100 rows a day and slot, some tens of KB per reading, the summary under 200 KB. The four
-  capabilities stay in the hot tier (no entry in `storage_tiering_policy`); decision 0021 records it.
+  capabilities stay in the hot tier (no entry in `storage_tiering_policy`); decision 0023 records it.
 
 ### When it runs
 
-- Post-close stage `tactic_trials` after `limit_up_risk` (dependency: `limit_up_risk`): store the `close` reading
+- (Rev 8) Stage `peer_tactic_trials` of the peer's evening loop (`peer_close_research.py`), after
+  `peer_limit_up_risk` (its dependency): build the `auction` reading if the morning loop did not; store the
+  `close` reading of T; settle the pick days of the last 12 sessions that are not complete, storing each day's
+  digest and pairs with it; fold the stored digests into the summary. Timeout 600 seconds. Receipt: `completed`,
+  or `blocked` when the day's lists or risk reading are not stored (tried again on the next tick); an exception is
+  `failed` and is tried again. The rest of this bullet is rev 7 and no longer holds.
+- (Rev 7, superseded) Post-close stage `tactic_trials` after `limit_up_risk` (dependency: `limit_up_risk`): store the `close` reading
   of T; settle the pick days of the last 12 sessions that are not complete; store the summary. Reads are ranges: the
   day's inputs, the window query, the market aggregate, and the whole stored history in three calls of `newest`
   (close, auction and settled readings; about 760 days of about 100 rows). Records and pairs are recomputed from
@@ -483,9 +509,9 @@ outcome or "return" (the tactic's own entry and sell rule).
     never appears, database busy).
 12. Runtime reads `board`, `summary`, `cases`; the three routes and their tests; relay entries; `generated.ts`.
 13. `frontend/src/research/tactic-trials.ts` with tests, `TacticTrialsTab.vue`, `App.vue`.
-14. `docs/decisions/0021-tactic-trial-ledger.md` (take the next free number if 0021 is gone); the full acceptance run.
+14. `docs/decisions/0023-tactic-trial-ledger.md`; the full acceptance run.
 
-After release: replay the close slot over the stored history on the owner (a write on the owner: run by the user).
+After release: a dry run of one 20-session chunk on the owner first (it prints `peak_rss_mb`; look at `free -m` before), then replay the close slot and after it the auction slot over the stored history (a write on the owner: run by the user), then `--summarise` for the last session.
 
 ## Acceptance
 
