@@ -151,6 +151,44 @@ class TacticConditionsTests(unittest.TestCase):
         self.assertIn("auction_amount_top5", missing_result["unknown"])
         self.assertIn("prev.theme_big", missing_result["unknown"])
 
+    def test_condition_claim_metadata_and_theme_absence(self):
+        by_key = {condition.key: condition for condition in CONDITIONS}
+        self.assertEqual(by_key["board_4plus"].claim_outcome, "big_loss")
+        self.assertEqual(by_key["board_4plus"].claim, 1)
+        self.assertEqual(by_key["assist"].claim_outcome, "seal")
+        self.assertEqual(by_key["assist"].claim, -1)
+        self.assertEqual(by_key["amount_record_250"].history["status"], "against")
+        self.assertTrue(by_key["amount_record_250"].history["text"].startswith("against，见 "))
+        self.assertEqual(by_key["tier_first"].history["text"], "+2.51% / +2.18%；+19.6 / +18.1 points")
+
+        decoded = {
+            "symbol": "000001.SZ", "name": "A", "sector": "", "first_seal_time": 1_767_231_000,
+            "seal_money": 1.0, "seal_max": 1.0, "main_net": 1.0, "turnover": 1.0,
+            "float_cap": 1.0, "boards": 2.0, "reopened": 0.0,
+            "bar": {"high": 11.0, "low": 11.0, "open": 10.0, "pre_close": 10.0},
+        }
+        features = {field: None for field in ("vr", "turnover_vs_max250", "runup_20", "close_vs_high60", "cost_share_below_close", "cost_share_0_30_above")}
+        row = build_trial_row(decoded, features, {}, [decoded])
+        self.assertIsNone(row["theme_count"])
+        evaluated = evaluate_conditions([row], {}, "close")
+        self.assertIn("theme_big", evaluated["rows"][0]["unknown"])
+        self.assertIn("theme_leader_top_board", evaluated["rows"][0]["unknown"])
+
+    def test_prior_leader_rules_and_rebound_require_valid_readings(self):
+        def row(symbol, sector, boards, seal, **values):
+            return {"symbol": symbol, "sector": sector, "boards": boards, "first_seal_time": seal,
+                    "one_word": False, "reopened": False, "vr": 1.0, "seal_money": 50_000_000, **values}
+
+        today = [row("A", "Theme", 2, "09:00:00"), row("B", "Theme", 1, "10:00:00")]
+        yesterday_low_leader = {"complete": True, "rows": [row("A", "Theme", 1, "14:00:00")]}
+        today_roles = evaluate_ladder_roles(today, [yesterday_low_leader, yesterday_low_leader, yesterday_low_leader])
+        self.assertNotIn("kawei_leader", today_roles[0]["flags"])
+        self.assertNotIn("kawei_leader", today_roles[0]["unknown"])
+
+        rebound = [row("A", "Theme", 1, "09:00:00")]
+        incomplete = evaluate_ladder_roles(rebound, [None, {"complete": True, "rows": [row("A", "Theme", 2, "09:00:00")]}, {"complete": True, "rows": []}])
+        self.assertIn("rebound_board", incomplete[0]["unknown"])
+
     def test_ladder_roles_on_two_themes_over_four_sessions(self):
         def row(symbol, sector, boards, seal, **values):
             return {"symbol": symbol, "sector": sector, "boards": boards, "first_seal_time": seal,
@@ -167,10 +205,11 @@ class TacticConditionsTests(unittest.TestCase):
             row("B1", "B", 3, "09:00:00"), row("B0", "B", 1, "10:00:00"),
         ]
         two_back = [row("B4", "B", 2, "09:00:00")]
+        three_back = [row("B4", "B", 2, "09:00:00")]
         readings = [
             {"trade_date": "2026-10-12", "complete": True, "rows": yesterday},
             {"trade_date": "2026-10-09", "complete": True, "rows": two_back},
-            None,
+            {"trade_date": "2026-10-08", "complete": True, "rows": three_back},
         ]
 
         evaluated = evaluate_ladder_roles(today, readings)

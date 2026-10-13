@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import pow
 from typing import Any, Callable, Mapping, Sequence
 
@@ -24,7 +24,7 @@ class Condition:
     test: ConditionTest
     source: str
     claim: int
-    claim_outcome: int
+    claim_outcome: str
     history: Mapping[str, str]
 
 
@@ -115,7 +115,7 @@ def build_trial_row(
         "vr": features["vr"],
         "gap": float(bar["open"]) / float(bar["pre_close"]) - 1,
         "risk_rank": risk_row.get("risk_rank"),
-        "theme_count": sum(row["sector"] == sector for row in decoded_rows),
+        "theme_count": None if not sector else sum(row.get("sector") == sector for row in decoded_rows),
         **{field: features[field] for field in HISTORY_FIELDS},
     }
 
@@ -162,14 +162,15 @@ def _seal_at_or_after(row: Mapping[str, Any], hour: int, minute: int = 0) -> boo
     return None if seal is None else seal >= hour * 3600 + minute * 60
 
 
-def _history(status: str, text: str) -> dict[str, str]:
+def _history(status: str, text: str | None = None) -> dict[str, str]:
+    text = text or f"{status}，见 docs/archive/2026-10-13-st-combined-tactics-v0.md"
     return {"status": status, "text": text}
 
 
 def _condition(
     key: str, name: str, slot: str, level: str, test: ConditionTest, source: str, claim: int, status: str, text: str,
 ) -> Condition:
-    return Condition(key, name, slot, level, test, source, claim, claim, _history(status, text))
+    return Condition(key, name, slot, level, test, source, claim, "held:close", _history(status, text))
 
 
 def _bool_field(key: str, expected: bool) -> ConditionTest:
@@ -280,7 +281,85 @@ def _ladder_conditions() -> tuple[Condition, ...]:
     )
 
 
-CONDITIONS = _close_conditions() + _day_conditions() + _auction_conditions() + _ladder_conditions()
+_CONDITION_METADATA: dict[str, tuple[str, str, int]] = {
+    "theme_big": ("大题材（同题材涨停≥10只）", "held:close", 1),
+    "theme_7plus": ("强题材（同题材涨停≥7只）", "held:close", 1),
+    "theme_lone": ("独苗或小题材（≤3只）", "held:close", -1),
+    "theme_leader_earliest": ("题材内最早封板", "held:close", 1),
+    "theme_leader_top_board": ("题材内最高板", "held:close", 1),
+    "market_top_board": ("全市场最高板", "seal", 1),
+    "board_2_3": ("二板三板", "seal", 1),
+    "board_4plus": ("四板以上", "big_loss", 1),
+    "board_6plus": ("六板以上", "held:close", -1),
+    "seal_small": ("封单小（不足2000万）", "held:close", -1),
+    "seal_large": ("封单大（3亿以上）", "held:close", 1),
+    "volume_heavy": ("放量板（量比≥3）", "held:close", -1),
+    "volume_shrunk": ("缩量板（量比<1）", "held:close", 1),
+    "amount_record_250": ("成交额创250日最大", "held:close", 1),
+    "seal_late": ("尾盘板（14:30后首封）", "held:close", -1),
+    "seal_early": ("早盘板（10:00前首封，非竞价封）", "held:close", 1),
+    "sealed_from_open": ("竞价即封", "seal", 1),
+    "reopened": ("开过板又封回", "held:close", 1),
+    "runup_40": ("20日已涨40%", "big_loss", 1),
+    "turnover_10bn": ("成交额过百亿", "seal", -1),
+    "above_high60": ("收盘过60日前高", "held:close", 1),
+    "main_net_out": ("主力净流出", "held:close", -1),
+    "risk_top_fifth": ("大面风险分前五分之一", "big_loss", 1),
+    "catch_up_first_board": ("强题材补涨首板", "held:close", 1),
+    "cost_above_band": ("收盘高于95%的成本", "held:close", 1),
+    "cost_overhead_heavy": ("上方30%内套牢盘重", "held:close", -1),
+    "env_ladder_ok": ("连板环境达标", "held:close", 1),
+    "env_turnover_2p1": ("两市成交额≥2.1万亿", "held:close", 1),
+    "env_turnover_above_median60": ("成交额高于近60日中位数", "held:close", 1),
+    "env_top_board_failed": ("昨日最高板今日断板", "held:close", -1),
+    "opens_at_limit": ("一字开盘", "seal", 1),
+    "gap_down_2": ("低开超2%", "open_to_close", 1),
+    "gap_up_5_not_sealed": ("高开5%以上未封", "open_to_close", -1),
+    "gap_3_to_8": ("高开3%到8%", "buy_open:close", 1),
+    "gap_0_to_5": ("平开到高开5%", "buy_open:close", 1),
+    "auction_amount_top5": ("竞价金额前五", "seal", 1),
+    "auction_burst": ("竞价爆量", "buy_open:close", 1),
+    "board_gap_below_typical": ("连板股高开不及常见幅度", "buy_open:close", -1),
+    "tier_first": ("同梯队最早封板", "held:close", 1),
+    "front_row": ("前排卡位", "held:close", 1),
+    "kawei_leader": ("卡位昨日龙头", "seal", 1),
+    "leader_switch": ("龙头切换", "held:close", 1),
+    "assist": ("助攻", "seal", -1),
+    "back_row": ("后排", "seal", -1),
+    "sole_high_board": ("独苗高标", "held:close", 1),
+    "ladder_full": ("题材梯队完整", "held:close", 1),
+    "weak_to_strong": ("弱转强", "held:close", 1),
+    "divergence_to_consensus": ("分歧转一致", "held:close", 1),
+    "consensus_to_divergence": ("一致转分歧", "big_loss", 1),
+    "rebound_board": ("反包", "held:close", 1),
+}
+
+_LADDER_HISTORY = {
+    "tier_first": "+2.51% / +2.18%；+19.6 / +18.1 points",
+    "front_row": "+1.34% / +1.12%；+10.0 / +9.4 points",
+    "kawei_leader": "+1.66% / +1.11%；+12.6 / +8.9 points; next-open buyer -0.55% / -1.46%",
+    "leader_switch": "+0.70% / +0.03%",
+    "assist": "+0.20% / +0.42%",
+    "back_row": "-0.54% / -0.33%；-5.6 / -5.5 points",
+    "sole_high_board": "no difference",
+    "ladder_full": "+0.70% / +0.38%",
+    "weak_to_strong": "+0.28% / 0.00%",
+    "divergence_to_consensus": "+3.32% / +4.64%",
+    "consensus_to_divergence": "-1.91% / -1.84%; big loss +7.9 / +9.2 points",
+    "rebound_board": "+15.0 / +6.1 points; next close -1.10% / -0.49%",
+}
+
+
+def _finalize_condition(condition: Condition) -> Condition:
+    name, outcome, claim = _CONDITION_METADATA[condition.key]
+    text = _LADDER_HISTORY.get(condition.key)
+    return replace(condition, name=name, claim=claim, claim_outcome=outcome,
+                   history=_history(condition.history["status"], text))
+
+
+CONDITIONS = tuple(_finalize_condition(condition) for condition in (
+    _close_conditions() + _day_conditions() + _auction_conditions() + _ladder_conditions()
+))
 
 
 def build_auction_row(
@@ -307,7 +386,7 @@ def build_auction_row(
 def _derived_close(row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> dict[str, bool | None]:
     sector = row.get("sector")
     theme = [item for item in rows if item.get("sector") == sector]
-    if sector is None or any(item.get("boards") is None or item.get("first_seal_time") is None for item in theme):
+    if not sector or any(item.get("boards") is None or item.get("first_seal_time") is None for item in theme):
         leader_earliest = leader_top = catch_up = None
     elif len(theme) < 2:
         leader_earliest = leader_top = catch_up = None
@@ -341,6 +420,8 @@ def _row_for(rows: Sequence[Mapping[str, Any]], symbol: str) -> Mapping[str, Any
 
 
 def _theme_leader(rows: Sequence[Mapping[str, Any]], sector: Any) -> Mapping[str, Any] | None:
+    if not sector:
+        return None
     theme = [row for row in rows if row.get("sector") == sector]
     if len(theme) < 2:
         return None
@@ -367,18 +448,19 @@ def _role_values(row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], prev
         values["_assist"] = float(row["boards"]) == 1 and float(leader["boards"]) >= 2 and 0 <= seal - leader_seal <= 1800
     values["_sole_high_board"] = None if row.get("boards") is None else float(row["boards"]) >= 3 and len(tier) == 1
     buckets = {1 if float(item["boards"]) == 1 else 2 if float(item["boards"]) == 2 else 3 for item in theme}
-    values["_ladder_full"] = None if not theme else buckets == {1, 2, 3}
+    values["_ladder_full"] = None if not sector or not theme else buckets == {1, 2, 3}
     prior_rows = _complete_rows(previous[0]) if previous else None
     prior = None if prior_rows is None else _row_for(prior_rows, row["symbol"])
     prior_leader = None if prior_rows is None else _theme_leader(prior_rows, sector)
-    if prior_rows is None or prior_leader is None:
+    if not sector or prior_rows is None:
         values["_kawei_leader"] = values["_leader_switch"] = None
+    elif prior_leader is None or float(prior_leader["boards"]) < 2:
+        values["_kawei_leader"] = values["_leader_switch"] = False
     else:
-        today_leader_seal = None if leader is None else _seal_seconds(leader["first_seal_time"])
         prior_leader_today = _row_for(rows, prior_leader["symbol"])
         values["_kawei_leader"] = (
-            None if today_leader_seal is None or prior_leader_today is None else
-            row["symbol"] != prior_leader["symbol"] and seal < _seal_seconds(prior_leader_today["first_seal_time"])
+            False if prior_leader_today is None else
+            row["symbol"] != prior_leader["symbol"] and seal is not None and seal < _seal_seconds(prior_leader_today["first_seal_time"])
         )
         values["_leader_switch"] = (
             row["symbol"] == (leader or {}).get("symbol") and prior_leader_today is None and len(theme) >= 2
@@ -400,14 +482,13 @@ def _role_values(row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], prev
 def _rebound_value(row: Mapping[str, Any], previous: Sequence[Mapping[str, Any] | None]) -> bool | None:
     if row.get("boards") is None:
         return None
+    if len(previous) < 3 or any(_complete_rows(reading) is None for reading in previous[:3]):
+        return None
     candidates: list[bool] = []
     unknown = False
     for lag in (2, 3):
         index = lag - 1
-        history = _complete_rows(previous[index]) if len(previous) > index else None
-        if history is None:
-            unknown = True
-            continue
+        history = _complete_rows(previous[index])
         before = _row_for(history, row["symbol"])
         if before is None or float(before["boards"]) < 2:
             candidates.append(False)
