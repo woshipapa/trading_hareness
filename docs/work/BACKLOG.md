@@ -326,6 +326,56 @@
 - found: 2026-10-13，W008 派工 4 的实现者跑脚本测试时报出，主会话在主检出和发布检出 `/Users/papa/codebase/.codex-wt/n8n-release-26170231` 各复现一次（1 failed, 8 passed）
 - updated: 2026-10-13
 
+### B036 短线来财：9 路打板战法 + 八阵图 8 槽登记进试验台
+
+- state: open
+- kind: idea
+- why: 用户要求把自有软件短线来财 v6.18.0 的所有战法登记为后续待做，喂给试验台 W006 做每日样本试验（全部研究证据，`live_effect: none`）。这批是基于东财涨停/炸板池和行业板块榜的打板选股规则
+- how: 按 `docs/archive/2026-10-13-desktop-tools-inventory/A-board-auction.md` 的「打板战法槽位」（cjv2/q10d/q10a/q8/q7k/pangyue/baimao/qilin/v66，各带池、阈值、排序键、file:line）和「八阵图」（qianlong…hhlb 8 槽 + 去重规则）逐条登记成 W006 的条件/战法。登记前按清单给的 `strategy.js:行号` 回源码核对阈值，以代码为准（清单已标出多处「说明文字 vs 代码」差异：实为 9 路非十路、q7k 放宽到前 15、gqjc 用的是涨跌家数差非封板率、cixin 不判次新等）。数据映射见 C-data 的消费关系速查
+- who: agent 梳理并登记进 W006；是否纳入每日试验由用户定
+- needs: 对应数据能力（涨停池/板块榜），见 B040；盘后口径已有（C-data D01/D05）
+- updated: 2026-10-13
+
+### B037 短线来财：11 条竞价战法 + 12 个竞价因子登记进试验台
+
+- state: open
+- kind: idea
+- why: 同 B036，这批是竞价时段（09:25 后）的选股规则和因子，与 W006 的竞价看板一步直接相关
+- how: 按 A-board-auction.md 的「竞价战法」（yaogu/grab/weak/oneword/imbalance/mainforce/sanyaosu/shouban/fanpao/dixi/trend，各带硬条件、评分权重、排序键、alert 窗口、file:line）和「因子」（12 个，A/B/C 三层，公式 + 输入 + file:line）登记。注意清单标出的坑：排序键与展示分不一致（grab 按额、weak 按涨幅、imbalance 按比值）；yaogu 名为「六条件」实为 5 条硬条件、用流通市值非总市值；竞价快照第 3 轮在 09:31 之后、`mergeSample` 取额大者会盖掉真实竞价值（见 A 的「不确定」第 1 条）；B 层分钟因子无调用方、`prevZbOpenPct` 只声明未计算。竞价快照采集方式见 A 的「竞价快照采集」一节
+- who: agent 梳理并登记进 W006；纳入由用户定
+- needs: 竞价快照数据（C-data D18，相关 B007/B023/B024）；fanpao/dixi/trend 还需日 K（已有 D11）
+- updated: 2026-10-13
+
+### B038 短线来财：方法论类战法登记进试验台
+
+- state: open
+- kind: idea
+- why: 同 B036，这批是持仓多日或大盘级的方法（八买点、三龙梯队、出手节点、情绪周期、低吸/反包/趋势、仓位、回测口径），是擒龙/短线龙头玩法的成文版，可组合进 W006
+- how: 按 `docs/archive/2026-10-13-desktop-tools-inventory/B-methodology.md` 逐模块登记（buydian 八买点仅 3/6/8 代码可判、longtou 三龙、jiedian 9 节点、cycle 7 阶段、playbook 6 法、dixi/fanpao/trend、guard 今日决策、position 仓位、backtest 回测）。重点核对 B 清单标出的「代码 vs 注释」差异和回测口径问题：做 T 的止盈止损是文案未实现、trend 回测的 ATR 移动止损恒不触发、回测成本不一致（0.4% vs 0.2%）、playbook 回测用未来信息选样（look-ahead）。这些差异决定我们自己实现时照代码还是照说明，以及 W006 已更正的「不能只用次日收盘价」的卖点口径
+- who: agent 梳理并登记进 W006；纳入由用户定
+- needs: 多为日 K（已有 D11）；三龙题材口径见 C-data D20
+- updated: 2026-10-13
+
+### B039 行业/概念板块榜盘中实时（榜 + 涨跌家数 + 领涨股）
+
+- state: open
+- kind: follow-up
+- why: 短线来财的 q7k、qilin、gqjc 三个战法和「主线」判断都要盘中实时的行业/概念板块榜（含板块内上涨/下跌家数、领涨股）。C-data D05 查到 n8n 没有这个盘中 30s 的榜：东财 clist 全市场在 owner 出口 2026-09-18 被断连（`app/datasources/catalog.py:40,318` UNSUPPORTED），现有的板块行情只有收盘快照和分钟资金流截面，分类还是同花顺/Longhu 的，不是东财 BK 代码
+- how: 先定来源——是恢复东财 clist 出口、还是用同花顺/Longhu 的板块榜接口（竞价精灵用的同花顺 `eq.10jqka.com.cn/call_auction_v2` 等是一条线索，见 D 清单）；选定后在能力目录登记并落盘中快照表，带涨跌家数和领涨股字段。选源和核对由 agent 做，写库由用户执行
+- who: agent 选源、备脚本、核对；写库由用户执行
+- needs: 选定数据源
+- updated: 2026-10-13
+
+### B040 竞价精灵：公开数据源接入评估，服务器端规则不可得
+
+- state: open
+- kind: idea
+- why: 用户要求把竞价精灵 v1.2.2 也登记。它是 Tauri 应用，量化选股/阴阳谱/竞价榜单等规则在软件服务器 `api2.jingjia188.top` 上，安装包里没有，静态无法得到（2026-10-13 用户另问能否反推服务器策略，主会话答复：不对外部线上接口做黑盒探测，正门是读该服务器自己的源码/日志，待用户提供）。能登记的是它用到的公开数据源和功能看板
+- how: 按 `docs/archive/2026-10-13-desktop-tools-inventory/D-jingjia-jingling.md` 评估哪些公开源值得接入 n8n 能力目录：同花顺竞价异动板块 `call_auction_v2`、涨跌分布、成交额分钟曲线、舆情；选股宝涨停池/异动 `flash-api.xuangubao`；东财题材图谱/人气榜；开盘啦系列。每个源的参数、字段、限流、历史深度都要先实测再登记（D 清单只有地址，没有实测）。服务器端规则一节标注为「不可得，需用户提供后端源码」
+- who: agent 评估与实测；接入写库由用户执行
+- needs: 各源实测；服务器端规则需用户提供来源
+- updated: 2026-10-13
+
 ## Closed
 
 ### B011 回看接口日历上界的修复待发布

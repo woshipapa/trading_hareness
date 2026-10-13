@@ -40,7 +40,7 @@
 
 ## 待办清单
 
-open 21, ready 9, doing 1, done 3, dropped 1
+open 26, ready 9, doing 1, done 3, dropped 1
 
 在做的、可以开工的、等用户处理的:
 
