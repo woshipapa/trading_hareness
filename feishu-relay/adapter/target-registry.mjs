@@ -11,7 +11,10 @@ export function createTargetRegistry({ ledger, bridgePost, webhookTargets, now =
 	}
 
 	async function changed() {
-		await Promise.all([...listeners].map((listener) => listener()));
+		await Promise.all([...listeners].map(async (listener) => {
+			try { await listener(); }
+			catch { console.error('目标群变更监听失败'); }
+		}));
 	}
 
 	function targetRow(target) {
@@ -26,11 +29,15 @@ export function createTargetRegistry({ ledger, bridgePost, webhookTargets, now =
 		};
 	}
 
-	async function record(target) {
-		const row = targetRow(target);
+	async function writeRow(row) {
 		await ledger.query(`INSERT INTO ${TARGET_TABLE} (${TARGET_COLUMNS}) VALUES ($1,$2,$3,$4,$5,$6,$7)
 			ON CONFLICT(chat_id) DO UPDATE SET websocket_chat_id=EXCLUDED.websocket_chat_id,chat_name=EXCLUDED.chat_name,bot_id=EXCLUDED.bot_id,bot_name=EXCLUDED.bot_name,owned=EXCLUDED.owned,resolved_at=EXCLUDED.resolved_at`,
 			[row.chat_id, row.websocket_chat_id, row.chat_name, row.bot_id, row.bot_name, row.owned, row.resolved_at]);
+	}
+
+	async function record(target) {
+		const row = targetRow(target);
+		await writeRow(row);
 		await changed();
 		return row;
 	}
@@ -61,22 +68,14 @@ export function createTargetRegistry({ ledger, bridgePost, webhookTargets, now =
 			}
 		}
 		if (!resolved.length) return list();
-		await ledger.query(`DELETE FROM ${TARGET_TABLE}`);
-		for (const row of resolved) {
-			await ledger.query(`INSERT INTO ${TARGET_TABLE} (${TARGET_COLUMNS}) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-				[row.chat_id, row.websocket_chat_id, row.chat_name, row.bot_id, row.bot_name, row.owned, row.resolved_at]);
-		}
+		for (const row of resolved) await writeRow(row);
 		await changed();
 		return list();
 	}
 
 	async function list() {
 		const stored = new Map((await rows()).map((row) => [row.chat_id, row]));
-		const targets = new Map(webhookTargets.list().map((target) => [target.chat_id, target]));
-		for (const row of stored.values()) {
-			if (!targets.has(row.chat_id)) targets.set(row.chat_id, { chat_id: row.chat_id, name: row.chat_name, keyword: null, origin: 'dashboard', usable: false, managed: false });
-		}
-		return [...targets.values()].sort((left, right) => left.chat_id.localeCompare(right.chat_id)).map((target) => {
+		return webhookTargets.list().sort((left, right) => left.chat_id.localeCompare(right.chat_id)).map((target) => {
 			const row = stored.get(target.chat_id);
 			return {
 				...target,

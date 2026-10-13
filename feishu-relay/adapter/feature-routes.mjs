@@ -21,9 +21,13 @@ function writeJson(response, status, payload) {
 	response.end(JSON.stringify(payload));
 }
 
+export function matchesFeatureRoute(routes, method, pathname) {
+	return routes.flatMap((module) => module.routes ?? module).some((route) => String(route.method).toUpperCase() === String(method).toUpperCase() && routeMatch(route, pathname));
+}
+
 export function createFeatureRoutes({ routes, readJsonBody, token }) {
 	const routeList = routes.flatMap((module) => module.routes ?? module);
-	return async function dispatch(request, response) {
+	const dispatch = async function dispatch(request, response) {
 		const url = new URL(request.url ?? '/', 'http://localhost');
 		const route = routeList.find((candidate) => String(candidate.method).toUpperCase() === String(request.method).toUpperCase() && routeMatch(candidate, url.pathname));
 		if (!route) return false;
@@ -41,4 +45,6 @@ export function createFeatureRoutes({ routes, readJsonBody, token }) {
 		}
 		return true;
 	};
+	dispatch.matches = (method, pathname) => matchesFeatureRoute(routeList, method, pathname);
+	return dispatch;
 }

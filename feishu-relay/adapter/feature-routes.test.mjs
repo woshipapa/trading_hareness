@@ -27,6 +27,8 @@ test('dispatches string and regexp routes with params and query', async () => {
 	const postResponse = response();
 	await dispatch({ method: 'POST', url: '/items/one', headers: {} }, postResponse);
 	assert.deepEqual(JSON.parse(postResponse.body), { item: 'one', body: { value: 3 } });
+	assert.equal(dispatch.matches('POST', '/items/two'), true);
+	assert.equal(dispatch.matches('GET', '/missing'), false);
 });
 
 test('internal routes require the injected bridge token', async () => {

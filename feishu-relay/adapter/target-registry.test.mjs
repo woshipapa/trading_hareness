@@ -59,6 +59,14 @@ test('record, forget, and resolve each notify listeners', async () => {
 	assert.equal(changes, 3);
 });
 
+test('a failing listener is isolated from registry writes', async () => {
+	const { registry } = setup({ bridgeAnswer: { groups: [{ chat_id: '7690000000000000001', name: '目标群', owned: true, bots: [{ bot_id: 'bot-1', name: '转发机器人', webhook_hash: HASH }] }] } });
+	registry.onChange(async () => { throw new Error('listener failed'); });
+	await assert.doesNotReject(() => registry.record({ chat_id: 'oc_env', websocket_chat_id: '7', chat_name: '群', bot_id: 'b', bot_name: '机器人', owned: true }));
+	await assert.doesNotReject(() => registry.forget('oc_env'));
+	await assert.doesNotReject(() => registry.resolve());
+});
+
 test('start resolves only an empty table and bridge failures are non-fatal', async () => {
 	const populated = setup({ initial: [{ chat_id: 'oc_env', websocket_chat_id: '7', chat_name: '群', bot_id: 'b', bot_name: '机器人', owned: true, resolved_at: NOW }] });
 	await populated.registry.start();
