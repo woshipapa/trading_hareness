@@ -22,8 +22,10 @@
 
 ## 到点要做
 
-- W008 2026-10-13 16:00 重跑 `docs/work/probes/2026-10-13-tdx-tolerance.py` 取 10 月 13 日全天的表，输出覆盖写到 `docs/work/probes/2026-10-13-tdx-tolerance.out.txt`（现在那份只到 14:17），把方案“The in-session agreement rule”里的表、15 个合格分钟的计数和 FACTS F016 对到新输出上；规则的取值如果因此站不住（15 秒以内出现不到 95% 的分钟），在方案和本记录里写明并告诉用户。前提：主会话已确认 owner 恢复应答、解除了“停止一切 owner 查询”；没解除就不要跑。调用方式见 Evidence。脚本里的日期是写死的 10 月 13 日，数据留在库里，哪天跑都行。
+- W003 2026-10-13 15:20 先确认 owner 主机是否恢复（BACKLOG B031 写了现象和检查命令）。没恢复就提醒用户看云控制台；恢复后先读负载和内存、弄清原因，再做下面 18:45 那条。
+- W008 2026-10-13 16:00 重跑 `docs/work/probes/2026-10-13-tdx-tolerance.py` 取 10 月 13 日全天的表，输出覆盖写到 `docs/work/probes/2026-10-13-tdx-tolerance.out.txt`（现在那份只到 14:17），把方案“The in-session agreement rule”里的表、15 个合格分钟的计数和 FACTS F016 对到新输出上；规则的取值如果因此站不住（15 秒以内出现不到 95% 的分钟），在方案和本记录里写明并告诉用户。前提：BACKLOG B031 已关闭（owner 恢复应答），并且主会话或用户说了可以再查 owner；否则不要跑。调用方式见 Evidence。脚本里的日期是写死的 10 月 13 日，数据留在库里，哪天跑都行。
 - W003 2026-10-13 18:45 核对该阶段第一次自动运行：读 `fetch_runs` 里能力 `daily_close_completion` 的回执（状态、各分类计数、剩下的股票和原因）；抽查补上的日线有没有涨跌停价和因子；健康检查 `data.daily_bars_complete`（`curl http://127.0.0.1:18300/api/research/indicators/health`）。阶段没跑或 `blocked`：查原因；当天缺口可用本机 `state/research/owner_repairs_20261012/` 里验证过的脚本手工补（写库由用户执行）。
+- W001 2026-10-13 19:30 核对当晚盘后自动生成的涨停榜和风险分读数（明早 09:15 的竞价池从 10 月 13 日的风险分读数取昨日涨停股）：`curl 'http://127.0.0.1:18300/api/research/market/limit-up-risk/daily'` 返回的 `reading.trade_date` 应是 2026-10-13。没有的话看盘后流程是否运行，以及 owner 主机是否正常（BACKLOG B031）。
 - W006 2026-10-13 22:05 owner 发布窗口重开（今天 15:10–18:45 也开着，但 16 步做不完）。若 16 步、双重评审和合并都已完成：备好包装脚本交给用户执行，发布后先做历史回放的干跑。没完成就顺延到 10 月 14 日 11:30–13:00 或 15:10–18:45。本线要发三个单元：owner 纯代码（`quant-service/app/tactic_*.py` 等在纯代码白名单里）、edge 中继（`research-routes.mjs` 新增三条路由）、edge 控制台（新页签）；owner 发布要求提交已在 origin/main，所以包装脚本里先 `git push`。
 - W006 2026-10-14 09:26 发布后的第一个交易日：核对竞价看板读数已存、与 09:25 处置表同一批股票，页面可见。
 - W006 2026-10-14 19:00 第一份每日总结：核对生成、各战法当日结果与手算的两三条一致。
@@ -35,7 +37,7 @@
 
 ## 待办清单
 
-open 19, ready 9, doing 1, done 1, dropped 1
+open 20, ready 9, doing 1, done 1, dropped 1
 
 可以开工或等用户处理的:
 

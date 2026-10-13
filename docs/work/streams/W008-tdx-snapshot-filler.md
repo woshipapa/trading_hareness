@@ -58,8 +58,9 @@
 
 - 2026-10-13 14:30 方案第 3 版写完（`docs/work/plans/tdx-live-snapshot-fallback.md`，就地改写）。容差的依据是 `probes/2026-10-13-tdx-tolerance.out.txt`（14:17 跑的，覆盖到 14:17）：比对行里记的间隔是两次采集起点之差，按“数据时刻”重算后（主源＝采集时刻减缓存年龄，通达信＝读取返回时刻）中位数是 47 秒而不是 31 秒；数据间隔 20 秒以内的 19 个分钟里，价格相差 0.5% 以内的股票占比最低 97.46%，20–30 秒的 23 个分钟里十分位数掉到 89.8%、最低 85.5%。规则的第一版取值：数据间隔不超过 15 秒的分钟才判定，至少 95% 的共同股票价格相差 0.5% 以内算一致；当天有 15 个这样的分钟，全部一致。
 - 2026-10-13 14:45–15:12 Codex 审查三轮，9 条异议全部采纳，见 Plan。
-- 2026-10-13 15:07 收盘后重跑容差探针三次（15:07:35、约 15:08:30、15:09:52），都在 SSH 握手阶段超时，没有任何查询到达数据库；本线最后一次到达数据库的查询是 14:17:14 的同一脚本（几秒内结束）。15:15 主会话通知：owner 自 15:10 起不应答（SSH、读路径、中继都不通），要求停止一切 owner 查询、未经它同意不得再跑；本线照办，全天的容差表因此没有重跑（见 Due）。
+- 2026-10-13 15:07 收盘后重跑容差探针三次（15:07:35、约 15:08:30、15:09:52），都在 SSH 握手阶段超时，没有任何查询到达数据库；本线最后一次到达数据库的查询是 14:17:14 的同一脚本（几秒内结束）。15:15 主会话通知：owner 主机不应答（SSH、读路径、中继都不通；BACKLOG B031，按本线的三次尝试最晚从 15:07 起），要求停止一切 owner 查询、未经它同意不得再跑；本线从 15:15 起照办，全天的容差表因此没有重跑（见 Due）。
 - 2026-10-13 15:18 correction: BACKLOG B023 的做法里写“通达信 09:15:20 就有第一份，W008 做完后这一分钟可以由它补”，不成立：那一份是 0 行（见 14:00 前置 2 一条）。已在 B023 里加了注明日期的更正。
+- 2026-10-13 15:22 检查点（主会话要求；提交 669471b7 之后补这一条）。主会话交给接手 agent 的五步：(1) 会话开始的核对，做完；(2) 四个前置问题查清，做完，四份探针在 Evidence；(3) 方案改到第 3 版，做完，只是容差表只覆盖到 14:17；(4) Codex 审查，三轮做完，9 条异议全部采纳，最后一处改动未复审，没有以 `SOUND` 收尾；(5) 笔记收尾（本记录、FACTS F013–F018、B023 的更正、视图、冷读检查），做完。没做成的只有一件：收盘后重跑容差探针，卡在 owner 查询暂停上（Due）。冷读检查由一个没有上下文的子 agent 做过一次，它指出的三处（持有者、分支名、重跑的输出文件名）已补进记录。
 
 ## Waiting on the user
 
@@ -71,7 +72,7 @@
 
 ## Due
 
-- [ ] 2026-10-13 16:00 重跑 `docs/work/probes/2026-10-13-tdx-tolerance.py` 取 10 月 13 日全天的表，输出覆盖写到 `docs/work/probes/2026-10-13-tdx-tolerance.out.txt`（现在那份只到 14:17），把方案“The in-session agreement rule”里的表、15 个合格分钟的计数和 FACTS F016 对到新输出上；规则的取值如果因此站不住（15 秒以内出现不到 95% 的分钟），在方案和本记录里写明并告诉用户。前提：主会话已确认 owner 恢复应答、解除了“停止一切 owner 查询”；没解除就不要跑。调用方式见 Evidence。脚本里的日期是写死的 10 月 13 日，数据留在库里，哪天跑都行。
+- [ ] 2026-10-13 16:00 重跑 `docs/work/probes/2026-10-13-tdx-tolerance.py` 取 10 月 13 日全天的表，输出覆盖写到 `docs/work/probes/2026-10-13-tdx-tolerance.out.txt`（现在那份只到 14:17），把方案“The in-session agreement rule”里的表、15 个合格分钟的计数和 FACTS F016 对到新输出上；规则的取值如果因此站不住（15 秒以内出现不到 95% 的分钟），在方案和本记录里写明并告诉用户。前提：BACKLOG B031 已关闭（owner 恢复应答），并且主会话或用户说了可以再查 owner；否则不要跑。调用方式见 Evidence。脚本里的日期是写死的 10 月 13 日，数据留在库里，哪天跑都行。
 
 ## Evidence
 
@@ -96,10 +97,12 @@
 
 ## Resume here
 
-现状（2026-10-13 15:25）：方案第 3 版写完，Codex 审了三轮（9 条异议全部采纳，没有以 `SOUND` 收尾，最后一处改动未复审）。用户还没批准，没有写一行实现代码，没有建工作区。通达信的并行采集早已在线上，本线要做的是四个前置修复（P1–P4）和补缺链（B1–B3）。
+现状（2026-10-13 15:22）：方案第 3 版写完，Codex 审了三轮（9 条异议全部采纳，没有以 `SOUND` 收尾，最后一处改动未复审）。用户还没批准，没有写一行实现代码，没有建工作区。通达信的并行采集早已在线上，本线要做的是四个前置修复（P1–P4）和补缺链（B1–B3）。
+
+怎么接上：先读方案 `docs/work/plans/tdx-live-snapshot-fallback.md` 开头的“Revision note”（第 3 版改了什么、审查到哪一步），再读“Measured on 2026-10-13”（每个数字后面是哪份探针输出，探针在 `docs/work/probes/2026-10-13-tdx-*.py` / `.out.txt`，调用方式在本记录 Evidence）。
 
 第一件事：看 Waiting on the user 那一条有没有答复。批准了：在仓库根目录 `bash ~/codebase/agent-skills/own/codex-flow/scripts/mkworktree.sh . tdx-shadow-measure --disposition merge --target main`，它会建分支 `codex/tdx-shadow-measure` 并打印工作区路径；然后按方案“Dispatches”派工 1（P1），验收命令在方案“Acceptance”。没批准：按用户的意见改方案，不要动工。
 
 信任本记录之前：`git diff --stat e8a7b953 HEAD -- quant-service scripts` 应为空（方案里的文件行号是按 e8a7b953 核对的，不为空就先核对被改到的那几处）；`bash ~/codebase/agent-skills/own/codex-flow/scripts/lsworktrees.sh . | grep -E "tdx-shadow-measure|tdx-promote-gate|tdx-live-snapshot-fallback"` 应无输出。
 
-陷阱：owner 自 10 月 13 日 15:07 起不应答，主会话下了“停止一切 owner 查询”，解除前不要跑任何探针（Due 那条也一样）。改 `scripts/tdx-promote.py` 会让此后每一次 owner 发布被判成全量发布，所以它单独一个派工并带分类器规则。22 个未合并的 `codex/tdx-*` 分支不要合并（BACKLOG B029）。W006 的工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials` 和 W009 的记录、主检出里未提交的 feishu-relay / scripts / config 文件都是别的会话的，不要碰。发布由用户执行。
+陷阱：owner 主机 10 月 13 日 15:07 起不应答（BACKLOG B031），15:15 起一切 owner 查询暂停，B031 没关、主会话或用户没说可以之前不要跑任何探针（Due 那条也一样）。改 `scripts/tdx-promote.py` 会让此后每一次 owner 发布被判成全量发布，所以它单独一个派工并带分类器规则。22 个未合并的 `codex/tdx-*` 分支不要合并（BACKLOG B029）。W006 的工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials` 和 W009 的记录、主检出里未提交的 feishu-relay / scripts / config 文件都是别的会话的，不要碰。发布由用户执行。
