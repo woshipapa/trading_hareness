@@ -13,7 +13,7 @@ import pandas as pd
 CN = timezone(timedelta(hours=8))
 ROOT = Path("/Users/papa/codebase/n8n")
 OUT = ROOT / "state/research/vshape_20261013/data"
-CODES = ("SH000001", "SZ399001", "SZ399006", "SH000852", "510300", "512100")
+CODES = tuple(sys.argv[1:]) or ("SH000001", "SZ399001", "SZ399006", "SH000852", "510300", "512100")
 KEY = re.search(r"^QUANT_SHARED_READ_API_KEY=(.*)$", (ROOT / "deploy/shared-peer/.env").read_text(), re.M).group(1).strip().strip('"')
 
 
@@ -36,9 +36,10 @@ start = datetime.now(CN).replace(hour=15, minute=10, second=0, microsecond=0)
 if datetime.now(CN) < start:
     log(f"waiting for {start:%H:%M}")
     time.sleep((start - datetime.now(CN)).total_seconds())
-with urllib.request.urlopen("http://127.0.0.1:18300/api/research/market/radar?trade_date=2026-10-13", timeout=120) as response:
-    (OUT.parent / "radar" / "radar_2026-10-13.json").write_bytes(response.read())
-log("saved the full-day radar")
+if not sys.argv[1:]:
+    with urllib.request.urlopen("http://127.0.0.1:18300/api/research/market/radar?trade_date=2026-10-13", timeout=120) as response:
+        (OUT.parent / "radar" / "radar_2026-10-13.json").write_bytes(response.read())
+    log("saved the full-day radar")
 panel = pd.read_parquet(ROOT / "state/research/shortterm_tactics_20261013/data/daily_panel.parquet", columns=["trading_date"])
 days = sorted({pd.Timestamp(day).strftime("%Y%m%d") for day in panel["trading_date"].unique() if pd.Timestamp(day) >= pd.Timestamp("2023-09-01")} | {"20261013"})
 log(f"{len(days)} sessions, {len(CODES)} codes")
@@ -78,4 +79,4 @@ for code in CODES:
                 log(f"{calls} calls; {code} at {day}")
             time.sleep(0.12)
     log(f"{code} finished")
-log(f"FINISHED {calls} calls")
+log(f"FINISHED {calls} calls ({' '.join(CODES)})")
