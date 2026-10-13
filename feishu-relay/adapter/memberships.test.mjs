@@ -10,14 +10,17 @@ function date(value) { return value instanceof Date ? value : new Date(value.inc
 function fakeLedger({ members = [], settings = null } = {}) {
 	const rows = members.map((row) => ({ target_chat_id: CHAT, created_at: date('2026-01-01'), updated_at: date('2026-01-01'), ...row }));
 	const config = settings ?? { target_chat_id: CHAT, enabled: true, default_term_months: 1, remind_text: '请续费', exempt_user_ids: [], last_review_on: null };
-	const clone = (row) => ({ ...row });
+	// node-pg returns a `date` column as a Date at local midnight, not as text; the fake answers in the same shape.
+	const pgDate = (value) => (typeof value === 'string' ? new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10))) : value);
+	const clone = (row) => ({ ...row, started_on: pgDate(row.started_on), expires_on: pgDate(row.expires_on), reminded_on: pgDate(row.reminded_on) });
+	const settingsClone = (row) => ({ ...row, last_review_on: pgDate(row.last_review_on) });
 	return {
 		rows,
 		config,
 		async query(sql, params = []) {
-			if (sql.startsWith('SELECT target_chat_id,enabled,last_review_on')) return config.enabled ? { rows: [{ target_chat_id: CHAT, enabled: true, last_review_on: config.last_review_on }] } : { rows: [] };
-			if (sql.startsWith('SELECT target_chat_id,enabled,default_term_months')) return { rows: [clone(config)] };
-			if (sql.startsWith('INSERT INTO feishu_group_relay_membership_settings')) { Object.assign(config, { target_chat_id: params[0], enabled: params[1], default_term_months: params[2], remind_text: params[3], exempt_user_ids: JSON.parse(params[4]), last_review_on: params[5] ?? config.last_review_on }); return { rows: [clone(config)] }; }
+			if (sql.startsWith('SELECT target_chat_id,enabled,last_review_on')) return config.enabled ? { rows: [{ target_chat_id: CHAT, enabled: true, last_review_on: pgDate(config.last_review_on) }] } : { rows: [] };
+			if (sql.startsWith('SELECT target_chat_id,enabled,default_term_months')) return { rows: [settingsClone(config)] };
+			if (sql.startsWith('INSERT INTO feishu_group_relay_membership_settings')) { Object.assign(config, { target_chat_id: params[0], enabled: params[1], default_term_months: params[2], remind_text: params[3], exempt_user_ids: JSON.parse(params[4]), last_review_on: params[5] ?? config.last_review_on }); return { rows: [settingsClone(config)] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_membership_settings')) { config.last_review_on = params[1]; return { rows: [] }; }
 			if (sql.startsWith('SELECT target_chat_id,user_id')) return { rows: rows.filter((row) => row.target_chat_id === String(params[0])).map(clone) };
 			if (sql.startsWith('INSERT INTO feishu_group_relay_memberships')) {
@@ -206,4 +209,32 @@ test('term values reject zero, negative, and fractional numbers', async () => {
 	const { feature } = setup();
 	for (const value of [0, -1, 1.5]) await assert.rejects(() => feature.updateSettings(CHAT, { default_term_months: value }), /默认期限/);
 	for (const value of [0, -1, 1.5]) await assert.rejects(() => feature.updateMember(CHAT, 'u1', { started_on: '2026-01-01', term_months: value }), /期限/);
+});
+
+const expired = { user_id: 'u1', display_name: '甲', started_on: '2026-01-31', term_months: 1, expires_on: '2026-02-28', note: null, reminded_on: null, remind_claimed_at: null, left_at: null };
+const off = { target_chat_id: CHAT, enabled: false, default_term_months: 1, remind_text: '请续费', exempt_user_ids: [], last_review_on: null };
+
+test('date columns are answered as calendar dates and an expired member is reported as expired', async () => {
+	const { feature } = setup({ members: [expired] });
+	const list = feature.routes.find((route) => route.method === 'GET' && route.path.endsWith('/memberships'));
+	const body = await list.handle({ params: { chatId: CHAT } });
+	assert.deepEqual(body.members.map((row) => [row.started_on, row.expires_on, row.status]), [['2026-01-31', '2026-02-28', '已到期']]);
+	const saved = await feature.updateMember(CHAT, 'u1', { started_on: '2026-02-15', term_months: 3, note: null });
+	assert.deepEqual([saved.started_on, saved.expires_on], ['2026-02-15', '2026-05-15']);
+});
+
+test('the preview and a review the user asks for do not depend on the daily switch', async () => {
+	const { feature, sent } = setup({ settings: { ...off }, members: [expired] });
+	assert.deepEqual((await feature.review(CHAT, { dryRun: true })).map((row) => [row.user_id, row.status]), [['u1', '已到期']]);
+	assert.equal(sent.length, 0);
+	await feature.tick();
+	assert.equal(sent.length, 0);
+	await feature.review(CHAT);
+	assert.equal(sent.length, 1);
+});
+
+test('a target already reviewed today is not reviewed again by the scheduler', async () => {
+	const { feature, sent } = setup({ settings: { ...off, enabled: true, last_review_on: '2026-03-01' }, members: [expired] });
+	await feature.tick();
+	assert.equal(sent.length, 0);
 });
