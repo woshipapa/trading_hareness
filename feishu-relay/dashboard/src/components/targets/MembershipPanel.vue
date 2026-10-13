@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { Bell, Edit, Refresh, Search, Setting } from '@element-plus/icons-vue';
 import { targetGroupsContextKey } from '../../dashboard-context';
 import { useMemberships } from '../../composables/useMemberships';
-import type { MembershipRow } from '../../api/memberships';
+import type { MembershipRow, MembershipSuggestion } from '../../api/memberships';
 
 const selection = inject(targetGroupsContextKey);
 if (!selection) throw new Error('membership panel requires the target groups context');
@@ -16,7 +16,7 @@ const settingsForm = reactive({ enabled: false, default_term_months: 1, remind_t
 const editDialog = ref(false);
 const editError = ref('');
 const editing = ref<MembershipRow | null>(null);
-const editForm = reactive({ started_on: '', term_months: 1, note: '', exempt: false });
+const editForm = reactive({ started_on: '', term_months: 1, fixed: false, expires_on: '', note: '', exempt: false });
 
 const ready = computed(() => Boolean(memberships.target.value) && memberships.eligible.value);
 
@@ -78,10 +78,20 @@ function openEdit(row: MembershipRow) {
   Object.assign(editForm, {
     started_on: row.started_on,
     term_months: row.term_months,
+    fixed: row.expiry_fixed === true,
+    expires_on: row.expires_on,
     note: row.note ?? '',
     exempt: memberships.settings.value?.exempt_user_ids.includes(row.user_id) ?? false,
   });
   editDialog.value = true;
+}
+
+// Fills the form from what the alias says; nothing is saved until the person presses 保存.
+function applySuggestion(suggestion: MembershipSuggestion) {
+  if (suggestion.started_on) editForm.started_on = suggestion.started_on;
+  if (suggestion.term_months) editForm.term_months = suggestion.term_months;
+  editForm.fixed = Boolean(suggestion.expires_on);
+  if (suggestion.expires_on) editForm.expires_on = suggestion.expires_on;
 }
 
 async function saveEdit() {
@@ -90,8 +100,13 @@ async function saveEdit() {
     editError.value = '请填写有效的开始日期和 1–120 的整数期限';
     return;
   }
+  if (editForm.fixed && (!/^\d{4}-\d{2}-\d{2}$/.test(editForm.expires_on ?? '') || editForm.expires_on < editForm.started_on)) {
+    editError.value = '指定的到期日要晚于开始日期';
+    return;
+  }
   editError.value = '';
-  if (await memberships.saveMember(editing.value.user_id, { ...editForm, note: editForm.note || null })) {
+  const edit = { started_on: editForm.started_on, term_months: editForm.term_months, expires_on: editForm.fixed ? editForm.expires_on : null, note: editForm.note || null, exempt: editForm.exempt };
+  if (await memberships.saveMember(editing.value.user_id, edit)) {
     editDialog.value = false;
     ElMessage.success('会员信息已保存');
   }
@@ -145,9 +160,10 @@ async function remind(row: MembershipRow) {
       </el-form>
 
       <el-table :data="memberships.sortedMembers.value" row-key="user_id" v-loading="memberships.loading.value" class="section-gap" empty-text="暂无成员">
-        <el-table-column prop="display_name" label="成员" min-width="150" />
+        <el-table-column prop="display_name" label="成员" min-width="130" />
+        <el-table-column label="备注名" min-width="190"><template #default="{ row }">{{ row.alias || '-' }}</template></el-table-column>
         <el-table-column prop="started_on" label="开始日期" width="125" />
-        <el-table-column label="期限" width="100"><template #default="{ row }">{{ row.term_months }} 个月</template></el-table-column>
+        <el-table-column label="期限" width="100"><template #default="{ row }">{{ row.expiry_fixed ? '指定到期日' : `${row.term_months} 个月` }}</template></el-table-column>
         <el-table-column prop="expires_on" label="到期日" width="125" />
         <el-table-column label="状态" width="105"><template #default="{ row }"><el-tag :type="statusType(row)">{{ statusText(row) }}</el-tag></template></el-table-column>
         <el-table-column prop="reminded_on" label="上次提醒" width="125"><template #default="{ row }">{{ row.reminded_on || '-' }}</template></el-table-column>
@@ -165,6 +181,13 @@ async function remind(row: MembershipRow) {
   <el-dialog v-model="editDialog" title="编辑会员" width="520px" destroy-on-close>
     <el-alert v-if="editError" :title="editError" type="error" :closable="false" show-icon class="section-gap" />
     <el-form :model="editForm" label-position="top">
+      <el-form-item v-if="editing?.alias" :label="`备注名：${editing.alias}`">
+        <el-space v-if="editing.suggestions?.length" wrap>
+          <span class="membership-hint">按备注名填：</span>
+          <el-button v-for="suggestion in editing.suggestions" :key="suggestion.label" size="small" plain @click="applySuggestion(suggestion)">{{ suggestion.label }}</el-button>
+        </el-space>
+        <span v-else class="membership-hint">备注名里没有读出日期或期限</span>
+      </el-form-item>
       <el-form-item label="开始日期"><el-date-picker v-model="editForm.started_on" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" class="full-width" /></el-form-item>
       <el-form-item label="期限">
         <el-space wrap>
@@ -172,6 +195,13 @@ async function remind(row: MembershipRow) {
             <el-radio-button v-for="term in quickTerms" :key="term" :label="term">{{ term }} 个月</el-radio-button>
           </el-radio-group>
           <el-input-number v-model="editForm.term_months" :min="1" :max="120" :step="1" controls-position="right" />
+        </el-space>
+      </el-form-item>
+      <el-form-item label="到期日">
+        <el-space wrap>
+          <el-switch v-model="editForm.fixed" active-text="指定到期日" inactive-text="按期限计算" />
+          <el-date-picker v-if="editForm.fixed" v-model="editForm.expires_on" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" placeholder="到期日" />
+          <span v-else class="membership-hint">开始日期加期限</span>
         </el-space>
       </el-form-item>
       <el-form-item label="备注"><el-input v-model="editForm.note" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
@@ -186,6 +216,7 @@ async function remind(row: MembershipRow) {
 
 <style scoped>
 .membership-empty { padding: 10px 0 4px; color: #738198; }
+.membership-hint { color: #738198; font-size: 13px; }
 .membership-settings { display: grid; grid-template-columns: 180px minmax(280px, 1fr) minmax(260px, 1.4fr) auto; gap: 14px; align-items: end; }
 .membership-settings .el-form-item { margin-bottom: 0; }
 .remind-text-field { min-width: 0; }

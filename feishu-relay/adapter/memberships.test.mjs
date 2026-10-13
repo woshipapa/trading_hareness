@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addMonths, createMemberships } from './memberships.mjs';
+import { addMonths, aliasSuggestions, createMemberships } from './memberships.mjs';
 
 const CHAT = 'oc_target';
 const WS = '7696053062053530578';
@@ -26,14 +26,14 @@ function fakeLedger({ members = [], settings = null } = {}) {
 			if (sql.startsWith('UPDATE feishu_group_relay_membership_settings')) { config.last_review_on = params[1]; return { rows: [] }; }
 			if (sql.startsWith('SELECT target_chat_id,user_id')) return { rows: rows.filter((row) => row.target_chat_id === String(params[0])).map(clone) };
 			if (sql.startsWith('INSERT INTO feishu_group_relay_memberships')) {
-				if (!rows.some((row) => row.user_id === params[1])) rows.push({ target_chat_id: params[0], user_id: params[1], display_name: params[2], started_on: params[3], term_months: params[4], expires_on: params[5], note: params[6], reminded_on: null, remind_claimed_at: null, left_at: null, created_at: params[7], updated_at: params[7] });
+				if (!rows.some((row) => row.user_id === params[1])) rows.push({ target_chat_id: params[0], user_id: params[1], display_name: params[2], started_on: params[3], term_months: params[4], expires_on: params[5], note: params[6], reminded_on: null, remind_claimed_at: null, left_at: null, alias: params[8], expiry_fixed: false, created_at: params[7], updated_at: params[7] });
 				return { rows: [] };
 			}
-			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET display_name')) { const row = rows.find((item) => item.user_id === params[1]); Object.assign(row, { display_name: params[2], left_at: null, updated_at: params[3] }); return { rows: [] }; }
+			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET display_name')) { const row = rows.find((item) => item.user_id === params[1]); Object.assign(row, { display_name: params[2], alias: params[4], left_at: null, updated_at: params[3] }); return { rows: [] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET left_at')) { const row = rows.find((item) => item.user_id === params[1]); Object.assign(row, { left_at: params[2], updated_at: params[2] }); return { rows: [] }; }
 			if (sql.startsWith('DELETE FROM feishu_group_relay_memberships')) { const index = rows.findIndex((row) => row.target_chat_id === String(params[0]) && row.user_id === String(params[1])); if (index >= 0) rows.splice(index, 1); return { rows: [] }; }
-			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET started_on')) { const row = rows.find((item) => item.user_id === params[1]); if (!row) return { rows: [] }; Object.assign(row, { started_on: params[2], term_months: params[3], expires_on: params[4], note: params[5], reminded_on: null, remind_claimed_at: null, updated_at: params[6] }); return { rows: [clone(row)] }; }
-			if (sql.startsWith('WITH updated_member AS')) { const row = rows.find((item) => item.user_id === params[1]); if (!row) return { rows: [] }; Object.assign(row, { started_on: params[2], term_months: params[3], expires_on: params[4], note: params[5], reminded_on: null, remind_claimed_at: null, updated_at: params[6] }); config.exempt_user_ids = JSON.parse(params[7]); return { rows: [clone(row)] }; }
+			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET started_on')) { const row = rows.find((item) => item.user_id === params[1]); if (!row) return { rows: [] }; Object.assign(row, { started_on: params[2], term_months: params[3], expires_on: params[4], note: params[5], reminded_on: null, remind_claimed_at: null, updated_at: params[6], expiry_fixed: params[7] }); return { rows: [clone(row)] }; }
+			if (sql.startsWith('WITH updated_member AS')) { const row = rows.find((item) => item.user_id === params[1]); if (!row) return { rows: [] }; Object.assign(row, { started_on: params[2], term_months: params[3], expires_on: params[4], note: params[5], reminded_on: null, remind_claimed_at: null, updated_at: params[6], expiry_fixed: params[8] }); config.exempt_user_ids = JSON.parse(params[7]); return { rows: [clone(row)] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET remind_claimed_at=$3')) {
 				const [chatId, second, third, fourth] = params;
 				const manual = sql.includes('user_id=$2');
@@ -265,4 +265,53 @@ test('a group without a bot can be listed, edited and previewed, but not reviewe
 	await assert.rejects(() => feature.updateSettings(CHAT, { enabled: true }), /还没有可用的机器人/);
 	assert.equal((await feature.updateSettings(CHAT, { default_term_months: 3 })).default_term_months, 3);
 	assert.equal(sent.length, 0);
+});
+
+test('an alias written as month-day plus term is read into offers, never into more than the text says', () => {
+	const offers = (alias) => aliasSuggestions(alias, '2026-10-13').map((item) => item.label);
+	assert.deepEqual(offers('阿明 823三个月'), ['08-23 起 3 个月']);
+	assert.deepEqual(offers('小华 三个月826'), ['08-26 起 3 个月']);
+	assert.deepEqual(offers('小黑24。94三个月'), ['09-04 起 3 个月']);
+	assert.deepEqual(offers('静静 108'), ['10-08 起']);
+	assert.deepEqual(offers('Abc1997 924三个月'), ['09-24 起 3 个月']);
+	assert.deepEqual(offers('飞书用户1234AB 923'), ['09-23 起']);
+	assert.deepEqual(offers('用户33安强827三个917一个'), ['08-27 起 3 个月', '09-17 起 1 个月']);
+	assert.deepEqual(offers('雪饼哥 97三个月921三'), ['09-07 起 3 个月', '09-21 起 3 个月']);
+	assert.deepEqual(offers('Example 98一个月108'), ['09-08 起 1 个月', '10-08 起']);
+	assert.deepEqual(offers('用户444444 到12月底 98一周'), ['到 12-31', '09-08 起 1 周（到 09-15）']);
+	assert.deepEqual(offers('阳阳 98一个月一周'), ['09-08 起 1 个月加 1 周（到 10-15）']);
+	assert.deepEqual(offers('用户 三个月'), ['3 个月']);
+	assert.deepEqual(offers('用户777777 97三个鱼13'), ['09-07 起 3 个月']);
+	for (const plain of ['老王', '用户888888', '', null]) assert.deepEqual(offers(plain), []);
+	assert.deepEqual(aliasSuggestions('阿明 823三个月', '2026-10-13')[0], { started_on: '2026-08-23', term_months: 3, expires_on: null, label: '08-23 起 3 个月' });
+	assert.deepEqual(aliasSuggestions('到12月底', '2026-10-13')[0], { started_on: null, term_months: null, expires_on: '2026-12-31', label: '到 12-31' });
+	// In January a December date is last month's, not eleven months ahead.
+	assert.deepEqual(aliasSuggestions('阿明 1225一个月', '2027-01-05').map((item) => item.started_on), ['2026-12-25']);
+});
+
+test('a sync keeps each member\'s alias, and the list offers what the alias says', async () => {
+	const { feature, ledger } = setup({ bridgeMembers: [{ user_id: 'u1', name: '群昵称', alias: '阿明 108三个月', joined_at: Math.floor(date('2026-01-31').getTime() / 1000), is_bot: false, is_self: false }] });
+	const rows = await feature.sync(CHAT);
+	assert.equal(rows[0].alias, '阿明 108三个月');
+	const list = feature.routes.find((route) => route.method === 'GET' && route.path.endsWith('/memberships'));
+	const body = await list.handle({ params: { chatId: CHAT } });
+	// The clock here is 2026-03-01, so "108" is read as the nearer 8 January, not 8 October.
+	assert.deepEqual(body.members[0].suggestions.map((item) => item.label), ['01-08 起 3 个月']);
+	// The alias follows Feishu at the next sync; the dates a person set do not move.
+	ledger.rows[0].started_on = '2026-02-10';
+	const again = createMemberships({ ledger, bridgePost: async () => ({ status: 'ok', members: [{ user_id: 'u1', name: '群昵称', alias: '阿明 18三个月', joined_at: 1, is_bot: false, is_self: false }] }), targetRegistry: { get: async () => ({ chat_id: CHAT, websocket_chat_id: WS, owned: true, usable: true }) }, webhookTargets: { sendText: async () => {} }, now: () => date('2026-03-01') });
+	const synced = await again.sync(CHAT);
+	assert.deepEqual([synced[0].alias, synced[0].started_on], ['阿明 18三个月', '2026-02-10']);
+});
+
+test('a typed expiry date wins over the term until the member is saved without one', async () => {
+	const { feature } = setup({ members: [expired] });
+	const fixed = await feature.updateMember(CHAT, 'u1', { started_on: '2026-09-20', term_months: 1, expires_on: '2026-10-30', note: null });
+	assert.deepEqual([fixed.started_on, fixed.expires_on, fixed.expiry_fixed], ['2026-09-20', '2026-10-30', true]);
+	const counted = await feature.updateMember(CHAT, 'u1', { started_on: '2026-09-20', term_months: 1, note: null });
+	assert.deepEqual([counted.expires_on, counted.expiry_fixed], ['2026-10-20', false]);
+	const withExempt = await feature.updateMember(CHAT, 'u1', { started_on: '2026-09-20', term_months: 3, expires_on: '2026-12-31', note: null, exempt: false });
+	assert.deepEqual([withExempt.expires_on, withExempt.expiry_fixed], ['2026-12-31', true]);
+	await assert.rejects(() => feature.updateMember(CHAT, 'u1', { started_on: '2026-09-20', term_months: 1, expires_on: '2026-09-01', note: null }), /到期日不能早于开始日期/);
+	await assert.rejects(() => feature.updateMember(CHAT, 'u1', { started_on: '2026-09-20', term_months: 1, expires_on: '10-30', note: null }), /到期日必须是 YYYY-MM-DD/);
 });

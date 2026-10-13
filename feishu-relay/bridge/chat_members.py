@@ -10,6 +10,7 @@ from group_admin import GroupAdminError, checked, require_client, require_owner
 MEMBER_PAGE_SIZE = 100
 HISTORY_PAGE_SIZE = 20
 APPLICATION_PAGE_SIZE = 50
+ALIAS_PAGE_SIZE = 50
 
 
 def _chat_id(payload: dict[str, Any]) -> str:
@@ -39,6 +40,16 @@ def _bot_ids(client, chat_id: str) -> set[str]:
 	}
 
 
+def _aliases(client, user_ids: list[str]) -> dict[str, str]:
+	"""The name the account itself gave each of these people (备注名); absent or empty where it gave none."""
+	found: dict[str, str] = {}
+	for start in range(0, len(user_ids), ALIAS_PAGE_SIZE):
+		page = checked(client.api("chatters.PullChattersByIdsRequest", {"chatterIds": user_ids[start:start + ALIAS_PAGE_SIZE]}))
+		for user_id, chatter in (page.get("chatters") or {}).items():
+			found[str(user_id)] = str((chatter or {}).get("alias") or "")
+	return found
+
+
 def list_members(bridge, payload: dict[str, Any]) -> dict[str, Any]:
 	chat_id = _chat_id(payload)
 	client = _owned(bridge, chat_id)
@@ -59,10 +70,12 @@ def list_members(bridge, payload: dict[str, Any]) -> dict[str, Any]:
 	names = _names(bridge, chat_id, user_ids)
 	bot_ids = _bot_ids(client, chat_id)
 	self_id = str(bridge.auth.user_id)
+	aliases = _aliases(client, [user_id for user_id in user_ids if user_id not in bot_ids and user_id != self_id])
 	return {"status": "ok", "chat_id": chat_id, "members": [
 		{
 			"user_id": user_id,
 			"name": names.get(user_id, ""),
+			"alias": aliases.get(user_id, ""),
 			"joined_at": int(joined_at),
 			"is_bot": user_id in bot_ids,
 			"is_self": user_id == self_id,
