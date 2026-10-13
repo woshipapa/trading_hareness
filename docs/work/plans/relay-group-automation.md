@@ -1,6 +1,6 @@
 # 飞书中继：目标群管理、撤回同步、加急告警、链接入群（relay-group-automation）
 
-- 版本：r2，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2 采纳了 Codex 方案审查第一轮的全部 7 条意见（见文末“审查记录”）。
+- 版本：r3，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2、r3 分别采纳了 Codex 方案审查第一轮的 7 条和第二轮的 4 条意见（见文末“审查记录”）。
 - 组件：只动 `feishu-relay/`（发布单元 edge-relay）。不碰 quant-service、frontend、scripts、config/secrets、docs/work。
 - 出处：待办 B030；用户 2026-10-13「可以这些全部推进，请你写好完整计划给codex-flow去执行推进。不同worktree最后merge」，
   看过方案要点后「同意了，我是trust的」。
@@ -83,10 +83,12 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
   `target_observer.py`（后五个 base 只建 `ROUTES = {}`）。
 - `bridge/bridge.py` 的 `do_POST`：在返回 404 之前查 `FEATURE_ROUTES`；`except (GroupLookupError, HistoryRangeError, ChatBotError)`
   里加上 `GroupAdminError`（同样回 422）。
-- `bridge/bridge.py` 给 D 留的两处钩子（base 接好，`target_observer.py` 的空壳让它们不起作用）：
-  收到 WebSocket 消息后、因不在监听名单而忽略（`not_allowlisted_or_dynamic_binding_failed`，约第 2327 行）之前，先问
-  `target_observer.observed(self, chat_id, message)`：返回真就把这条消息发到 `target_observer.ingress_url(self)` 并结束，不进普通通道；
-  空壳的 `observed` 恒为假。功能线 D 只改 `target_observer.py`。
+- `bridge/bridge.py` 给 D 留的钩子是一个**旁路**（base 接好，`target_observer.py` 的空壳什么都不做）：在处理一条收到的群消息的
+  最前面——早于 XHS 指令群的分支（约第 2291–2295 行）和监听名单的判断——调用 `target_observer.tap(self, chat_id, message)`。
+  `tap` 自己判断这个群是不是在观察、发送者是不是该群登记的机器人，是就把一份副本发到观察入口；它不返回值、不改变后面的处理，
+  它里面的异常只记日志（旁路不能影响正常转发，这是有意的吞异常）。观察中的目标群**不加入** `websocket_chat_ids`：
+  没监听的目标群，消息在 `tap` 之后照旧因不在名单被忽略；本来就在监听的群（例如汇总群）照旧走原通道。
+  没有 `from_id` 的消息在更早的地方就被丢弃（约第 565 行），本来也对不上机器人。功能线 D 只改 `target_observer.py`。
 - 功能模块的处理函数拿到的是 `bridge` 对象；需要 larkx 的地方在函数内部导入（本机没有 larkx，模块顶层不能导入它），
   规则写成不依赖 `bridge` 的纯函数，由处理函数把网络访问传进去。
 
@@ -99,11 +101,16 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
   `target-members.mjs`、`urgent-alerts.mjs`、`delivery-check.mjs` 先是空壳），启动时依次执行它们的 `schema`，在 `createServer`
   回调里、现有的 `/internal/larkagentx/*` 和 `/api/group-relay/targets` 分支之前调用分发函数。
   `Route` 可带 `internal: true`：分发函数先按现有内部入口的做法校验 `x-larkagentx-token`。
+  执行完 `schema` 后，对有 `start()` 的功能对象调用一次 `start()`（D 用它定时把观察名单发给 bridge）。
+  `targetRegistry` 提供 `onChange(listener)`：`resolve()` 写表后、以及 `/api/group-relay/targets` 新增和删除目标群的两个处理分支
+  （`index.mjs`，base 改）成功后通知监听者。
 - 给 U 和 D 预先接好的三处调用（空壳里是什么都不做的函数，功能线只改自己的模块）：
   `notifyOps`（第 109 行）在原有的发运维群之后 `await urgentAlerts.notify(key, text)`；
   创建 group relay 时把 `deliveryCheck.recordWebhookDelivery` 和 `deliveryCheck.recallDeliveries` 传进去；
   `adapter/group-relay.mjs` 的 `sendMessage` 在 webhook 发送成功后调用前者（传 `messageId`、`targetChatId`、最终发出的 `webhookMsgType`
   和加过关键词的最终内容），源头撤回的分支（第 1007–1010 行，`updateRelaySourceMessage` 之后）调用后者。
+  这两处调用都**不等待、不让失败外传**（`Promise` 链末尾 `catch` 记日志）：webhook 没有幂等，记录失败如果让 `sendMessage` 报错，
+  重试会把同一条消息再发一遍；撤回失败也不能打断轮询。这是本方案里另一处有意的吞异常，注释里写明原因。
 - 分发函数把处理函数抛出的异常一律回 400 并带上原因；bridge 回的 422、429 经 `bridgePostJson` 变成带原因的异常，同样回 400。
 - 两个 Dockerfile（`adapter/Dockerfile`、`deploy/edge/Dockerfile.adapter`）的 COPY 清单一次加齐七个新文件。
 
@@ -190,11 +197,13 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
 
 ## D：撤回同步与送达核对
 
-- bridge `target_observer.py`：`POST /targets/observe {chats: [{chat_id, bot_ids: [...]}]}` 设定要观察的目标群（存内存；adapter 启动时
-  和目标群变化时下发）。`bridge.py`：观察中的群加入监听集合；`ingress_url_for` 增加第三条去向——观察中的群的消息只发到
-  `…/internal/larkagentx/target-observed`（由 `LARKX_INGRESS_URL` 换路径得到，不新增环境变量），且只转发 `from_id` 属于该群
-  `bot_ids` 的消息；这些群的消息不进普通转发通道。`POST /messages/recall-in-group {chat_id, message_id}`：`require_owner` →
-  `DeleteGroupMessage`。
+- bridge `target_observer.py`：`POST /targets/observe {chats: [{chat_id, bot_ids: [...]}]}` 设定要观察的目标群（只存内存，整表替换）；
+  `tap(bridge, chat_id, message)`（调用点见“接缝”）：群在观察名单里且 `from_id` 属于该群的 `bot_ids` 时，把消息的
+  `{chat_id, message_id, position, create_time, from_id, msg_type, text}` 发到 `…/internal/larkagentx/target-observed`
+  （由 `LARKX_INGRESS_URL` 换路径得到，不新增环境变量；带 `x-larkagentx-token`）。别人发的消息不发。
+  `POST /messages/recall-in-group {chat_id, message_id}`：`require_owner` → `DeleteGroupMessage`。
+- adapter 一侧由 `delivery-check.mjs` 的 `start()` 每 60 秒把观察名单（`targetRegistry.list()` 里有数字群 ID 和 `bot_id` 的目标群）
+  发给 bridge，并订阅 `targetRegistry.onChange` 在变化时立即发一次；bridge 重启后名单最多 60 秒内恢复。
 - adapter `delivery-check.mjs`：表 `feishu_group_relay_target_deliveries(delivery_id bigserial primary key, source_message_id text not null,
   target_chat_id text not null, fingerprint text not null, sent_at timestamptz not null, target_message_id text, observed_at timestamptz,
   recalled_at timestamptz, recall_error text)`。
@@ -226,7 +235,7 @@ git diff --check integration/relay-auto...HEAD
 
 每个功能模块要有会失败的测试，至少覆盖：
 - bridge：不是群主时拒绝且不发任何写命令；J 的非法链接不调用网关；U 的接收人不是会话里唯一的对方时被拒、超过每小时上限被拒；
-  D 只转发机器人发的消息、别人的消息不转发。
+  D 的 `tap` 只对观察名单里的群、且发送者是登记的机器人时发副本，其余情况不发，发送失败不抛出。
 - adapter：R 的哈希对不上时不写表、响应里没有地址；C 中途失败时返回走到的步骤；M 对没有数字群 ID 或非群主的目标群回 400；
   D 指纹零条或多条匹配时不写、源头撤回只撤已核对的、撤回失败不重试；U 关着或没有接收人时不调用 bridge。
 - 看板：每个面板的组合函数各有一个测试，断言发出的请求（方法、路径、请求体）和失败时不改变状态。
@@ -238,7 +247,8 @@ Claude 在评审时另跑：`bash feishu-relay/scripts/edge/test-bridge-on-edge.
 
 - 这些是网页端内部接口，会随飞书改版变；每个 bridge 模块的报错要带上服务器给的原因，方便看板上看出是哪条命令失效。
 - 写操作用的是个人账号：只在自己是群主的群里做；加急每小时 6 次封顶；移除成员、处理申请、入群都只由人在看板上点，不做自动规则。
-- D 让 bridge 多监听目标群：这些群的消息量就是转发量本身；只转发机器人发的消息，不进普通转发通道，避免把目标群当源群再转一遍。
+- D 只是旁路：观察中的目标群不进监听名单，bridge 只多发一份机器人消息的副本，原有的转发、汇总群处理都不变，
+  不会把目标群当源群再转一遍。
 - 发布时 adapter 和 bridge 重启，WebSocket 断约 15 秒（与平时发布相同）。
 - 并行工作区的冲突靠接缝避免：共享文件只由 base 线改，U 和 D 需要的调用点 base 预先接好。
 
@@ -257,3 +267,9 @@ Claude 在评审时另跑：`bash feishu-relay/scripts/edge/test-bridge-on-edge.
 5. medium：D 的指纹不是最终发出的文字 → 调用点传最终类型和内容，规范化两边一致，并用 P0-8 的样本确认。
 6. medium：导入 `bridge.py` 的测试本机被跳过 → 规则测试不导入 `bridge.py`，接线由 edge 套件把关。
 7. medium：R 筛掉了群主不是本账号的目标群 → 全部入表，用 `owned` 区分。
+
+第二轮（同一线程）4 条，全部采纳：
+1. high：布尔钩子拦不住目标群里别人的消息进普通通道 → 改成旁路 `tap`，观察中的群不进监听名单，原处理一律不变。
+2. medium：钩子的位置晚于 XHS 分支 → 调用点提到处理的最前面；没有 `from_id` 的消息本来就对不上机器人。
+3. medium：记录发送失败会让已成功的 webhook 被当成失败而重发 → 两处调用不等待、不外传失败。
+4. medium：没有把观察名单发给 bridge 的时机 → `start()` 定时发、`targetRegistry.onChange` 变化时发，都由 base 接好。
