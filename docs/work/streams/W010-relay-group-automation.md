@@ -5,8 +5,8 @@
 - goal: 在转发看板里完成建同步群、管理目标群成员、源头撤回后同步撤回、降级告警加急、粘贴邀请链接入群，以及把现有目标群纳入看板管理
 - plan: docs/work/plans/relay-group-automation.md
 - branch: integration/relay-auto
-- head: 0413948f
-- release: edge 中继 `hotfix-20261013T133421Z-b311b53e2193-21767`（七项功能全部上线）
+- head: 3c78e23e
+- release: edge 中继 `hotfix-20261013T142445Z-3c78e23ec2e8-28449`（七项功能全部上线；这一版修了“目标群”页的两处渲染）
 - next: 用户在看板上试用后按反馈改；用户第一次真实使用时核对三件没在线上看到的事：(1) 会员到期提醒真的 @ 到别的租户的成员；(2) 一条文字转发被核对上、源头撤回后目标群同步撤回；(3) 一键建同步群走通全程。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified`
 - updated: 2026-10-13
 
@@ -127,9 +127,18 @@
   方案审查线程 01a1342e 另计输入 712 万（缓存 650 万、新输入 62 万）、输出 4.2 万、推理 2.9 万。
 - 2026-10-13 22:05 用户：「全部推送」。`git push origin main`：`147e589b..fd0727e3`，推送后本地与 origin/main 一致（97 个提交，含别的会话在 main 上的提交）。
   集成分支和两个还没回收的 `codex/relay-auto-*` 分支没有推送（内容都已在 main 里）。
+- 2026-10-13 22:10 用户按“也推送”的话：n8n 提交并推送 7e217c71（老师复盘的 peer 目录修复，本会话早先留下的改动）；`video_understanding_harness` 提交 35105f4，但该仓库没有远端，推不了，等用户给地址。
+- 2026-10-13 22:15 用户报告“目标群”页一直加载不出来。接口都正常（`/api/group-relay/target-groups` 40 毫秒）。原因在看板：`TargetRegistryPanel.vue` 和 `MembershipPanel.vue`
+  把组合函数的返回值当普通对象放着，在模板里读 `registry.targets`、`registry.resolving`、`memberships.loading` 这类嵌套的 ref——Vue 只解包顶层绑定，于是表格拿到的是 ref 不是数组、
+  按钮的 `loading` 恒为真、报错条恒显示。base 上线（18:00）起就是这样。
+  correction：18:00 那次我对用户说“现有目标群都有名字了”，依据的是接口返回和页面资源里的文字，没有看实际渲染；页面上其实一直是空表和转圈的按钮。
+  修复 b6a57bf2（集成分支）→ main 3c78e23e → `hotfix-20261013T142445Z-3c78e23ec2e8-28449`，状态脚本通过，已推送。新增 `TargetRegistryPanel.test.ts`：用真的 Element Plus 组件挂载两个面板和整页，
+  修复前 2 项失败、修复后 3 项通过；整页那一项还断言没有“Invalid prop”警告。原有的 `TargetMembersPanel.test.ts` 用的表格桩会对数据 `unref`，正好掩盖这类问题。
+  浏览器扩展连不上，本会话没有在真浏览器里看过页面，等用户刷新后确认。
 
 ## Waiting on the user
 
+- [ ] 2026-10-13 刷新看板的“目标群”页，确认登记表有数据、按钮不再转圈。为什么等：本会话连不上浏览器，只能用组件测试验证渲染。之后：仍有问题就按报告的现象继续查。
 - [ ] 2026-10-13 在看板上试用七项功能并反馈；特别是会员期限：对真实目标群第一次“同步成员”后，老成员的开始日期是各自的入群日期、期限是默认的 1 个月，
   多数会直接显示已到期——先改成真实的购买日期和期限，用“预览今天要提醒谁”确认名单，再打开“每天自动审查”。为什么等：只有用户知道每个会员的购买日期和期限。
   之后：按 `next` 核对线上没验到的三件事。
@@ -189,8 +198,9 @@
 
 ## Resume here
 
-七项功能全部上线：edge 中继是 `hotfix-20261013T133421Z-b311b53e2193-21767`（main b311b53e；main 之后的 0413948f 只改了 `WEB_GATEWAY.md`；main 已于 2026-10-13 22:05 由本会话按用户的话推送到 origin）。
-先跑 `bash scripts/release-sync-status.sh --skip-owner --edge-source-sha b311b53e` 确认线上仍是这一版。
+七项功能全部上线：edge 中继是 `hotfix-20261013T142445Z-3c78e23ec2e8-28449`（main 3c78e23e，已推送到 origin）。
+先跑 `bash scripts/release-sync-status.sh --skip-owner --edge-source-sha 3c78e23e` 确认线上仍是这一版。
+看板的改动上线前要看实际渲染：接口通、页面资源里有文字都不算；连不上浏览器时用 `TargetRegistryPanel.test.ts` 那样的真实组件挂载测试。
 还开着的：用户试用后的反馈（Waiting on the user）；线上没验到的四件事（Open questions）；待办 B046–B049（后续修补）；
 工作区 `n8n-relay-auto-members`、`n8n-relay-auto-membership` 和集成分支 `integration/relay-auto`（工作区 `n8n-relay-auto-int`）还没回收——
 它们的内容都已在 main 里，用 `bash ~/codebase/agent-skills/own/codex-flow/scripts/finishworktree.sh . <slug> --into integration/relay-auto --apply` 回收前两个，
