@@ -47,7 +47,7 @@ class TargetRegistryTest(unittest.TestCase):
 
 	def test_unrequested_or_refused_webhooks_have_no_hash(self):
 		bridge = FakeBridge()
-		bridge.client.chatbot_api = lambda name, body: {"code": 403, "msg": "refused"}
+		bridge.client.chatbot_api = lambda name, body: {"code": 403, "msg": "refused", "data": {"webhook": HOOK}}
 		answer = resolve(bridge, {"webhook_hashes": []})
 		self.assertNotIn("webhook_hash", answer["groups"][0]["bots"][0])
 

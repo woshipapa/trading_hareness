@@ -29,13 +29,14 @@ def resolve_groups(groups: list[dict[str, Any]], *, chat_infos: dict[str, dict[s
 		bots = []
 		for bot in custom_bots(pull_chat_bots(chat_id)):
 			info = chatbot_api("GetWebhookBotInfo", {"bot_id": bot["bot_id"], "i18n": "zh-CN"}) or {}
+			refused = info.get("code") not in (None, 0)
 			data = info.get("data") if isinstance(info.get("data"), dict) else info
 			entry = {
 				"bot_id": bot["bot_id"],
 				"name": str(data.get("name") or bot["name"]),
 				"key_words": list(data.get("key_words") or []),
 			}
-			webhook_hash = _webhook_hash(data, requested)
+			webhook_hash = None if refused else _webhook_hash(data, requested)
 			if webhook_hash:
 				entry["webhook_hash"] = webhook_hash
 			bots.append(entry)
