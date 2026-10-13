@@ -1,0 +1,38 @@
+
+== depth entry -1.5%, by how many of the six conditions are true: sessions 166
+  all               0: n= 82 close -0.48% nextC -0.48% up-share 0.35 | 1: n= 59 close +0.13% nextC +0.17% up-share 0.49 | 2+: n= 25 close +0.71% nextC +0.82% up-share 0.68
+  to 2025-12        0: n= 61 close -0.54% nextC -0.56% up-share 0.36 | 1: n= 46 close +0.07% nextC +0.19% up-share 0.46 | 2+: n= 11 close +1.46% nextC +1.62% up-share 0.82
+  2026              0: n= 21 close -0.34% nextC -0.24% up-share 0.33 | 1: n= 13 close +0.37% nextC +0.13% up-share 0.62 | 2+: n= 14 close +0.12% nextC +0.19% up-share 0.57
+  since 2026-07-01  0: n=  9 close -0.48% nextC +0.68% up-share 0.33 | 1: n=  2 close -0.58% nextC -2.55% up-share 0.00 | 2+: n=  6 close +0.51% nextC +0.18% up-share 0.50
+
+== depth entry -2.0%, by how many of the six conditions are true: sessions 99
+  all               0: n= 44 close -0.61% nextC -0.53% up-share 0.36 | 1: n= 35 close +0.06% nextC +0.57% up-share 0.43 | 2+: n= 20 close +1.02% nextC +1.26% up-share 0.70
+  to 2025-12        0: n= 31 close -0.78% nextC -0.70% up-share 0.32 | 1: n= 27 close +0.10% nextC +0.61% up-share 0.41 | 2+: n=  8 close +1.35% nextC +2.32% up-share 0.88
+  2026              0: n= 13 close -0.20% nextC -0.13% up-share 0.46 | 1: n=  8 close -0.06% nextC +0.47% up-share 0.50 | 2+: n= 12 close +0.80% nextC +0.55% up-share 0.58
+  since 2026-07-01  0: n=  6 close -0.56% nextC +0.88% up-share 0.33 | 1: n=  1 close +0.14% nextC +2.69% up-share 1.00 | 2+: n=  6 close +1.01% nextC +0.34% up-share 0.50
+
+== first rebound of 0.5 points after -2%: sessions 80
+  all               0: n= 27 close -0.39% nextC -0.23% up-share 0.48 held 0.56 | 1: n= 23 close +0.39% nextC +0.86% up-share 0.57 held 0.39 | 2+: n= 30 close +0.42% nextC +0.90% up-share 0.57 held 0.40
+  to 2025-12        0: n= 16 close -0.61% nextC -0.66% up-share 0.38 held 0.50 | 1: n= 16 close +0.65% nextC +1.33% up-share 0.69 held 0.50 | 2+: n= 19 close +0.35% nextC +1.09% up-share 0.53 held 0.42
+  2026              0: n= 11 close -0.07% nextC +0.41% up-share 0.64 held 0.64 | 1: n=  7 close -0.21% nextC -0.24% up-share 0.29 held 0.14 | 2+: n= 11 close +0.55% nextC +0.57% up-share 0.64 held 0.36
+  since 2026-07-01  0: n=  5 close -0.18% nextC +1.25% up-share 0.60 held 0.40 | 1: n=  2 close -0.69% nextC +1.33% up-share 0.00 held 0.00 | 2+: n=  5 close +1.49% nextC +0.97% up-share 0.80 held 0.20
+
+== sessions since 2026-07-01 in which the average stock fell through -1.5% (returns of the average-stock line from the minute after)
+       day entry_-1.5%          conditions_at_entry  to_close_%  to_next_close_% rebound_after_-2%  held rebound_to_close_%
+2026-07-07       10:10                        昨日跌停多       -1.14            -2.55                                           
+2026-07-08       10:15              昨日跌停多、1000ETF放量       -0.01             0.61                                           
+2026-07-09       10:49       昨日跌停多、1000ETF放量、30分钟背离        2.28             3.09             13:01  True               2.11
+2026-07-13       09:41                            无       -2.35            -0.89             13:34 False              -0.96
+2026-07-17       09:49              昨日跌停多、1000ETF放量       -3.41            -5.65             11:01 False              -2.79
+2026-07-20       13:27 昨日宽基放量、五日跌5%、昨日跌停多、1000ETF放量       -0.92             0.48             13:49 False               0.27
+2026-07-21       09:51 昨日宽基放量、五日跌5%、昨日跌停多、1000ETF放量        3.05             2.11             10:07 False               5.11
+2026-07-24       10:19                            无       -1.03             1.97             13:03 False              -0.68
+2026-07-30       11:22                            无       -0.32             2.23             13:08 False              -0.41
+2026-08-19       09:40                            无       -2.47            -1.11             10:23 False              -1.65
+2026-08-21       09:38                            无        1.73             0.58                                           
+2026-08-24       10:44                            无        0.44             1.93             14:12  True               0.59
+2026-09-11       09:36                            无       -0.24             0.30             13:16  True               0.82
+2026-09-28       09:50                            无       -0.65             0.07             11:06 False                0.0
+2026-10-08       14:24                            无        0.57             1.07                                           
+2026-10-09       10:00           1000ETF放量、宽基近5分钟放量        2.08             0.46             10:45 False               2.75
+2026-10-12       10:04                       昨日宽基放量       -0.02              NaN                                           
