@@ -1,6 +1,6 @@
 # 飞书中继：目标群管理、撤回同步、加急告警、链接入群（relay-group-automation）
 
-- 版本：r6，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2、r3、r4 分别采纳了 Codex 方案审查三轮的 7 条、4 条、1 条意见（见文末“审查记录”）。r5 应用户 2026-10-13 的新要求加了功能 E（会员期限与到期提醒）。
+- 版本：r7，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2、r3、r4 分别采纳了 Codex 方案审查三轮的 7 条、4 条、1 条意见（见文末“审查记录”）。r5 应用户 2026-10-13 的新要求加了功能 E（会员期限与到期提醒）。
 - 组件：只动 `feishu-relay/`（发布单元 edge-relay）。不碰 quant-service、frontend、scripts、config/secrets、docs/work。
 - 出处：待办 B030；用户 2026-10-13「可以这些全部推进，请你写好完整计划给codex-flow去执行推进。不同worktree最后merge」，
   看过方案要点后「同意了，我是trust的」。
@@ -108,8 +108,8 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
   `Route` 可带 `internal: true`：分发函数先按现有内部入口的做法校验 `x-larkagentx-token`。
   执行完 `schema` 后，对有 `start()` 的功能对象调用一次 `start()`（D 用它定时把观察名单发给 bridge）。
   `targetRegistry` 提供 `onChange(listener)`，由它**自己的写方法**通知监听者：`resolve()` 写表后、`record(target)`（登记或更新一行）、
-  `forget(chatId)`（删一行）。`/api/group-relay/targets` 新增和删除目标群的两个处理分支（`index.mjs`，base 改）成功后分别调用
-  `record` 和 `forget`；C 建好同步群后也调用 `record`。这样任何途径加减目标群都会通知到，功能线不需要碰 `index.mjs`。
+  `forget(chatId)`（删一行）。`/api/group-relay/targets` 新增和删除目标群的两个处理分支（`index.mjs`，base 改）成功后分别触发
+  `resolve`（后台）和 `forget`；C 建好同步群后调用 `record`。这样任何途径加减目标群都会通知到，功能线不需要碰 `index.mjs`。
 - 给 U 和 D 预先接好的三处调用（空壳里是什么都不做的函数，功能线只改自己的模块）：
   `notifyOps`（第 109 行）在原有的发运维群之后 `await urgentAlerts.notify(key, text)`；
   创建 group relay 时把 `deliveryCheck.recordWebhookDelivery` 和 `deliveryCheck.recallDeliveries` 传进去；
@@ -122,8 +122,13 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
 - `adapter/webhook-targets.mjs` 加一个方法 `sendText(chatId, text)`：用该目标群的 webhook 发一条文字，**由它在文字前面加上该目标群的
   关键词**（调用方不管关键词），飞书拒绝时抛出带原因的错误（沿用模块里测试消息的那套判断）；地址仍不出这个模块。
   E 用它发到期提醒；它是 base 线的改动，功能线不碰这个文件。
-- 每个功能模块的 `createXxx(deps)` 收到同一组依赖：`{ ledger, bridgePost, targetRegistry, webhookTargets, now }`，其中 `bridgePost`
-  就是 `index.mjs` 里的 `bridgePostJson(pathname, payload, timeoutMs)`。功能线要用的都在这里面，不需要再改 `index.mjs`。
+- 每个功能模块的 `createXxx(deps)` 收到同一组依赖：`{ ledger, bridgePost, targetRegistry, webhookTargets, refreshGroups, now }`，其中
+  `bridgePost` 就是 `index.mjs` 里的 `bridgePostJson(pathname, payload, timeoutMs)`，`refreshGroups` 是 `() => groupSync.requestRefresh()`
+  （J 和 C 加群、建群后用它）。功能线要用的都在这里面，不需要再改 `index.mjs`。
+- `webhookTargets.webhookHashes()` 返回 `[{ chat_id, webhook_hash }]`（每个运行中的 webhook 地址的 sha256 十六进制），R 用它；地址本身仍不出模块。
+- `targetRegistry` 通知监听者时，某个监听者失败只记日志，不让 `record` / `forget` / `resolve` 失败（通知是旁路）。
+- `/api/group-relay/targets` 新增成功后在后台跑一次 `targetRegistry.resolve()`（补上数字群 ID、机器人和是否群主），删除成功后调 `forget`；
+  `resolve()` 只更新它对上的行，不清空表。
 
 **看板**
 - 新增一级栏目 `targets`（“目标群”）：`App.vue` 的菜单、标题、视图切换；`useFeishuDashboardWorkspace.ts` 里四处：
@@ -199,20 +204,23 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
 - bridge：不新增模块，成员和入群时间取自 M 的 `POST /chat-members/list`。
 - adapter `memberships.mjs`：
   - 表 `feishu_group_relay_memberships(target_chat_id text, user_id text, display_name text not null, started_on date not null,
-    term_months integer not null, expires_on date not null, note text, reminded_on date, left_at timestamptz, created_at, updated_at,
-    primary key (target_chat_id, user_id))` 和 `feishu_group_relay_membership_settings(target_chat_id text primary key,
+    term_months integer not null, expires_on date not null, note text, reminded_on date, remind_claimed_at timestamptz, left_at timestamptz,
+    created_at, updated_at, primary key (target_chat_id, user_id))` 和 `feishu_group_relay_membership_settings(target_chat_id text primary key,
     enabled boolean not null, default_term_months integer not null, remind_text text not null, last_review_on date)`。
   - `sync(chatId)`：向 bridge 取成员；新成员建一行，开始日期是入群那天（上海日期），期限取该群的默认期限；已不在群里的写 `left_at`；
     重新进群的清掉 `left_at`、保留原有日期。本账号自己不建行（成员列表里没有机器人）。
   - 到期日 = 开始日期加 `term_months` 个日历月（月底对齐：1 月 31 日加 1 个月是 2 月最后一天）。改开始日期、期限或备注时重算到期日并清空
     `reminded_on`（续费就是改这两项）。
   - `review(chatId, { dryRun })`：先 `sync`，再处理 `expires_on <= 今天`、`left_at` 为空、`reminded_on` 为空的成员。`dryRun` 只返回名单不发。
-    **先认领后发送**：用一条 `UPDATE … SET reminded_on = 今天 WHERE … reminded_on IS NULL RETURNING` 取出这批人——并发的两次审查
-    （定时的和手动的，或两个 adapter 实例）只有一次能认领到同一个人；然后每条消息最多 @ 20 人，文字是
-    `<at user_id="成员ID">名字</at>… <提醒文字>`，用 `webhookTargets.sendText` 发（关键词由它加）；某一条发失败，就把那一条里的人的
-    `reminded_on` 改回空，下次审查再试。每人只提醒一次，除非续费后再次到期。
-  - “再提醒一次”（`POST …/memberships/:userId/remind`）：只对已到期且还在群里的成员有效，不看 `reminded_on`，发成功后把它写成今天；其他情况回 400。
-  - `term_months` 只接受 1 到 120 的整数，`started_on` 只接受 `YYYY-MM-DD`，否则回 400。日期一律是上海日期。
+    **先认领后发送**：用一条 `UPDATE … SET remind_claimed_at = now() WHERE … reminded_on IS NULL AND (remind_claimed_at IS NULL OR
+    remind_claimed_at < now() - interval '10 minutes') RETURNING` 取出这批人——并发的两次审查（定时的和手动的，或两个 adapter 实例）
+    只有一次能认领到同一个人；然后每条消息最多 @ 20 人，文字是 `<at user_id="成员ID">名字</at>… <提醒文字>`，用
+    `webhookTargets.sendText` 发（关键词由它加）；一条发成功，把那一条里的人写成 `reminded_on = 今天`、清掉认领；发失败只清掉认领，下次审查再试。
+    这是“至少一次”：认领后进程崩溃，认领 10 分钟后失效，下次审查会补发；飞书其实收下了但回应丢了，下次审查会再发一遍。
+    取舍是宁可偶尔多提醒一次，不漏提醒。正常情况下每人只提醒一次，除非续费后再次到期。
+  - “再提醒一次”（`POST …/memberships/:userId/remind`）：先 `sync`；只对已到期且还在群里的成员有效；用同一个认领（不看 `reminded_on`，
+    但已被认领且未失效时回 400“正在提醒中”），发成功后 `reminded_on = 今天`；其他情况回 400。
+  - `term_months` 和设置里的 `default_term_months` 只接受 1 到 120 的整数，`started_on` 只接受 `YYYY-MM-DD`，否则回 400。日期一律是上海日期。
   - `start()`：每分钟看一次时间，上海时间 09:00 之后且某个启用的目标群 `last_review_on` 不是今天，就对它 `review` 并写 `last_review_on`
     （adapter 在 09:00 时没在运行的话，启动后补做当天这一次）。
   - 路由：`GET /api/group-relay/target-groups/:chatId/memberships`（每行带状态：正常、7 天内到期、已到期、已离群）；
@@ -224,7 +232,8 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
 - 测试至少覆盖：月底和闰年的到期日；新成员按入群日和默认期限登记；改期限后清空已提醒；审查只取到期、在群、未提醒的；
   两次审查并发时同一个人只发一次；发送失败的那一条改回未提醒、别的条不受影响；超过 20 人分成多条；未启用的群不审查；
   09:00 之前不审查、当天审查过不再审查、09:00 之后才启动时补做一次；“再提醒一次”对未到期或已离群的成员回 400；
-  `term_months` 为 0、负数、小数时回 400。base 线里 `sendText` 的测试：带关键词的目标群发出的文字以关键词开头且保留 `<at …>` 标签，
+  `term_months`、`default_term_months` 为 0、负数、小数时回 400；认领超过 10 分钟仍未写成已提醒的，下次审查会再发；
+  “再提醒一次”与正在进行的审查撞上时回 400。base 线里 `sendText` 的测试：带关键词的目标群发出的文字以关键词开头且保留 `<at …>` 标签，
   飞书拒绝时抛错。E 的验收命令与其他线相同（`node --test feishu-relay/adapter/*.test.mjs` 等），其中必须有 `memberships.test.mjs`。
 - 没验证的：被 @ 的成员属于别的租户时 @ 是否生效（对外的同步群成员都是这种）。第一次真实提醒就是验收；@ 不生效时消息里仍有名字。
 
@@ -335,3 +344,10 @@ E 这一节的审查（同一线程，2026-10-13）第一轮 5 条，全部采�
 3. medium：定时审查和手动审查会重复提醒 → 先用一条 UPDATE 认领，再发送，失败回退。
 4. medium：P0 表里没有 P0-9 → 补上（已试通）。
 5. medium：E 的测试缺并发、补做、手动提醒、期限校验 → 补进测试清单。
+
+E 的审查第二轮 5 条，全部采纳（r7），没有再送审（派 E 之前可以再审一轮）：
+1. high：依赖里缺 `groupSync` → 加 `refreshGroups`。
+2. medium：R 需要的地址哈希没有取处 → `webhookTargets.addressHashes()`。
+3. high：认领后崩溃会漏提醒、回应丢失会重发 → 认领带时间、10 分钟失效，明确是“至少一次”。
+4. medium：“再提醒一次”不受认领约束、用的可能是旧的在群状态 → 走同一个认领，并先同步成员。
+5. medium：没校验 `default_term_months` → 一并校验。
