@@ -618,6 +618,56 @@
 - found: 2026-10-14
 - updated: 2026-10-14
 
+### B065 老师阶段被关掉时，当晚的回执就关闭了，之后打开不会补
+
+- state: open
+- kind: defect
+- why: 2026-10-14 Grok 只读审查，我核对过代码：`post_close_refresh.py:74-76` 把 `skipped` 改写成 `completed`；`peer_close_research.py` 里老师开关关着时两个阶段返回 `skipped`，回执（键含日期）当晚即关闭，开关晚上再打开也不会补滚。影响面很窄（只有开关当天翻转）
+- how: 没有直接做，因为两种改法都会改运行信号：(a) 把 `skipped` 记成 `blocked`，每个 10 分钟的轮次都会重跑这两个阶段，W011 用来验收的“left open”日志行会常驻；(b) 只给老师两阶段一个“开关关着不关回执”的标记，要在回执摘要里多存一个键。先问 W011 的验收是否要保留“left open”为零，再选
+- who: agent
+- needs: 用户决定要不要为这个窄场景改运行信号
+- updated: 2026-10-14
+
+### B066 战法标签不看 q 值
+
+- state: open
+- kind: defect
+- why: 2026-10-14 审查核对：`tactic_trials.py:321-328` 的 `supports`/`against` 只看前向 `t` 的绝对值 ≥2、20 个有选股日、60 笔；BH 的 `q`（`:489-493`）只附在记录上，不参与标签；`p` 是正态近似（`:488`，源码注释自己写了）。战法多时（约 20 条）总会有一两条单看 `t≥2`
+- how: 标签加一道 `q` 阈值，阈值由用户定（例如 0.1）；`p` 改 t 分布，样本 20 天时差别不大。改动在 `_label` 和调用处，测试是纯函数
+- who: agent
+- needs: 用户定 `q` 的阈值，和是否把已有的 `supports` 读数按新口径重算
+- updated: 2026-10-14
+
+### B067 风险分的回执门禁和 `partial` 的含义
+
+- state: open
+- kind: defect
+- why: 2026-10-14 审查核对了机制，没追影响：(1) 风险分阶段在日线 ≥4,000 根（`peer_close_research.py:62`）且榜单非空时就回执 `completed`，之后当晚不重算；读数里带 `coverage.missing_bar` 和 `ranks_reliable`，所以缺口可见，但回执关了。(2) `post_close_scheduler.py:55` 与 `post_close_strategy_service.py:233` 把策略的 `partial` 算作当日完成；`partial` 在什么情况下返回没有追到
+- how: 先只读：查近 10 个交易日 `peer_limit_up_risk` 回执时的 `coverage.missing_bar`（`post_close_strategy_runs` 里 `partial` 的原因）；如果缺口里涨停股占比不可忽略，再把门禁改成补齐回执 `completed`，或覆盖率上升时允许同日重算
+- who: agent 只读查询；写库的重算由用户执行
+- needs: 无（先查询）
+- updated: 2026-10-14
+
+### B068 复盘检查点只有 2 分钟窗口，窗口外启动当天不补
+
+- state: open
+- kind: defect
+- why: 2026-10-14 审查核对：`strategy_review_scheduler.py:19,56-57` 的 11:31 和 15:05 各只有 2 分钟；进程在窗口外启动或窗口内调用全失败，当天的日评、结算、周评都不补。15:05 的收盘复盘没有理由不能晚补
+- how: 无回执时在 15:10–22:00 补跑一次收盘检查点（先 `completed_for_checkpoint` 查回执，保持幂等）；11:31 的盘中检查点是时点快照，不补
+- who: agent
+- needs: 无
+- updated: 2026-10-14
+
+### B069 审查里推测的四处，要用运行证据确认
+
+- state: open
+- kind: follow-up
+- why: 2026-10-14 审查给出、我没能用代码证明的：(1) `analyst_market_evaluation.py:447` 观测表用 `strategy_available_at >= %s::date`，没转 `Asia/Shanghai`，而同一函数里日内结果的查询转了；若数据库会话时区是 UTC，上海 16:00 之后的观测会划到次日；(2) `derived_daily_readings.py` 把所有读数的 `effective_at` 写成当日 15:00，次日补的读数对只看 `effective_at` 的读者像是昨日已知，要找有没有这样的读者；(3) `all_a_snapshot_sources.py:160-161` 缺状态（`None`）时视为可决策，源码说是有意的向后兼容，要查有没有调用方传 `None`；(4) `longhu_vendor_source.py:363,936` 分钟批量默认 12 并发，高于仓库的 8
+- how: (1) 在 owner 库只读跑 `SHOW timezone` 与一条带跨 16:00 观测的对比；(2)(3) 全仓库查读者与调用方；(4) 看实际调用路径是不是大批量，是的话改默认或封顶 8
+- who: agent
+- needs: 无
+- updated: 2026-10-14
+
 ## Closed
 
 ### B057 龙版传媒（605577）缺的复权日线
@@ -698,3 +748,25 @@
 - needs: 无
 - reason: 被 W006 取代：个案记录、每日复盘和模式总结都并进了试验台的每日总结
 - updated: 2026-10-13
+
+### B063 竞价循环在窗口内重试没读成的 09:25 表和晚建的池
+
+- state: done
+- kind: defect
+- why: 2026-10-14 Grok 只读审查，我对着代码核对属实：`run_auction_pool_capture_loop` 在 `capture_session` 返回后一律睡到次日 09:14。晚补读到 `failed`/`not_final`，或池在 09:14 之后才建成（`no_pool`），当天不再试，09:25 处置表缺失。B059 只管“09:25 之后才启动”，不管这一支
+- how: 已改并提交（c94eb531）：`AuctionPoolCaptureRuntime.retry_late_table`；循环里晚补为 `failed`/`not_final`/`database_busy` 时每分钟再读一次，最多 30 次、不过 11:30；`no_pool` 在 09:30 之前每 30 秒重试。新增三条用例在 `quant-service/tests/test_auction_pool_runtime.py`
+- who: agent 改并提交；推送、发布由用户做
+- needs: 无；发布要随下一次 owner 纯代码发布（`scripts/release plan` 先确认，推送与发布由用户做），W002 的持有会话看到本条后并进 W002
+- result: 2026-10-14 `make -C quant-service test-release-path` 3,232 条通过、2 条跳过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（本地 main，尚未推送）；未发布、未在线上验证
+- updated: 2026-10-14
+
+### B064 周复盘的回归永远凑不够样本
+
+- state: done
+- kind: defect
+- why: 2026-10-14 审查核对属实：`analyst_market_review.py` 的周窗口是 7 个自然日（最多 5 个交易日），回归门槛 `MIN_REGRESSION_DAYS=8`，周回归恒为 `insufficient_history`，周评状态也恒为 `insufficient_history`
+- how: 已改并提交（c94eb531）：报告仍展示自己的 7 天，回归读以报告日结尾的 28 个自然日（`REGRESSION_LOOKBACK_DAYS=27`），`summary.regression_window` 记下窗口，方法版本升到 `analyst-market-review-v2`（读取侧只回显版本，不按版本过滤）。这是我选的口径；要换成别的窗口（例如只用交易日、或 60 日）改一个常量
+- who: agent 改并提交；推送、发布由用户做
+- needs: 无；28 天窗口由用户确认，要换改 `REGRESSION_LOOKBACK_DAYS`；发布同 B063
+- result: 2026-10-14 同 B063 的全套测试通过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（本地 main，尚未推送）；未发布。回归仍是描述性的，`live_effect: none`
+- updated: 2026-10-14
