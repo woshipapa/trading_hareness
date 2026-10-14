@@ -2,11 +2,11 @@
 # Fenced reverse handoff: make the always-on edge the relay writer again.
 set -euo pipefail
 
-edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
+edge_host="${RELAY_EDGE_HOST:-root@116.62.30.225}"
 edge_dir="${RELAY_EDGE_DIR:-/opt/feishu-relay-edge}"
 edge_runtime_env="${RELAY_EDGE_RUNTIME_ENV:-/etc/feishu-relay-edge/runtime.env}"
 edge_secrets_env="${RELAY_EDGE_SECRETS_ENV:-$edge_dir/.env}"
-edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/feishu_relay_edge_ed25519}"
+edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/relay_release_ed25519}"
 local_adapter_container="${LOCAL_FEISHU_ADAPTER_CONTAINER:-n8n-feishu-adapter}"
 local_postgres_container="${LOCAL_N8N_POSTGRES_CONTAINER:-n8n-postgres}"
 remote_writer_id="${RELAY_EDGE_WRITER_ID:-relay-edge-47}"

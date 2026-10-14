@@ -10,8 +10,8 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 pin_file="$repo_root/feishu-relay/larkx-pin.sha256"
-edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
-edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/feishu_relay_edge_ed25519}"
+edge_host="${RELAY_EDGE_HOST:-root@116.62.30.225}"
+edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/relay_release_ed25519}"
 source_dir="${LARKX_SOURCE_DIR:-/opt/larkagentx/source}"
 ssh_command=(ssh -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
 

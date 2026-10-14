@@ -19,8 +19,8 @@ apply=false
 [[ "${2:-}" == "" || "${2:-}" == "--apply" ]] || usage
 
 source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-edge_host="${ITOUGU_EDGE_HOST:-root@47.114.113.152}"
-edge_key="${ITOUGU_EDGE_SSH_KEY:-$HOME/.ssh/feishu_relay_edge_ed25519}"
+edge_host="${ITOUGU_EDGE_HOST:-root@116.62.30.225}"
+edge_key="${ITOUGU_EDGE_SSH_KEY:-$HOME/.ssh/relay_release_ed25519}"
 edge_root="${ITOUGU_EDGE_ROOT:-/opt/itougu-neican}"
 github_repository="${ITOUGU_EDGE_GITHUB_REPOSITORY:-woshipapa/trading_hareness}"
 github_branch="${ITOUGU_EDGE_GITHUB_BRANCH:-main}"

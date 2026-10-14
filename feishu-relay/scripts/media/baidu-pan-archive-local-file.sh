@@ -13,8 +13,8 @@ usage() {
 
 source_file=""
 remote_dir=""
-ssh_host="root@47.114.113.152"
-ssh_key="${HOME}/.ssh/feishu_relay_edge_ed25519"
+ssh_host="root@116.62.30.225"
+ssh_key="${HOME}/.ssh/relay_release_ed25519"
 part_bytes="419430400"
 
 while [[ $# -gt 0 ]]; do

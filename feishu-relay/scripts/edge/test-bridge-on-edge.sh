@@ -7,8 +7,8 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 bridge_dir="$repo_root/feishu-relay/bridge"
-edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
-edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/feishu_relay_edge_ed25519}"
+edge_host="${RELAY_EDGE_HOST:-root@116.62.30.225}"
+edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/relay_release_ed25519}"
 venv_python="${LARKX_VENV_PYTHON:-/opt/supervisor/.venv/bin/python}"
 remote_dir="/tmp/bridge-test-$$"
 remote_home="/tmp/larkx-test-$$"

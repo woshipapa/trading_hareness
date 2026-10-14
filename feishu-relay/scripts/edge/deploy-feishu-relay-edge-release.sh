@@ -34,11 +34,11 @@ done
 [[ -n "$image_ref" ]] || { echo "image reference must not be empty" >&2; exit 2; }
 [[ "$pull_timeout_seconds" =~ ^[0-9]+$ ]] && (( pull_timeout_seconds >= 30 && pull_timeout_seconds <= 1800 )) || { echo "image pull timeout must be 30-1800 seconds" >&2; exit 2; }
 
-edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
+edge_host="${RELAY_EDGE_HOST:-root@116.62.30.225}"
 edge_dir="${RELAY_EDGE_DIR:-/opt/feishu-relay-edge}"
 runtime_env="${RELAY_EDGE_RUNTIME_ENV:-/etc/feishu-relay-edge/runtime.env}"
 secrets_env="${RELAY_EDGE_SECRETS_ENV:-$edge_dir/.env}"
-edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/feishu_relay_edge_ed25519}"
+edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/relay_release_ed25519}"
 ssh_control_path="${RELAY_EDGE_SSH_CONTROL_PATH:-}"
 [[ -r "$edge_key" ]] || { echo "edge SSH key is not readable: $edge_key" >&2; exit 2; }
 ssh_command=(ssh -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)

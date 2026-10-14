@@ -22,10 +22,10 @@ OWNER_USER="${LONGHU_SSH_USER:-stockpeer}"
 OWNER_KEY="${LONGHU_SSH_KEY_PATH:?需要 LONGHU_SSH_KEY_PATH}"
 
 # edge 是另一台机器（47.114），root@22，用独立密钥
-EDGE_HOST="${EDGE_SSH_HOST:-47.114.113.152}"
+EDGE_HOST="${EDGE_SSH_HOST:-116.62.30.225}"
 EDGE_PORT="${EDGE_SSH_PORT:-22}"
 EDGE_USER="${EDGE_SSH_USER:-root}"
-EDGE_KEY="${EDGE_SSH_KEY_PATH:-${HOME}/.ssh/feishu_relay_edge_ed25519}"
+EDGE_KEY="${EDGE_SSH_KEY_PATH:-${HOME}/.ssh/relay_release_ed25519}"
 
 # ── 远端目标路径（用户 home 下，不需要 root）──────────────────────
 OWNER_REMOTE_DIR="${OWNER_REMOTE_SECRETS_DIR:-.secrets/owner}"

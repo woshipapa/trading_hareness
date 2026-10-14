@@ -12,8 +12,8 @@
 #   XIAOJIE_SYNC_SINCE=2026-08-01 scripts/sync-xiaojie-message-features.sh
 set -euo pipefail
 
-edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
-edge_key="${RELAY_EDGE_SSH_KEY:-$HOME/.ssh/feishu_relay_edge_ed25519}"
+edge_host="${RELAY_EDGE_HOST:-root@116.62.30.225}"
+edge_key="${RELAY_EDGE_SSH_KEY:-$HOME/.ssh/relay_release_ed25519}"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/shared-peer/owner-host.sh"
 peer_host="${PEER_SSH_HOST:-$OWNER_PEER_HOST}"
 peer_port="${PEER_SSH_PORT:-$OWNER_PEER_PORT}"

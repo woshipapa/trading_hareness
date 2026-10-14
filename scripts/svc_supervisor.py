@@ -60,6 +60,13 @@ RELAY_TOKEN = _load_env_secret("RELAY_TOKEN")
 SCHOLAR_ALERT_DIR = _load_env_secret("PAPER_KB_SCHOLAR_ALERT_DIR")
 B300_COLLAB_WEBHOOK = _load_env_secret("B300_COLLAB_FEISHU_WEBHOOK_URL")
 
+# The relay stack, xhs, itougu and the paper services run on the owner host (2026-10-15, W015): their tunnels and
+# Paper-KB's pulls use the same settings as the owner tunnel, so the address is written once, in .env.local.
+_UNIFIED_TARGET = (f"{_load_env_secret('LONGHU_SSH_USER')}@{_load_env_secret('LONGHU_SSH_HOST')}"
+                   if _load_env_secret("LONGHU_SSH_USER") and _load_env_secret("LONGHU_SSH_HOST") else None)
+_UNIFIED_KEY = _load_env_secret("LONGHU_SSH_KEY_PATH") or os.path.join(HOME, ".ssh/stockpeer_ed25519")
+_UNIFIED_TASKS = ("feishu-tunnel", "s2-gateway-tunnel", "xhs-edge-tunnel", "paper-kb-webhook-tunnel")
+
 TASKS = [
     # ---- 常驻 daemon (原 KeepAlive) ----
     # Video Understanding Harness: the NiceGUI page and FastAPI backend run in
@@ -100,28 +107,28 @@ TASKS = [
       if all(_load_env_secret(name) for name in
              ("LONGHU_SSH_KEY_PATH", "LONGHU_SSH_USER", "LONGHU_SSH_HOST")) else []),
     dict(name="feishu-tunnel", kind="daemon",
-         args=["ssh","-i",os.path.join(HOME,".ssh/stockpeer_ed25519"),
+         args=["ssh","-i",_UNIFIED_KEY,
                "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
                "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
-               "-N","-L","127.0.0.1:18300:127.0.0.1:18300","stockpeer@116.62.30.225"],
+               "-N","-L","127.0.0.1:18300:127.0.0.1:18300",_UNIFIED_TARGET],
          cwd=HOME, out=os.path.join(N8N,"logs/feishu-tunnel.log"),
          err=os.path.join(N8N,"logs/feishu-tunnel.log"), env={}),
     # Semantic Scholar 唯一出口：key、限流与冷却都在 edge 的 s2_gateway（127.0.0.1:18791）。
     # Mac 侧调用经此转发；是否使用由 paper_kb/.s2_via_edge 标记文件决定。
     dict(name="s2-gateway-tunnel", kind="daemon",
-         args=["ssh","-i",os.path.join(HOME,".ssh/stockpeer_ed25519"),
+         args=["ssh","-i",_UNIFIED_KEY,
                "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
                "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
-               "-N","-L","127.0.0.1:18791:127.0.0.1:18791","stockpeer@116.62.30.225"],
+               "-N","-L","127.0.0.1:18791:127.0.0.1:18791",_UNIFIED_TARGET],
          cwd=HOME, out=os.path.join(N8N,"logs/s2-gateway-tunnel.log"),
          err=os.path.join(N8N,"logs/s2-gateway-tunnel.log"), env={}),
     # 小红书 edge API 的 loopback forward。采集器一直运行在 edge，本地只
     # 领取摘要任务并调用 Paper-KB 的 codex-teleai provider。
     dict(name="xhs-edge-tunnel", kind="daemon",
-         args=["ssh","-i",os.path.join(HOME,".ssh/stockpeer_ed25519"),
+         args=["ssh","-i",_UNIFIED_KEY,
                "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
                "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
-               "-N","-L","127.0.0.1:18790:127.0.0.1:18790","stockpeer@116.62.30.225"],
+               "-N","-L","127.0.0.1:18790:127.0.0.1:18790",_UNIFIED_TARGET],
          cwd=HOME, out=os.path.join(N8N,"logs/xhs-edge-tunnel.log"),
          err=os.path.join(N8N,"logs/xhs-edge-tunnel.log"), env={}),
     dict(name="xhs-ai-worker", kind="daemon",
@@ -142,10 +149,10 @@ TASKS = [
     # runs on edge.  Keep its command webhooks on a loopback-only reverse SSH
     # forward so 收录/查询/反馈 do not depend on an edge n8n workflow copy.
     dict(name="paper-kb-webhook-tunnel", kind="daemon",
-         args=["ssh","-i",os.path.join(HOME,".ssh/stockpeer_ed25519"),
+         args=["ssh","-i",_UNIFIED_KEY,
                "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
                "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
-               "-N","-R","127.0.0.1:25678:127.0.0.1:5678","stockpeer@116.62.30.225"],
+               "-N","-R","127.0.0.1:25678:127.0.0.1:5678",_UNIFIED_TARGET],
          cwd=HOME, out=os.path.join(N8N,"logs/paper-kb-webhook-tunnel.log"),
          err=os.path.join(N8N,"logs/paper-kb-webhook-tunnel.log"), env={},
          # A remote listener collision can persist across several SSH retries;
@@ -325,11 +332,12 @@ TASKS = [
 
 # The paper services' outputs (arXiv feed, source snapshots) and the Semantic Scholar gateway run on the owner host
 # since 2026-10-15 (W015); Paper-KB's rsync pulls read these two variables.
-_PAPER_EDGE_ENV = {"ARXIV_EDGE_HOST": "stockpeer@116.62.30.225",
-                   "ARXIV_EDGE_KEY": os.path.join(HOME, ".ssh/stockpeer_ed25519")}
-for _task in TASKS:
-    if _task["name"].startswith("paperkb."):
-        _task.setdefault("env", {}).update(_PAPER_EDGE_ENV)
+if _UNIFIED_TARGET is None:
+    TASKS[:] = [_t for _t in TASKS if _t["name"] not in _UNIFIED_TASKS]
+else:
+    for _task in TASKS:
+        if _task["name"].startswith("paperkb."):
+            _task.setdefault("env", {}).update({"ARXIV_EDGE_HOST": _UNIFIED_TARGET, "ARXIV_EDGE_KEY": _UNIFIED_KEY})
 
 _shutdown = threading.Event()
 _procs = {}  # name -> Popen (daemons)

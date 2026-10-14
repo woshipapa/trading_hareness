@@ -75,7 +75,11 @@ class OwnerHostAddressTests(unittest.TestCase):
         tracked = subprocess.run(["git", "grep", "-l", "-F", address, "--", "scripts", "quant-service/app", "feishu-relay/adapter",
                                   "feishu-relay/scripts", "xhs-intel", "deploy", "config"], cwd=ROOT, capture_output=True, text=True).stdout.split()
         # The teacher review's default predates the shared file and the isolation test names the address on purpose.
-        allowed = {"scripts/shared-peer/owner-host.sh", "scripts/teacher_review_daily.py", "scripts/test_release_unit_isolation.py"}
+        # Since 2026-10-15 the relay stack runs on the same host, so the relay-side release scripts carry it as their own
+        # default (root login, their own key); test_release_unit_isolation.UnifiedHostTests keeps those copies in step.
+        from test_release_unit_isolation import RELAY_SIDE_SCRIPTS
+        allowed = {"scripts/shared-peer/owner-host.sh", "scripts/teacher_review_daily.py", "scripts/test_release_unit_isolation.py",
+                   "config/components.json", *RELAY_SIDE_SCRIPTS}
         self.assertEqual(sorted(set(tracked) - allowed), [], "read the address from scripts/shared-peer/owner-host.sh")
 
     def test_every_owner_tool_reads_the_shared_file(self) -> None:

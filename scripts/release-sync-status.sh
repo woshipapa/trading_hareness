@@ -54,8 +54,8 @@ if [[ -n "$owner_source_ref" ]]; then
   owner_source_sha="$(git -C "$repo_root" rev-parse --verify "${owner_source_ref}^{commit}")"
 fi
 
-edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
-edge_key="${RELAY_EDGE_SSH_KEY:-$HOME/.ssh/feishu_relay_edge_ed25519}"
+edge_host="${RELAY_EDGE_HOST:-root@116.62.30.225}"
+edge_key="${RELAY_EDGE_SSH_KEY:-$HOME/.ssh/relay_release_ed25519}"
 edge_dir="${RELAY_EDGE_DIR:-/opt/feishu-relay-edge}"
 edge_runtime_env="${RELAY_EDGE_RUNTIME_ENV:-/etc/feishu-relay-edge/runtime.env}"
 . "$repo_root/scripts/shared-peer/owner-host.sh"
@@ -235,7 +235,7 @@ if not skip_edge:
               f"{'source-overlay' if edge_source else 'pinned'} from {edge_expected[:12]}")
         xhs = health(first(edge, "xhs_health"))
         xhs_release = (xhs or {}).get("release") or {}
-        manifest = health(first(edge, "xhs_manifest"))
+        manifest = health(first(edge, "xhs_manifest")) or {}
         check("edge", "XHS collector /health", (xhs or {}).get("status"),
               (xhs or {}).get("status") == "ok" and (xhs or {}).get("collector") == "Spider_XHS"
               and (xhs or {}).get("cookie_configured") is True, "ok / Spider_XHS / cookie configured")

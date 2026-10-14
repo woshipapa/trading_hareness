@@ -87,9 +87,12 @@ continue without the previous conversation.
    `scripts/CATALOG.md` says what every script is for, which component owns it
    and which host runs it; a new script needs a rule in
    `scripts/generate_scripts_catalog.py`, then regenerate the catalog.
-9. Syncing or releasing to the two hosts (edge `47.114.113.152`; the owner quant
-   service on `116.62.30.225` (a server under another Alibaba Cloud account, SSH port 22) since 2026-10-14
-   17:00-17:08; the previous hosts `118.178.133.37` (2026-10-13) and `47.110.79.189:3535` no longer run it, have Docker
+9. Syncing or releasing: since 2026-10-15 the relay stack (feishu-relay, xhs, itougu, the paper services) and the
+   owner quant service run on ONE host, `116.62.30.225` (a server under another Alibaba Cloud account, SSH port 22; the
+   quant service moved there 2026-10-14 17:00-17:08), as two independent release units with their own Docker daemon,
+   directories and credentials. The old edge host `47.114.113.152` keeps only services that are not this repo's
+   (stock-reports, sub2api) and the retired quant writer. Relay-side scripts log in as `root` with
+   `~/.ssh/relay_release_ed25519`; owner-side tools use `OWNER_PEER_HOST` (`stockpeer`); the previous hosts `118.178.133.37` (2026-10-13) and `47.110.79.189:3535` no longer run it, have Docker
    blocked, and must not be restored) follows `docs/RELEASE_SYNC_47.md` step by step. Start and end
    with the read-only `scripts/release-sync-status.sh`. The edge relay and owner
    quant service are independent release units: use `--edge-source-sha` and

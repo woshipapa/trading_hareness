@@ -36,11 +36,11 @@ while (($#)); do
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
+edge_host="${RELAY_EDGE_HOST:-root@116.62.30.225}"
 edge_dir="${RELAY_EDGE_DIR:-/opt/feishu-relay-edge}"
 hotfix_root="${RELAY_EDGE_HOTFIX_ROOT:-$edge_dir/hotfix}"
 console_root="${QUANT_CONSOLE_EDGE_ROOT:-$hotfix_root/quant-console}"
-edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/feishu_relay_edge_ed25519}"
+edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/relay_release_ed25519}"
 retain_releases="${QUANT_CONSOLE_RETAIN:-5}"
 
 [[ "$rollback_id" == "" || ( "$rollback_id" =~ ^console-[A-Za-z0-9][A-Za-z0-9._-]*$ && "$rollback_id" != *..* ) ]] || {

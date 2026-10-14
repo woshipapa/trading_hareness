@@ -37,12 +37,12 @@ done
 
 component_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="$(cd "$component_root/.." && pwd)"
-edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
+edge_host="${RELAY_EDGE_HOST:-root@116.62.30.225}"
 edge_dir="${RELAY_EDGE_DIR:-/opt/feishu-relay-edge}"
 runtime_env="${RELAY_EDGE_RUNTIME_ENV:-/etc/feishu-relay-edge/runtime.env}"
 secrets_env="${RELAY_EDGE_SECRETS_ENV:-$edge_dir/.env}"
 hotfix_root="${XHS_HOTFIX_ROOT:-$edge_dir/hotfix-xhs}"
-edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/feishu_relay_edge_ed25519}"
+edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/relay_release_ed25519}"
 container_name="${XHS_COLLECTOR_CONTAINER:-feishu-relay-edge-xhs}"
 retain_releases="${XHS_HOTFIX_RETAIN:-5}"
 

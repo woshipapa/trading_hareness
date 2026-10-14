@@ -30,8 +30,38 @@ OWNER_SCRIPT = ROOT / "scripts" / "shared-peer" / "deploy-code-only.sh"
 OWNER_RULES = ROOT / "scripts" / "shared-peer" / "classify-owner-paths.sh"
 CONSOLE_SCRIPT = ROOT / "scripts" / "edge" / "deploy-quant-console-edge.sh"
 
-OWNER_MARKERS = ("116.62.30.225", "118.178.133.37", "47.110.79.189", "stockpeer", "OWNER_PEER_HOST", "OWNER_PEER_SSH_KEY", "owner-host.sh")
+# Since 2026-10-15 the relay stack and the owner quant service share one physical host (116.62.30.225), so an address can
+# no longer tell the two release units apart: they are told apart by the names they own. 118.178.133.37 and
+# 47.110.79.189 are the earlier owner hosts, 47.114.113.152 is the old edge host (stock-reports and the retired writer).
+UNIFIED_HOST = "116.62.30.225"
+OWNER_MARKERS = ("118.178.133.37", "47.110.79.189", "stockpeer", "OWNER_PEER_HOST", "OWNER_PEER_SSH_KEY", "owner-host.sh")
 EDGE_MARKERS = ("47.114.113.152", "EDGE_HOST")
+# Scripts that act on the relay / xhs / itougu / paper services and must default to the unified host.
+RELAY_SIDE_SCRIPTS = (
+    "config/secrets/sync-secrets.sh",
+    "feishu-relay/scripts/edge/deploy-edge-relay-workflows.sh",
+    "feishu-relay/scripts/edge/deploy-feishu-relay-edge-release.sh",
+    "feishu-relay/scripts/edge/export-edge-relay-workflows.sh",
+    "feishu-relay/scripts/edge/failback-feishu-relay-to-remote.sh",
+    "feishu-relay/scripts/edge/failover-feishu-relay-to-local.sh",
+    "feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh",
+    "feishu-relay/scripts/edge/install-edge-import-watchdog.sh",
+    "feishu-relay/scripts/edge/preflight-feishu-relay-handoff.sh",
+    "feishu-relay/scripts/edge/test-bridge-on-edge.sh",
+    "feishu-relay/scripts/edge/verify-edge-relay-workflows.sh",
+    "feishu-relay/scripts/edge/verify-larkx-pin.sh",
+    "feishu-relay/scripts/media/baidu-pan-archive-local-file.sh",
+    "feishu-relay/scripts/sources/itougu/deploy-itougu-neican.sh",
+    "feishu-relay/scripts/sources/itougu/deploy-itougu-perf-report.sh",
+    "scripts/edge/deploy-quant-console-edge.sh",
+    "scripts/release-sync-status.sh",
+    "scripts/release_plan.py",
+    "scripts/sync-xiaojie-message-features.sh",
+    "scripts/workflow-status.sh",
+    "xhs-intel/scripts/deploy-xhs-intel-edge.sh",
+    "xhs-intel/scripts/hotfix-xhs-intel-edge.sh",
+    "xhs-intel/scripts/publish-xhs-workflow-edge.sh",
+)
 
 
 def _body(path: pathlib.Path) -> str:
@@ -43,6 +73,42 @@ def _body(path: pathlib.Path) -> str:
             continue
         lines.append(line.split(" #", 1)[0])
     return "\n".join(lines)
+
+
+class UnifiedHostTests(unittest.TestCase):
+    """One address for everything this repo deploys; the old edge address only where a retired or foreign service lives."""
+
+    def test_every_relay_side_script_defaults_to_the_unified_host(self) -> None:
+        for relative in RELAY_SIDE_SCRIPTS:
+            text = (ROOT / relative).read_text(encoding="utf-8")
+            self.assertIn(UNIFIED_HOST, text, f"{relative} 没有默认到统一主机 {UNIFIED_HOST}")
+            self.assertNotIn("47.114.113.152", _body(ROOT / relative), f"{relative} 还在使用旧 edge 地址")
+            self.assertNotIn("feishu_relay_edge_ed25519", text, f"{relative} 还在使用旧 edge 的钥匙")
+
+    def test_the_host_registry_gives_both_units_the_unified_address(self) -> None:
+        import json
+        hosts = {h["id"]: h for h in json.loads((ROOT / "config" / "components.json").read_text(encoding="utf-8"))["hosts"]}
+        self.assertEqual(hosts["47edge"]["address"], UNIFIED_HOST)
+        self.assertEqual(hosts["47owner"]["address"], UNIFIED_HOST)
+        self.assertEqual(hosts["47edge"]["shares_physical_host_with"], "47owner")
+
+    def test_the_owner_default_host_is_the_same_address(self) -> None:
+        owner_host = (ROOT / "scripts" / "shared-peer" / "owner-host.sh").read_text(encoding="utf-8")
+        self.assertIn(UNIFIED_HOST, owner_host)
+
+    def test_the_old_edge_address_survives_only_where_the_service_stayed_there(self) -> None:
+        allowed = {
+            "scripts/deploy-intraday-edge-release.sh", "scripts/pull-intraday-edge-evidence.sh",
+            "scripts/sync-watchlist-to-edge.sh", "scripts/verify-intraday-edge-live-session.sh",  # retired writer
+            "scripts/harden-remote-http-workflow.mjs",  # stock-reports (18081) did not move
+            "scripts/test_release_unit_isolation.py",
+            "config/components.json",  # names it as the legacy address of the old edge host
+        }
+        import subprocess
+        tracked = subprocess.run(["git", "grep", "-l", "47.114.113.152", "--", "*.sh", "*.py", "*.mjs", "*.json", "*.yaml", "*.yml"],
+                                 cwd=ROOT, capture_output=True, text=True).stdout.split()
+        unexpected = [f for f in tracked if f not in allowed and not f.startswith(("docs/", "workflows/"))]
+        self.assertEqual(unexpected, [], f"旧 edge 地址出现在不该出现的地方: {unexpected}")
 
 
 class HostIsolationTests(unittest.TestCase):

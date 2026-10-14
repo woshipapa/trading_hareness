@@ -169,6 +169,7 @@
   "hosts": [
     {
       "id": "47owner",
+      "address": "116.62.30.225",
       "role": "owner/peer 实时数据面：唯一的 provider 轮询、扫描、租约调度与生产写入方",
       "components": [
         "quant-research"
@@ -204,21 +205,25 @@
     },
     {
       "id": "47edge",
-      "role": "飞书中继、n8n 工作流、小红书采集，以及同源托管的两个前端；没有任何 quant 写入者",
+      "role": "飞书中继、n8n 工作流、小红书采集、itougu、paper 服务，以及同源托管的两个前端；没有任何 quant 写入者。自 2026-10-15 与 47owner 同在一台物理主机上，但是独立发布单元：自己的 Docker 守护进程、自己的目录、自己的凭据",
+      "address": "116.62.30.225",
+      "shares_physical_host_with": "47owner",
+      "legacy_address": "47.114.113.152：旧 edge 主机，只剩不属于本仓库的服务（stock-reports、sub2api 等）和已退役的 quant 写入者；本仓库的中继栈已不在那里",
       "components": [
         "feishu-relay",
         "xhs-intel",
         "quant-research"
       ],
       "processes": [
-        "Docker 项目 feishu-relay-edge：feishu-adapter（同源托管飞书面板与 quant 控制台 edge-quant-console）、n8n、n8n-runners、xhs-collector",
-        "systemd：larkagentx-group-relay.service（LarkAgentX bridge）"
+        "系统级 Docker（docker.io，network_mode: host；与 47owner 的 rootless Docker 并存，不能放进后者）项目 feishu-relay-edge：feishu-adapter（同源托管飞书面板与 quant 控制台 edge-quant-console）、n8n、n8n-runners、xhs-collector；compose 覆盖文件设了内存与 CPU 上限",
+        "systemd：larkagentx-group-relay.service（LarkAgentX bridge）、itougu-neican.service、itougu-perf-daily/weekly.timer、paper-s2-gateway.service、paper-sources.timer、paper-arxiv-rss.timer、paper-proxy-tunnel.service",
+        "PostgreSQL 16（apt，仅 127.0.0.1）：库 n8n_relay"
       ],
       "retired": [
         "quant-intraday-edge.service：2026-09 退役并 disable；docs/RELEASE_SYNC_47.md 铁律 1 禁止再启用"
       ],
       "release": "feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh、scripts/edge/deploy-quant-console-edge.sh、xhs-intel/scripts/hotfix-xhs-intel-edge.sh",
-      "credentials": "~/.secrets/edge/.env.edge，由 config/secrets/sync-secrets.sh edge 推送",
+      "credentials": "/root/.secrets/edge/.env.edge，由 config/secrets/sync-secrets.sh edge 推送（目标主机见本条 address；发布脚本以 root 登录，用工作站的 ~/.ssh/relay_release_ed25519）",
       "writes": [
         "n8n 库 public schema 里的中继台账（owned_data）",
         "xhs-intel 自己的 SQLite 队列"

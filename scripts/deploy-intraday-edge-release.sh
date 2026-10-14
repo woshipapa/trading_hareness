@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Deploy one committed source revision into a retained edge release directory.
 # Default mode is read-only planning. --apply performs the fenced service restart.
+# RETIRED (2026-09; RELEASE_SYNC_47 rule 1): this script belongs to the edge quant writer, which is disabled on the old
+# edge host 47.114.113.152. That address is kept on purpose and is NOT the unified owner/relay host (config/components.json,
+# hosts[].address): repointing it would aim a quant writer deployment at the owner host. Do not run it.
 set -euo pipefail
 
 usage() {

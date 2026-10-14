@@ -36,8 +36,8 @@ def owner_defaults() -> dict[str, str]:
 
 _OWNER = owner_defaults()
 OWNER = tuple(os.environ.get(name, _OWNER[name]) for name in ("OWNER_PEER_HOST", "OWNER_PEER_PORT", "OWNER_PEER_SSH_KEY"))
-EDGE = (os.environ.get("RELAY_EDGE_HOST", "root@47.114.113.152"), "22",
-        os.environ.get("RELAY_EDGE_SSH_KEY", str(Path.home() / ".ssh" / "feishu_relay_edge_ed25519")))
+EDGE = (os.environ.get("RELAY_EDGE_HOST", "root@116.62.30.225"), "22",
+        os.environ.get("RELAY_EDGE_SSH_KEY", str(Path.home() / ".ssh" / "relay_release_ed25519")))
 EDGE_PARTS = {
     "adapter and dashboard": ("feishu-relay/adapter/", "feishu-relay/bridge/", "feishu-relay/dashboard/", "frontend/",
                               "feishu-relay/deploy/edge/"),

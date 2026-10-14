@@ -28,6 +28,7 @@
 | [0022](0022-feishu-relay-uses-existing-group-bots.md) | 飞书转发：可以借用群里已有的自定义机器人发消息，但不改它、不删它 | 生效 |
 | [0023](0023-tactic-trial-ledger.md) | 战法试验台：战法和条件是证据观察，不是策略；每晚的总结按天折叠，每个时点各有自己的读数 | 生效 |
 | [0024](0024-owner-paths-are-classified-not-built.md) | owner 的改动按路径分类；不认识的路径是缺一条规则，不是去构建镜像；迁移随覆盖层发布并每次过库版本闸门 | 生效 |
+| [0025](0025-relay-stack-shares-the-owner-host.md) | 中继栈（feishu-relay、xhs、itougu、paper）与量化在同一台主机上，仍是两个独立发布单元：各自的 Docker 守护进程、目录、凭据和发布工具；靠名字而不是地址隔离 | 生效 |
 
 格式：
 

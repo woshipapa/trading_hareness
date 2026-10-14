@@ -15,7 +15,7 @@
 
 | 位置 | 组件 | 部署方式 | 版本核验 |
 | --- | --- | --- | --- |
-| **47 edge** `root@47.114.113.152`，密钥 `feishu_relay_edge_ed25519` | `feishu-relay-edge-adapter` 容器（`127.0.0.1:18300`） | GHCR 不可变镜像 `ghcr.io/woshipapa/trading-hareness-feishu-adapter:<sha>`，`scripts/deploy-feishu-relay-edge-release.sh` | `/health` 的 `build.git_sha`、`build.release`、`runtime_source` |
+| **47 edge**（自 2026-10-15 在 owner 主机上：`root@116.62.30.225`，密钥 `relay_release_ed25519`；旧地址 `47.114.113.152` 只剩 stock-reports 等不属于本仓库的服务；中继栈用系统级 Docker，与量化的 rootless Docker 并存） | `feishu-relay-edge-adapter` 容器（`127.0.0.1:18300`） | GHCR 不可变镜像 `ghcr.io/woshipapa/trading-hareness-feishu-adapter:<sha>`，`scripts/deploy-feishu-relay-edge-release.sh` | `/health` 的 `build.git_sha`、`build.release`、`runtime_source` |
 | | LarkAgentX bridge，systemd `larkagentx-group-relay.service`（`127.0.0.1:8090`） | 源码 overlay，`scripts/hotfix-feishu-relay-edge.sh`（bridge 目前**只有**这一条发布路径） | `/health` 的 `release`（overlay 发布 ID 含基准提交前 12 位） |
 | | n8n `feishu-relay-edge-n8n`（`127.0.0.1:5678`）的 4 个 webhook 工作流 | `scripts/deploy-edge-relay-workflows.sh` | `scripts/verify-edge-relay-workflows.sh`（只读漂移比对） |
 | | `stock-reports-import` watchdog | `scripts/install-edge-import-watchdog.sh` | systemd 状态 |
@@ -54,7 +54,7 @@ owner 容器设置了 `QUANT_SKIP_MIGRATIONS=true`，服务启动时只检查几
 - 密钥（不要拷贝进仓库）：
 
   ```bash
-  export RELAY_EDGE_SSH_KEY=~/.ssh/feishu_relay_edge_ed25519   # 47 edge root
+  export RELAY_EDGE_SSH_KEY=~/.ssh/relay_release_ed25519       # 中继栈，root@116.62.30.225（与 owner 同一台主机）
   export OWNER_PEER_SSH_KEY=~/.ssh/stockpeer_ed25519           # 47 owner stockpeer，端口 22
   ```
 
@@ -90,7 +90,7 @@ scripts/release-sync-status.sh --sha origin/main | tee ~/release-sync-logs/$(dat
 补充盘点（阶段 B 需要用到）：
 
 ```bash
-E=root@47.114.113.152
+E=root@116.62.30.225
 ssh -i "$RELAY_EDGE_SSH_KEY" $E 'readlink /opt/feishu-relay-edge/hotfix/current; cat /opt/feishu-relay-edge/hotfix/current/.base-git-sha'
 ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 \
   'ls -1 ~/.local/share/trading-hareness/releases/; ls ~/.local/share/trading-hareness/releases/*/trading_hareness/quant-service/migrations/versions/ 2>/dev/null | grep -E "_0(09[5-9]|1[0-9][0-9])_" | sort -u'
@@ -148,7 +148,7 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 1. 从 edge 取回正在运行的版本（它是运行事实的来源，只读拷贝）：
 
    ```bash
-   E=root@47.114.113.152; K="$RELAY_EDGE_SSH_KEY"; D=/tmp/edge-drift-$(date +%Y%m%d)
+   E=root@116.62.30.225; K="$RELAY_EDGE_SSH_KEY"; D=/tmp/edge-drift-$(date +%Y%m%d)
    mkdir -p "$D"
    rsync -a -e "ssh -i $K" "$E:/opt/feishu-relay-edge/hotfix/current/" "$D/overlay/"
    scp -i "$K" "$E:/opt/feishu-relay-edge/docker-compose.yml" "$D/"
@@ -384,7 +384,7 @@ scripts/verify-edge-relay-workflows.sh || scripts/deploy-edge-relay-workflows.sh
 
 ```bash
 scripts/release-sync-status.sh --sha "$X" --skip-owner    # ALL CHECKS PASSED
-ssh -i "$RELAY_EDGE_SSH_KEY" root@47.114.113.152 'curl -fsS http://127.0.0.1:18300/api/group-relay/status | head -c 600'
+ssh -i "$RELAY_EDGE_SSH_KEY" root@116.62.30.225 'curl -fsS http://127.0.0.1:18300/api/group-relay/status | head -c 600'
 ```
 
 ---

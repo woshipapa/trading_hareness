@@ -15,7 +15,7 @@ the relay ledger; it is an operational fence after a copied ledger, not a
 cross-host lock (the two hosts have separate PostgreSQL instances). The remote
 `relay.env` is mode 0640 and is not stored in git.
 
-The workstation keeps a dedicated `feishu_relay_edge_ed25519` key under its
+The workstation keeps a dedicated `relay_release_ed25519` key (root on the unified host, see `config/components.json`) under its
 private `.ssh` directory. Both handoff scripts use it by default; another
 operator can override it through `RELAY_EDGE_SSH_KEY` without placing a key in
 this repository.
@@ -56,7 +56,7 @@ Use `feishu-relay/scripts/edge/export-edge-relay-workflows.sh` to refresh the re
 workflow JSON under `workflows/edge-relay/`, then use
 `feishu-relay/scripts/edge/verify-edge-relay-workflows.sh` before a deployment. The latter is
 read-only and fails on workflow drift. Both commands use the dedicated
-`feishu_relay_edge_ed25519` key by default (or `RELAY_EDGE_SSH_KEY` when an
+`relay_release_ed25519` key by default (or `RELAY_EDGE_SSH_KEY` when an
 operator supplies a different key), never an interactive password prompt.
 Version IDs, execution counters, timestamps and n8n static runtime state are
 deliberately ignored by the drift comparison; node graphs, connections,
@@ -94,7 +94,7 @@ the durable relay ledger.
 
 ### GHCR pulls from the edge stall — the release script now recovers on its own
 
-Docker Hub / GHCR blob delivery straight to `47.114.113.152` has repeatedly
+Docker Hub / GHCR blob delivery straight to the relay host (it was `47.114.113.152` before 2026-10-15; Docker Hub is unreachable from `116.62.30.225` altogether) has repeatedly
 stalled mid-layer (TLS handshake timeout on one blob) while the same image
 pulls fine from a workstation. `deploy-feishu-relay-edge-release.sh` no longer
 needs a manual rescue for this: it first tries the pull on the edge, and only

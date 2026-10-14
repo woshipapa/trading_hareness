@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Pull edge-owned evidence into the workstation DB. No remote writes are made.
+# RETIRED (2026-09; RELEASE_SYNC_47 rule 1): this script belongs to the edge quant writer, which is disabled on the old
+# edge host 47.114.113.152. That address is kept on purpose and is NOT the unified owner/relay host (config/components.json,
+# hosts[].address): repointing it would aim a quant writer deployment at the owner host. Do not run it.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
