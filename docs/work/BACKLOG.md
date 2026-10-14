@@ -775,3 +775,15 @@
 - needs: 无；28 天窗口由用户确认，要换改 `REGRESSION_LOOKBACK_DAYS`；发布同 B063
 - result: 2026-10-14 同 B063 的全套测试通过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（已推送到 origin/main，2026-10-14；未发布）。回归仍是描述性的，`live_effect: none`
 - updated: 2026-10-14
+
+### B070 竞价分档：把“真一字”和“开盘涨停后开板”分开记
+
+- state: done
+- kind: follow-up
+- why: 用户 2026-10-14 在读完 Grok 的社区调研后说「竞价分档进行分离」。依据：连板网（`docs/archive/2026-10-14-grok-a-share-community-research/`，未审计，页面我打开核对过）开盘即涨停的次日，真一字全天买不到、开盘涨停但盘中开板能按涨停价成交，两者合并记账会偏乐观
+- how: 09:25 的表只知道开盘，所以表里的 `bucket` 仍是 `opens_at_limit`，没有改（竞价池、战法条件都读它）。已实现的跟踪汇总 `/api/v1/market/auction-desk/track` 在日线出来之后按当日最低价拆成 `opens_at_limit:one_word`（最低价在涨停价上：全天买不到，记现金 0 且不从样本里删）和 `opens_at_limit:reopened`（最低价低于涨停价：开板后可按涨停价买，保守规则仍不假设成交），每档带 `fill_rule`；没有最低价的日线留在合并档里。`gap_bucket` 的历史统计 `BUCKET_STATISTICS['opens_at_limit']`（n=754）是合并口径，没有改
+- who: agent
+- needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
+- result: 2026-10-14 提交 e3291702（本地 main，尚未推送、未发布）；`test_track_separates_a_board_that_stayed_one_word_from_one_that_reopened`；全套 3,240 条通过，输出 `docs/work/probes/2026-10-14-auction-bucket-split-release-path.out.txt`。还没有用真实读数看过两档各有多少只：发布后读 `/api/v1/market/auction-desk/track`
+- updated: 2026-10-14
+
