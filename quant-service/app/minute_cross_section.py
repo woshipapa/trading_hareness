@@ -21,7 +21,8 @@ per-symbol rows through the legacy fallbacks here. The newest minute is also
 kept in this process's memory for the latest-snapshot read.
 
 A minute is stored under the provider its snapshot names: the main source's ``fuyao_ths``, or
-the source that filled a minute the main one failed. Readers select by capability across the
+the source that filled a minute the main one failed (``tdx_public`` live; ``longhuvip`` when the minute is
+rebuilt afterwards from the per-stock trend, with ``reconstructed`` and ``decision_eligible: false`` in its metadata). Readers select by capability across the
 providers of the snapshot chain (``DOCUMENT_PROVIDERS``), so a filled minute is read like any
 other; the shadow stream has a capability of its own and is never among them. Only the
 completeness roster (``latest_main_total``) reads the main source's documents alone.
@@ -45,8 +46,12 @@ from . import settings
 SCHEMA = "minute-cross-section-v1"
 #: The main source: the default provider of a document, and the only one the roster reads.
 PROVIDER_KEY = "fuyao_ths"
-#: Every provider a minute document may be stored under: the sources of the all-A snapshot chain.
-DOCUMENT_PROVIDERS = (PROVIDER_KEY, "tdx_public")
+#: The licensed Longhu feed.  It is not a live all-A source of the chain (the gateway has no all-A snapshot,
+#: only watch lists of 300 and one stock's minute trend a call); a minute the main source missed is rebuilt from
+#: the per-stock trend after the fact and stored under it, so the readers of the main series see it.
+LONGHU_PROVIDER_KEY = "longhuvip"
+#: Every provider a minute document may be stored under: the sources of the all-A snapshot chain and Longhu.
+DOCUMENT_PROVIDERS = (PROVIDER_KEY, "tdx_public", LONGHU_PROVIDER_KEY)
 CAPABILITY = "a_share_minute_cross_section"
 LEGACY_CAPABILITY = "a_share_prices_snapshot"
 CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -333,7 +338,7 @@ def latest_level1_items(observed_at: datetime, rows: Sequence[Mapping[str, Any]]
 
 
 __all__ = [
-    "CAPABILITY", "DOCUMENT_PROVIDERS", "LEGACY_CAPABILITY", "SCHEMA", "STORAGE_MODES", "build_document", "day_documents", "first_between",
+    "CAPABILITY", "DOCUMENT_PROVIDERS", "LEGACY_CAPABILITY", "LONGHU_PROVIDER_KEY", "SCHEMA", "STORAGE_MODES", "build_document", "day_documents", "first_between",
     "latest", "latest_async", "latest_level1_items", "latest_main_total", "persist_document", "recent", "remember", "rows_for", "rows_of",
     "snapshot_provider", "storage_mode", "symbol_index",
 ]

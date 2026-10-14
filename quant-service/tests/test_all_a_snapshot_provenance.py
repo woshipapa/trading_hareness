@@ -773,11 +773,13 @@ class MinuteDocumentReaderTests(unittest.TestCase):
         self.assertEqual(len(calls), 5)
         for sql, params in calls:
             self.assertIn("provider_key=ANY(%s)", sql)
-            self.assertEqual(params[:2], ("a_share_minute_cross_section", ["fuyao_ths", "tdx_public"]))
+            self.assertEqual(params[:2], ("a_share_minute_cross_section", ["fuyao_ths", "tdx_public", "longhuvip"]))
             self.assertNotIn("a_share_minute_cross_section_shadow", params)
-        # Every source of the snapshot chain is among the providers the readers select.
+        # Every source of the snapshot chain is among the providers the readers select, and Longhu, whose
+        # per-stock trend rebuilds a minute the main source missed.
         self.assertEqual(set(minute_cross_section.DOCUMENT_PROVIDERS),
-                         {snapshot_sources.FUYAO_PROVIDER_KEY, snapshot_sources.TDX_PROVIDER_KEY})
+                         {snapshot_sources.FUYAO_PROVIDER_KEY, snapshot_sources.TDX_PROVIDER_KEY, "longhuvip"})
+        self.assertEqual(minute_cross_section.DOCUMENT_PROVIDERS[0], "fuyao_ths", "the main source is listed first")
 
     def test_the_roster_reads_main_source_documents_only(self):
         calls = []
@@ -807,6 +809,7 @@ class MinuteDocumentReaderTests(unittest.TestCase):
         self.assertEqual(minute_cross_section.snapshot_provider(FUYAO_METADATA), "fuyao_ths")
         self.assertEqual(minute_cross_section.snapshot_provider(None), "fuyao_ths")
         self.assertEqual(minute_cross_section.snapshot_provider(tdx_metadata()), "tdx_public")
+        self.assertEqual(minute_cross_section.snapshot_provider({"provider_key": "longhuvip"}), "longhuvip")
         # A minute stored where no reader looks would be a silent gap.
         with self.assertRaises(ValueError):
             minute_cross_section.snapshot_provider({"provider_key": "some_other_source"})
