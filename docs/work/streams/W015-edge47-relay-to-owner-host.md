@@ -42,8 +42,12 @@
 - 2026-10-14 17:5x 关于值：配置文件的值我没有打印，也不会写进对话或仓库；核对用的是键名、是否为空、长度和是否含本机地址（探针脚本 `docs/work/probes/2026-10-14-edge47-config-shapes.py`）。搬运打算用 `ssh edge 'cat 文件' | ssh 新主机 'cat > 文件; chmod 600'` 的管道，不落在工作站磁盘上。`config/secrets/` 的规矩（只用 `sync-secrets.sh`、不手工拷 env 文件）管的是仓库托管的那些；这几个 `/etc/*.env` 不在 `config/secrets/` 里，是 edge 自己的，所以走主机间管道，这一点请用户确认。
 - 2026-10-14 22:2x 条件变化（用户转来对方的说明）：新主机 stockpeer 已开免密 sudo，所以第一项阻塞（要 root）解除；对方明确要求 edge 等 10 月 15 日收盘后再搬进来（明天是新量化机第一次实盘验证），交易时段 09:15–15:10 不重启 Docker、不升级系统软件、不重启机器，动 nginx 前先说一声，对外开端口或加域名要找他们在控制台或 Cloudflare 上做，edge 的容器要设内存上限（新机 8 GB，量化开盘约 1.6 GB）。其余三个技术问题（rootless 网络、Hub 不可达、同时消费）不变。
 - 2026-10-14 22:3x 密钥：新主机 authorized_keys 里 `stockpeer-self-tunnel`、`quant-edge-to-owner` 已改成只许端口转发（详见 W014 Log 22:3x）。
+- 2026-10-14 22:5x 方案定了：新主机上已装好 `docker.io` 29.1.3（和 edge 同版本，系统级 `docker.service` 被禁用着、`/var/lib/docker` 在）；在它上面起系统级 Docker，与量化用的 rootless Docker 并存，edge 的 compose（`network_mode: host`）就能原样跑，所有 `127.0.0.1` 地址不用改（rootless 里 host 网络是 rootlesskit 的命名空间，容器到宿主 127.0.0.1 不通，已用临时容器实测：到宿主私网 IP 的 22 通、到 127.0.0.1 上的 15682 拒绝；加入量化的 compose 网络后能解析 `quant-research`）。路径、用户、systemd 单元都照 edge 的原样复制。PostgreSQL 用 apt 装 16（只带来 perl 的安全更新，没有 Docker、内核、libc、openssl）。库角色：`relay_n8n`（`n8n_relay` 的属主）、`quant_edge`、`quant_edge_export`；扩展 `uuid-ossp`、`pgcrypto`。
+- 2026-10-14 22:5x 发现：工作站的 `config/secrets/.env.edge`（sha256 前 8 位 3cfbd837）和 edge 上 `/root/.secrets/edge/.env.edge`（110e13be）不一致，所以不能用工作站的衍生文件当来源；搬运以 edge 上实际在用的那份为准（主机间管道，不落盘）。edge 上 `.env` 是指向它的软链接。
+- 2026-10-14 22:5x 这一步（装 PostgreSQL、启动系统级 Docker）被自动模式拦截，没有执行，也没有换别的方式绕过。已写成 `state/edge-move-A1.sh`（本机、被 git 忽略）等用户决定。
 
 ## Waiting on the user
+- [ ] 2026-10-14 22:5x 在新主机上装 PostgreSQL 16 并启动系统级 Docker（`bash state/edge-move-A1.sh`，或给我这类命令的权限）。为什么等：自动模式拦截了生产主机上装包和起守护进程。之后：镜像、文件、角色先预备，再在夜里切换。
 - [x] 2026-10-14 17:5x 新主机 stockpeer 要 root：装 `python3-venv`（或我整套拷 edge 的 venv 就不用）、Postgres（或走容器）、tailscale 入网、nginx 站点。为什么等：`sudo` 要密码，我没有。 → 用户 22:2x 告知已开免密 sudo（对方 `/etc/sudoers.d/90-stockpeer`，2026-10-14）
 - [ ] 2026-10-14 17:5x 数据库方案：n8n_relay 库 2.4 GB 搬法。选项：只搬业务表（不含 `execution_data` 1.5 GB 的历史执行）进新主机上的 Postgres 容器（镜像从 edge `docker save` 过去）。为什么等：丢不丢执行历史、要不要保留 baidu 归档队列 878 MB 是用户的取舍。
 - [ ] 2026-10-14 17:5x 同机共用的风险是否接受，以及切换时刻：owner 与飞书中继同机后，owner 主机故障会同时带走中继；切换会有几分钟两边都不消费。为什么等：需要用户定。之后：写决策记录、改 `OWNER_MARKERS` 与 edge 脚本的主机默认值。
