@@ -607,7 +607,7 @@
 - needs: 涨停池含 firstSealTime/lastSealTime/fund/amount/floatCap/turnover/brokenTimes（已有 D01），板块当日涨停家数（同 B039 的板块口径）
 - updated: 2026-10-14
 
-### B061 换到 4 核 8 GB、200 Mbps 的主机之后可以放开的限制
+### B062 换到 4 核 8 GB、200 Mbps 的主机之后可以放开的限制
 
 - state: open
 - kind: follow-up
