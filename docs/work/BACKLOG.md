@@ -943,9 +943,19 @@
 
 - state: open
 - kind: follow-up
-- why: edge47 的 feishu-relay、xhs、itougu 搬到 owner 主机后，`config/components.json` 的 `47edge` 与 `47owner` 如何表示、`OWNER_MARKERS`（只覆盖主 relay 热发布脚本和 owner code-only 脚本）要扩到 workflow、xhs、itougu、failover、status 脚本；`release-sync-status.sh:57`、`release_plan.py:39`、`hotfix-feishu-relay-edge.sh:41`、`hotfix-xhs-intel-edge.sh:40` 等默认还是 `root@47.114.113.152`，改之前发布会作用在旧主机上（来源：Codex 审计第 16、17 条，W015）
+- why: edge47 的 feishu-relay、xhs、itougu、paper 服务搬到 owner 主机后，`config/components.json` 的 `47edge` 与 `47owner` 如何表示、`OWNER_MARKERS`（只覆盖主 relay 热发布脚本和 owner code-only 脚本）要扩到 workflow、xhs、itougu、failover、status 脚本；`release-sync-status.sh:57`、`release_plan.py:39`、`hotfix-feishu-relay-edge.sh:41`、`hotfix-xhs-intel-edge.sh:40` 等默认还是 `root@47.114.113.152`，改之前发布会作用在旧主机上（来源：Codex 审计第 16、17 条，W015）
 - how: 先写决策记录，再改默认和测试；`failover-feishu-relay-to-local.sh` 与 `failback-...` 的表清单补上 `baidu_pan_archive_jobs`、`paper_kb_deliveries` 等
 - who: agent
 - needs: W015 切换完成并验证
 - updated: 2026-10-14
+
+### B086 切换之后的清理与对账（W015）
+
+- state: open
+- kind: follow-up
+- why: 旧栈停用但保留，用来回退；两个完整交易日验证通过后清理。另有几处对账：`n8n_relay_pass1`（947 MB）在新主机上；edge 上四个已停容器与五个已禁用单元（itougu-neican、itougu-perf-daily/weekly、larkagentx-group-relay、paper-s2-gateway、paper-sources/-arxiv-rss 的 timer）；`config/secrets/sync-secrets.sh` 的 edge 与 paper-edge 目标仍是 `root@47.114.113.152`（推到旧主机，新主机的 `/root/.secrets/edge/.env.edge`、`/etc/paper-sources-edge.env` 不会更新）；工作站 `.env.edge` 与 edge 在用的那份不一致的原因；paper 服务对 edge 上 mihomo 的依赖（新主机经 `paper-proxy-tunnel` 转发）
+- how: 见 W015 Log；先改 `sync-secrets.sh` 的目标，再对账 `.env.edge`
+- who: agent，删除类动作由用户确认
+- needs: 两个完整交易日的验证
+- updated: 2026-10-15
 

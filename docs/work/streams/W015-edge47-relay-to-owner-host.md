@@ -1,12 +1,13 @@
 # W015 edge47 上的 feishu-relay 和 itougu 迁到新 owner 主机
 
-- state: building
+- state: released
+- release: 2026-10-15 00:10–00:20 relay stack (n8n, adapter, bridge) cut over; xhs 23:5x, itougu 23:49, paper 00:3x（见 Log）
 - holder: Claude Code 会话 d39e7e11，2026-10-14
 - goal: feishu-relay（adapter、bridge、xhs、n8n）和 itougu（内参、业绩报告）搬到 116.62.30.225 上跑；配置里的令牌、cookie、会话状态原样带过去；edge47 上的这些服务停掉，只留一套在写
 - plan: docs/work/plans/edge-relay-move.md
 - branch: main
-- head: 154fd970
-- next: 传输跑完（镜像、库第一遍）→ 写 compose 覆盖和新写入者 ID → 用户确认切换 → 按步骤文档切换并核对；今夜 07:40（XHS 第一个定时）之前完成验证
+- head: c4314eda
+- next: 观察到明天 15:30 itougu 日报、09:30 起的 XHS 定时、10:30 arXiv RSS、03:21 paper-sources 都在新主机上正常；用户决定飞书看板的前门（见 Waiting）；然后清理 `n8n_relay_pass1`（947 MB）和 edge 上停用的旧单元与容器
 - updated: 2026-10-14
 
 ## Requirements
@@ -48,9 +49,15 @@
 - 2026-10-14 23:3x 决定与执行：用户 22:3x「现在是闭盘时间，可以开始迁移了，n8n 执行历史也一起迁移过去」（库整库带，含执行历史）；A1（装 PostgreSQL、起系统级 Docker）由用户跑 `state/edge-move-A1.sh` 完成。edge 的出口带宽约 0.3 MB/s 且有重传，直连新主机也一样，所以公共镜像（n8n、runners）改从 DaoCloud 镜像站按 digest 拉（docker.n8n.io 会重定向到被墙的 Docker Hub），只从 edge 传自制的两个；数据库先全量再补差量。新主机上加了一把临时的传输钥匙（在 edge 上生成，私钥不出 edge，只能从 edge 的 IP 登录，只能跑 `tar-x`、`docker-load`、`psql <库名>` 三条白名单命令），传完要从 authorized_keys 里删除并删 `~/bin/edge-ingest.sh`。
 - 2026-10-14 23:4x Codex 审计（`mcp__codex-teleai__codex`，只读，线程 `01a13b03-49b2-7bc3-ab83-d5232e42a271`）。24 条，我对着代码核实后的取舍：采纳并写进步骤文档的有写入者围栏（`feishu-relay/adapter/ledger.mjs:304-312` 只比较、不升代，所以新 ID 加手工升代）、归档与投递 worker 不受围栏约束（旧 adapter 必须先停）、WAL 文件要停服后复制、XHS 与 itougu 没有跨主机围栏、n8n 数据卷与加密密钥、五个工作流和热更新覆盖层回落到镜像内旧代码、15678 与量化 compose 的 `n8n` profile 冲突、监督进程三条隧道（18791 与 stock-reports 18081 不改）、发布工具和隔离测试需扩、failover 脚本表清单落后、`Persistent=true` 的补跑、PG 的先决条件。已过时的：第 1、2 条（A1 已完成）。第 3 条（密钥来源矛盾）如实保留为切换后的对账项。第 23 条（5680）：那是 runners 的健康端口，不是 5679，不预留。
 - 2026-10-14 23:4x 反向依赖：留在 edge 上的服务（stock-reports、paper-*、codex-model-router）的配置和单元里没有出现被搬走的端口，也没有到这些端口的连接；18081 的 nginx 无来源限制，所以 n8n 搬走后从新主机调 `https://47.114.113.152:18081` 不会被来源限制挡住（P9 仍要实测）。
+- 2026-10-15 00:10–00:20 切换第三组（bridge、adapter、n8n、runners）。步骤脚本 `state/edge-move/C3a`–`C3d`（本机、被忽略）：edge 上停 bridge→adapter→n8n→runners 并 `restart=no`（adapter 在 30 秒宽限后被强制结束，租约自然过期）；复制 bridge 状态（校验和一致）、adapter 摄取目录和 n8n 数据卷（只补变化文件）；最终库 `n8n_relay_final` = edge 的 schema 与小表全量 + 第一遍的两张大表数据 + T0 之后变化的行，**155 张表逐表行数对比相等**后才改名（过程中发现 execution_data 多 2 行：edge 在第一遍之后清理了两条旧执行，已删这 2 个孤儿行再比），并核对 `baidu_pan_archive_jobs` 与 `execution_entity` 的内容校验和与 edge 一致；起栈顺序 n8n（5 个工作流 active）→ runners → 写入者升到第 4 代（`owner-116-62-30-225`）→ adapter（`runtime_source`: source-overlay）→ bridge（已认证、WS 已连、监听 26 个群）。随后 adapter 转发了源群消息，n8n 的第一次定时执行（00:30 XHS 工作流）成功。
+- 2026-10-15 00:2x 工作站监督进程：`feishu-tunnel`、`xhs-edge-tunnel`、`paper-kb-webhook-tunnel`（`-R` 改 25678，新主机上已监听并连通工作站的 n8n）改指 `stockpeer@116.62.30.225`，用 `state/edge-move/supervisor_retarget.py` 只提交这几行（`e17bb1e7`），别的会话未提交的改动没有带上。
+- 2026-10-15 00:3x paper 服务（用户要求「paper 服务」也纳入）。edge 上：`paper-s2-gateway`（18791）、`paper-sources.timer`（每 3 小时 :17）、`paper-arxiv-rss.timer`（10:30、11:30、12:30），代码与状态在 `/opt/paper-arxiv-edge`（209 MB，其中 `sources/` 207 MB）。它们依赖 edge 上的 mihomo 代理（7890、7899、7896 三个出口 IP；新主机直连 HuggingFace 不通、也连不上这些端口），而 mihomo 是用户自己的代理基础设施，不属于本仓库，所以没有搬：在新主机上加了 `paper-proxy-tunnel.service`，用**在新主机上生成**的专用钥匙（edge 的 authorized_keys 里一行，限 `from=116.62.30.225`、`restrict`、`command=nologin`、只许转发这三个端口，备份 `authorized_keys.bak-20261015-paperproxy`）把这三个端口转发到新主机的 127.0.0.1。单元里的 `mihomo.service` 依赖改成 `paper-proxy-tunnel.service`，服务以 stockpeer 运行。在新主机上单次运行验证：arXiv RSS 写出当天 feed；`huggingface_daily`（走代理）、`semantic_scholar_daily`（走本机网关，29 条）、`openalex`（直连）都成功。edge 上这三个单元已停用并禁用。工作站：`s2-gateway-tunnel` 改指新主机；每个 `paperkb.*` 任务加 `ARXIV_EDGE_HOST`/`ARXIV_EDGE_KEY`（`c4314eda`），Paper-KB 的 rsync 干跑（与它自己的命令相同）读到新主机的 `feed/`。
+- 2026-10-15 00:4x 前端：adapter 在新主机上服务的各路由（`/`、`/monitor`、`/dashboard`、`/workbench`、`/relay`、`/research`、`/personal`）都返回 200；工作站经 `feishu-tunnel` 在 127.0.0.1:18300 可访问。原来通过 edge 的 nginx 18301（只许 tailnet 来源）访问，新主机上没有 tailscale 也没动 nginx（对方约定动 nginx 前先说）。我准备的做法是在 edge 上加一个 `relay-adapter-forward.service`，用现有的 edge→owner 钥匙把 edge 的 127.0.0.1:18300 转发到新主机的 18300，edge 的 nginx 不变，URL 不变；这需要给 `quant-edge-to-owner` 这把受限钥匙多加一个 `permitopen`，自动模式拦截了（扩大权限），脚本 `state/edge-move/F1-frontend-front-door.sh` 已写好，等用户决定。
+- 2026-10-15 00:4x 临时传输钥匙（edge→新主机，白名单三条命令）已从新主机 authorized_keys 删除、edge 上的私钥已删；authorized_keys 回到 5 行加 0 行（量化 1 行、操作员 2 行、`stockpeer-self-tunnel`、`quant-edge-to-owner`）。
 
 ## Waiting on the user
-- [ ] 2026-10-14 23:4x 确认切换：停 edge 上的 adapter、bridge、xhs、n8n、itougu，改工作站三条隧道，在新主机起栈（步骤文档“切换”一节）。为什么等：这一步会让飞书中继中断十几分钟并改变线上流量去向。之后：按步骤文档执行并核对，旧栈保持停止但完整，两个完整交易日后再清理。
+- [ ] 2026-10-15 00:4x 飞书看板的前门：(a) 给 `quant-edge-to-owner` 加 `permitopen="127.0.0.1:18300"`，edge 的 nginx 18301 继续做前门（`bash state/edge-move/F1-frontend-front-door.sh`）；(b) 在新主机上装 tailscale 并让 nginx 监听 18301（要你在 tailscale 控制台授权，也要对方同意动 nginx）；(c) 只用工作站的隧道（127.0.0.1:18300）。为什么等：(a) 扩大受限钥匙的权限，被自动模式拦截。我倾向 (a)。
+- [x] 2026-10-14 23:4x 确认切换：停 edge 上的 adapter、bridge、xhs、n8n、itougu，改工作站三条隧道，在新主机起栈（步骤文档“切换”一节）。为什么等：这一步会让飞书中继中断十几分钟并改变线上流量去向。 → 用户「开始吧全部进行迁移，这里逐个进行迁移」（2026-10-15 00:0x）
 - [ ] 2026-10-14 22:5x 在新主机上装 PostgreSQL 16 并启动系统级 Docker（`bash state/edge-move-A1.sh`，或给我这类命令的权限）。为什么等：自动模式拦截了生产主机上装包和起守护进程。 → 用户 22:3x 自己跑了 `state/edge-move-A1.sh`（2026-10-14）
 - [x] 2026-10-14 17:5x 新主机 stockpeer 要 root：装 `python3-venv`（或我整套拷 edge 的 venv 就不用）、Postgres（或走容器）、tailscale 入网、nginx 站点。为什么等：`sudo` 要密码，我没有。 → 用户 22:2x 告知已开免密 sudo（对方 `/etc/sudoers.d/90-stockpeer`，2026-10-14）
 - [ ] 2026-10-14 17:5x 数据库方案：n8n_relay 库 2.4 GB 搬法。选项：只搬业务表（不含 `execution_data` 1.5 GB 的历史执行）进新主机上的 Postgres 容器（镜像从 edge `docker save` 过去）。为什么等：丢不丢执行历史、要不要保留 baidu 归档队列 878 MB 是用户的取舍。
