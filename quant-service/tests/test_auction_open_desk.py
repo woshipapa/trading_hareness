@@ -6,6 +6,8 @@ import unittest
 from app.auction_open_desk import (
     AUCTION_POOL_MAX_SYMBOLS,
     BUCKET_STATISTICS,
+    OPENS_AT_LIMIT_ONE_WORD,
+    OPENS_AT_LIMIT_REOPENED,
     VERSION,
     accepts_snapshot_row,
     auction_timetable,
@@ -14,6 +16,7 @@ from app.auction_open_desk import (
     next_auction_tick,
     open_gap,
     opens_at_limit,
+    realised_bucket,
     build_auction_table,
     auction_track_summary,
 )
@@ -89,6 +92,31 @@ class AuctionOpenDeskRulesTests(unittest.TestCase):
                                                     "pre_close_price": 10, "open_price": 0,
                                                     "auction_price": auction_price}])
             self.assertEqual(result["coverage"]["accepted"], 0)
+
+    def test_track_separates_a_board_that_stayed_one_word_from_one_that_reopened(self) -> None:
+        day = date(2026, 10, 12)
+        rows = [
+            {"symbol": "000001.SZ", "bucket": "opens_at_limit", "open": 11.0},
+            {"symbol": "000002.SZ", "bucket": "opens_at_limit", "open": 11.0},
+            {"symbol": "000003.SZ", "bucket": "opens_at_limit", "open": 11.0},
+            {"symbol": "000004.SZ", "bucket": "0..2%", "open": 10.1},
+        ]
+        bars = [
+            {"symbol": "000001.SZ", "trading_date": day, "open": 11.0, "high": 11.0, "low": 11.0, "close": 11.0},
+            {"symbol": "000002.SZ", "trading_date": day, "open": 11.0, "high": 11.0, "low": 10.5, "close": 10.67},
+            {"symbol": "000003.SZ", "trading_date": day, "open": 11.0, "close": 10.9},
+            {"symbol": "000004.SZ", "trading_date": day, "open": 10.1, "high": 10.3, "low": 10.0, "close": 10.2},
+        ]
+        buckets = auction_track_summary([{"trade_date": "2026-10-12", "rows": rows}], bars)["days"][0]["buckets"]
+        self.assertEqual(buckets[OPENS_AT_LIMIT_ONE_WORD]["stocks"], 1)
+        self.assertAlmostEqual(buckets[OPENS_AT_LIMIT_ONE_WORD]["open_to_close_mean"], 0.0)
+        self.assertEqual(buckets[OPENS_AT_LIMIT_REOPENED]["stocks"], 1)
+        self.assertAlmostEqual(buckets[OPENS_AT_LIMIT_REOPENED]["open_to_close_mean"], 10.67 / 11.0 - 1)
+        self.assertIn("not buyable", buckets[OPENS_AT_LIMIT_ONE_WORD]["fill_rule"])
+        self.assertIn("buyable at the limit", buckets[OPENS_AT_LIMIT_REOPENED]["fill_rule"])
+        self.assertEqual(buckets["opens_at_limit"]["stocks"], 1, "a bar without a low cannot be told apart: it stays combined")
+        self.assertNotIn("fill_rule", buckets["0..2%"])
+        self.assertEqual(realised_bucket({"bucket": "opens_at_limit", "open": 11.0}, {"low": 11.0}), OPENS_AT_LIMIT_ONE_WORD)
 
     def test_track_summary_uses_only_matching_daily_bars(self) -> None:
         reading = {"trade_date": "2026-10-12", "rows": [{"symbol": "000001.SZ", "bucket": "0..2%", "open": 10}]}

@@ -207,6 +207,29 @@ def build_auction_table(
     }
 
 
+#: At 09:25 only the open is known, so the table's bucket stays ``opens_at_limit``.  Once the day has traded the
+#: track tells two things apart that a buyer's ledger must not mix: a board that stayed one-word (the low is at the
+#: limit too) could not be bought all day, one that opened at the limit and reopened could be bought at the limit
+#: price (a conservative backtest still does not assume it).
+OPENS_AT_LIMIT_ONE_WORD = "opens_at_limit:one_word"
+OPENS_AT_LIMIT_REOPENED = "opens_at_limit:reopened"
+FILL_RULES: Mapping[str, str] = MappingProxyType({
+    OPENS_AT_LIMIT_ONE_WORD: "not buyable all day: counted as cash (0 return) and kept in the sample, not dropped",
+    OPENS_AT_LIMIT_REOPENED: "buyable at the limit price once the board opens; a conservative rule does not assume the fill",
+})
+
+
+def realised_bucket(row: Mapping[str, Any], bar: Mapping[str, Any] | None) -> str:
+    """The bucket of a row once the day's bar is known; ``opens_at_limit`` is split, every other bucket is kept."""
+    bucket = str(row["bucket"])
+    if bucket != "opens_at_limit" or bar is None:
+        return bucket
+    opening, low = optional_float(row.get("open")), optional_float(bar.get("low"))
+    if opening is None or low is None:
+        return bucket
+    return OPENS_AT_LIMIT_ONE_WORD if low >= opening - SEALED_TOLERANCE else OPENS_AT_LIMIT_REOPENED
+
+
 def auction_track_summary(readings: Sequence[Mapping[str, Any]], bars: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Summarize realised open-to-close returns by session and auction bucket."""
     by_pair = {(str(row["symbol"]), str(row["trading_date"])): row for row in bars}
@@ -218,10 +241,11 @@ def auction_track_summary(readings: Sequence[Mapping[str, Any]], bars: Sequence[
             bar = by_pair.get((str(row["symbol"]), day))
             opening, close = optional_float(row.get("open")), optional_float(bar.get("close")) if bar else None
             if opening is not None and close is not None and opening > 0:
-                buckets.setdefault(str(row["bucket"]), []).append(close / opening - 1)
+                buckets.setdefault(realised_bucket(row, bar), []).append(close / opening - 1)
         sessions.append({"trade_date": day, "buckets": {
             bucket: {"stocks": len(values), "open_to_close_mean": sum(values) / len(values),
-                     "share_open_to_close_le_minus_5": sum(value <= -0.05 for value in values) / len(values)}
+                     "share_open_to_close_le_minus_5": sum(value <= -0.05 for value in values) / len(values),
+                     **({"fill_rule": FILL_RULES[bucket]} if bucket in FILL_RULES else {})}
             for bucket, values in buckets.items()
         }})
     return {"version": VERSION, "days": sessions, "research_only": True, "live_effect": "none"}
@@ -231,5 +255,6 @@ __all__ = [
     "AUCTION_POOL_MAX_SYMBOLS", "BUCKET_STATISTICS", "PRE_CLOSE_ABSOLUTE_TOLERANCE",
     "PRE_CLOSE_RELATIVE_TOLERANCE", "VERSION", "accepts_snapshot_row", "auction_timetable",
     "build_auction_pool", "gap_bucket", "open_gap", "next_auction_tick", "opens_at_limit", "optional_float",
-    "auction_track_summary", "build_auction_table",
+    "auction_track_summary", "build_auction_table", "realised_bucket",
+    "OPENS_AT_LIMIT_ONE_WORD", "OPENS_AT_LIMIT_REOPENED", "FILL_RULES",
 ]

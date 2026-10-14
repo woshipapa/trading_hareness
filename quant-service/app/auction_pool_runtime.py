@@ -382,7 +382,7 @@ def track(database: Any, days: int = 120) -> dict[str, Any]:
                 dates.append(day)
         bars = connection.execute(
             """WITH wanted(symbol,trading_date) AS (SELECT * FROM unnest(%s::text[], %s::date[]))
-               SELECT b.symbol,b.trading_date,b.open,b.close
+               SELECT b.symbol,b.trading_date,b.open,b.high,b.low,b.close
                  FROM quant.canonical_bars_daily b JOIN wanted w
                    ON w.symbol=b.symbol AND w.trading_date=b.trading_date
                 WHERE NOT coalesce(b.is_suspended, false) AND b.pre_close > 0 AND b.open > 0 AND b.close > 0""",
