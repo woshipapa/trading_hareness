@@ -212,7 +212,7 @@ def persist_document(database: Any, observed_at: datetime, rows: Sequence[Mappin
 
 _DOCUMENT_SQL = """SELECT effective_at,normalized FROM quant.raw_market_observations
                     WHERE capability=%s AND symbol IS NULL AND provider_key=ANY(%s){where}
-                    ORDER BY effective_at {order} LIMIT 1"""
+                    ORDER BY effective_at {order},(provider_key='""" + PROVIDER_KEY + """') DESC LIMIT 1"""
 
 
 def snapshot_provider(metadata: Mapping[str, Any] | None) -> str:
