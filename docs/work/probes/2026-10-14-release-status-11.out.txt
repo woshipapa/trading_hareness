@@ -1,0 +1,29 @@
+host   check                          observed                                                                                        result  expected                           
+edge   adapter /health                ok                                                                                              PASS    ok                                 
+edge   adapter git_sha                861ecbfaa96e5dc647f9e530ca9720b92089badc                                                        PASS    861ecbfaa96e                       
+edge   adapter release                hotfix-hotfix-20261014T035902Z-861ecbfaa96e-3299                                                PASS    hotfix source-overlay              
+edge   adapter runtime_source         source-overlay                                                                                  PASS    source-overlay                     
+edge   hotfix base                    861ecbfaa96e5dc647f9e530ca9720b92089badc                                                        PASS    861ecbfaa96e                       
+edge   runtime.env image              not required                                                                                    PASS    not required for source-overlay    
+edge   runtime.env overlay            true                                                                                            PASS    true                               
+edge   larkagentx bridge              ok                                                                                              PASS    ok                                 
+edge   bridge release                 hotfix-20261014T035902Z-861ecbfaa96e-3299                                                       PASS    source-overlay from 861ecbfaa96e   
+edge   XHS collector /health          ok                                                                                              PASS    ok / Spider_XHS / cookie configured
+edge   XHS source commit              83132b3331d5d15bfcbc0092841c7faf576b5c75                                                        PASS    pinned external commit             
+edge   XHS source digest              c83f859682403587f098f74ab8aea182421b186fdccdcb347281c189e5c7d9a1                                PASS    64-char SHA-256                    
+edge   XHS component manifest         edge-xhs                                                                                        PASS    edge-xhs / clean source            
+edge   retired quant-intraday-edge    inactive/disabled                                                                               PASS    inactive/disabled                  
+owner  ~/trading_hareness             /home/stockpeer/.local/share/trading-hareness/releases/owner-full-20261012-20/trading_hareness  PASS    release symlink                    
+owner  quant-research :15682 /health  ok                                                                                              PASS    ok                                 
+owner  quant-research :15682 git_sha  7e9d61f3ea73ce9ac37ba7ca640439efce330442                                                        PASS    7e9d61f3ea73                       
+owner  quant-research :15682 release  owner-code-20261014-11                                                                          PASS    non-empty source-overlay release   
+owner  scheduler :15683 /health       ok                                                                                              PASS    ok                                 
+owner  scheduler :15683 git_sha       7e9d61f3ea73ce9ac37ba7ca640439efce330442                                                        PASS    7e9d61f3ea73                       
+owner  scheduler :15683 release       owner-code-20261014-11                                                                          PASS    non-empty source-overlay release   
+owner  quant source-overlay           true                                                                                            PASS    true                               
+owner  main runtime profile           intraday_edge                                                                                   PASS    intraday_edge                      
+owner  alembic revision               20261010_ow0121                                                                                 PASS    20261010_ow0121                    
+owner  intraday-secrets.env           present                                                                                         PASS    present                            
+
+expected sha: 7e9d61f3ea73ce9ac37ba7ca640439efce330442
+ALL CHECKS PASSED

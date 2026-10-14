@@ -901,8 +901,8 @@
 - why: 2026-10-14 当日模拟里 6 条计划依附 `000530`，它全天一字（开高低收都是 6.3）买不到；`sympathy_follow` 的“龙头强”把封板当成前提，看不出它是替代买点
 - how: `teacher_review_rules.py`：龙头的 `open`、`low`、`limit_up_price` 写进 tape 的最新摘要；`sympathy_follow` 的清单多一行“龙头一字（至今全天买不到，跟随票是替代买点）”，不参与门控，动作不变。理由：老师的跟随打法本来就是龙头买不到时买跟风，是否跟随是老师的判断，不是这条规则的；结果统计时可以按这一行分账
 - who: agent
-- needs: 无；发布要随下一次 owner 纯代码发布
-- result: 2026-10-14 提交 420273d0；新用例 `test_follower_report_names_a_leader_that_cannot_be_bought_without_gating_on_it`（一字与非一字两种龙头，动作都是 entry）；全套 3,249 条通过，输出 `docs/work/probes/2026-10-14-follower-leader-line-release-path.out.txt`
+- needs: 无
+- result: 2026-10-14 提交 420273d0；新用例 `test_follower_report_names_a_leader_that_cannot_be_bought_without_gating_on_it`（一字与非一字两种龙头，动作都是 entry）；全套 3,249 条通过，输出 `docs/work/probes/2026-10-14-follower-leader-line-release-path.out.txt`；已推送，2026-10-14 16:29 随 `owner-code-20261014-11` 发布（发布表），发布后状态检查通过
 - updated: 2026-10-14
 
 ### B082 补完 2023 年复权因子之后，重放试验台 2023–2024 的收盘和竞价读数
