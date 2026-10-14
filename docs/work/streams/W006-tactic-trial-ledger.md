@@ -5,8 +5,8 @@
 - goal: 把每条短线规则登记成条件、组合成战法并配卖出规则，每天收盘和 09:25 在当天样本上试，自动出每日总结和竞价看板，全部只作研究证据
 - plan: docs/work/plans/tactic-trial-ledger.md
 - branch: main
-- head: fd476b0b
-- next: 等用户推送并发布（Waiting on the user；`bash ~/codebase/n8n/state/rel07.sh`，现在发的是 main fd476b0b，含本线、W012 的 A 段和 10 月 14 日的一批小修）。owner 主机 11:15 已恢复、内存 3,499 MB（FACTS F030），对着它的只读干跑通过（Log 11:17）。发布后 agent 按 Due 的顺序做：只读核对 → 在容器里干跑一个回放分块看 `peak_rss_mb` → 备全量回放命令给用户 → 当晚阶段自己出总结 → 次日 09:26 核对竞价读数。今天（10 月 14 日）没有 09:25 的竞价定格（主机故障，F031），所以今天这一天不会有竞价读数，回放也补不出来（历史竞价榜当晚还没有当天的数据），这是数据缺口不是代码问题。edge 的中继和控制台在 owner 之后发。回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`（先删里面的 `frontend/node_modules` 符号链接）放在发布核对之后。
+- head: 861ecbfa
+- next: 等用户推送并发布（Waiting on the user；`bash ~/codebase/n8n/state/rel07.sh`，现在发的是 main 861ecbfa，含本线、W012 的 A 段和 10 月 14 日的一批小修（包括 B059））。owner 主机 11:15 已恢复、内存 3,499 MB（FACTS F030），对着它的只读干跑通过（Log 11:17）。发布后 agent 按 Due 的顺序做：只读核对 → 在容器里干跑一个回放分块看 `peak_rss_mb` → 备全量回放命令给用户 → 当晚阶段自己出总结 → 次日 09:26 核对竞价读数。今天（10 月 14 日）没有 09:25 的竞价定格（主机故障，F031），所以今天这一天不会有竞价读数，回放也补不出来（历史竞价榜当晚还没有当天的数据），这是数据缺口不是代码问题。edge 的中继和控制台在 owner 之后发。回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`（先删里面的 `frontend/node_modules` 符号链接）放在发布核对之后。
 - updated: 2026-10-14
 
 ## Requirements
@@ -147,7 +147,7 @@
 - 2026-10-14 11:17 owner 主机 11:15 恢复（F030：内存已是 3,499 MB）。main 上又合进了一批小修和构建前的内存检查（c5da5fa0、556a9a2c），发布目标改成 fd476b0b，`state/rel07.sh` 和干净的发布工作区（`/Users/papa/codebase/.codex-wt/n8n-release-07`）跟着换了。对着真实主机只读干跑了纯代码发布（不推送、不带 `--apply`；库版本闸门读了对方的 `/health`）：`schema: owner database 20261010_ow0121, release head 20261010_ow0121: at_head`，候选通过，21 个运行时文件；那两个脚本带着放行（F032）。竞价循环补上了连接池超时（3d2e6a8b），评审第 17 条至此全部关闭。
 
 ## Waiting on the user
-- [ ] 2026-10-14 11:17 推送并发布 owner（纯代码，`owner-code-20261014-07`，0a57d7fb → fd476b0b，21 个运行时文件）：`! bash ~/codebase/n8n/state/rel07.sh` 先推送并只做检查，看输出没问题再 `! bash ~/codebase/n8n/state/rel07.sh --apply`。为什么等：推送和生产发布只能用户执行。可发的时段：11:30–13:00、15:10–18:45、22:05 之后；16:15 前发布并回放完，当晚就自动跑。脚本每次运行都会把主机上那两个改了登记的脚本与提交再比一遍，相同才放行。之后：agent 做发布后的只读核对，再备回放命令。
+- [ ] 2026-10-14 11:17 推送并发布 owner（纯代码，`owner-code-20261014-07`，0a57d7fb → 861ecbfa，23 个运行时文件）：`! bash ~/codebase/n8n/state/rel07.sh` 先推送并只做检查，看输出没问题再 `! bash ~/codebase/n8n/state/rel07.sh --apply`。为什么等：推送和生产发布只能用户执行。可发的时段：11:30–13:00、15:10–18:45、22:05 之后；16:15 前发布并回放完，当晚就自动跑。脚本每次运行都会把主机上那两个改了登记的脚本与提交再比一遍，相同才放行。之后：agent 做发布后的只读核对，再备回放命令。
 
 ## Running
 
