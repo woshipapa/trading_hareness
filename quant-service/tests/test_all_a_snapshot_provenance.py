@@ -12,12 +12,14 @@ import dataclasses
 import unittest
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
 from app import all_a_snapshot_sources as snapshot_sources
 from app import board_flow_drill_runtime as drill_runtime
 from app import intraday_signal_rules as rules_module
+from app import level1_snapshot_runtime as level1
+from app import minute_cross_section
 from app.all_a_snapshot_sources import (
     fallback_provenance, snapshot_decision_eligible, tdx_snapshot_completeness, tdx_snapshot_metadata,
 )
@@ -25,23 +27,29 @@ from app.board_flow_drill_runtime import BoardDrillDependencies, drill_board_sto
 from app.datasources import catalog as catalog_module
 from app.datasources.catalog import (
     BINDINGS, EXCHANGE_TIMESTAMPED_QUOTE_LABELS, RULE_USABLE_FLOW_LABELS, SOURCE_LABELS, binding_decision_eligible,
+    health_capability,
 )
 from app.datasources.contracts import LIVE_VERIFIED
 from app.intraday_derived_flow_metrics import (
     DERIVED_FLOW_LABELS, UNKNOWN_VOLUME_DERIVED_LABEL, apply_derived_watch_flow_metrics, derived_flow_label,
 )
+from app.indicator_health import minute_document_checks
 from app.intraday_features import annotate_flow_snapshot_provenance
 from app.intraday_quote_normalization import observation_source, quote_from_fuyao
 from app.intraday_scan_preparation import prepare_intraday_scan_inputs
 from app.intraday_scan_source_status import build_scan_source_status
 from app.intraday_watch_quote_capture import capture_watch_quotes
+from app.level1_snapshot_runtime import Level1CaptureDependencies, capture_level1_snapshot, level1_capture
 from app.limit_up_anchor import anchor_source, live_limit_up_pool_rows, snapshot_anchor_source
 from app.live_policy import live_policy_gate
 from app.main import intraday_signal_rules
 from app.paper_auto_execution_runtime import (
     SNAPSHOT_NOT_ELIGIBLE_REASON, PaperAutoExecutionDependencies, run_paper_auto_execution,
 )
-from app.platform.evidence_contracts import all_a_snapshot_contract_keys, materialize_evidence_status
+from app.platform.evidence_contracts import (
+    EVIDENCE_CONTRACTS, all_a_snapshot_contract_keys, materialize_evidence_status,
+)
+from app.realtime_provider_health import SOURCES as HEALTH_SOURCES, project_realtime_source_health
 
 import test_intraday_watch_quote_capture as capture_tests
 
@@ -617,6 +625,263 @@ class LimitUpAnchorTests(unittest.TestCase):
         result, stored = self.refresh(dict(TDX_ROW))
         self.assertEqual(result["source"], "tdx_public_all_a_plus_stk_limit")
         self.assertEqual(stored, [("_persist_local_limit_pool", "tdx_public_derived")])
+
+
+FUYAO_METADATA = {"status": "fresh", "source": "fuyao_ths_all_a_snapshot", "provider_key": "fuyao_ths",
+                  "decision_eligible": True, "cross_sectional": True, "upstream_timestamp_ms": 1, "total": 5580}
+MINUTE = datetime(2026, 10, 13, 2, 0, 50, tzinfo=timezone.utc)
+
+
+def tdx_metadata(eligible=False):
+    return {"status": "fresh", "source": "tdx_public_all_a_snapshot", "provider_key": "tdx_public",
+            "decision_eligible": eligible, "fallback_for": "fuyao_ths", "fallback_reason": "Fuyao request failed",
+            "cross_sectional": True, "upstream_timestamp_ms": None, "total": 5579}
+
+
+class Level1StorageTests(unittest.TestCase):
+    def capture(self, row, metadata, storage="both"):
+        written = {}
+
+        async def fetch():
+            return [dict(row)], dict(metadata)
+
+        async def persist(provider, capability, rows):
+            written["per_symbol"] = (provider, capability, len(rows))
+            return len(rows)
+
+        async def persist_document(observed_at, rows, given):
+            written["document"] = (observed_at, rows[0]["snapshot_metadata"], dict(given))
+            return {"rows": len(rows)}
+
+        async def session_open(_now):
+            return True
+
+        with mock.patch.object(level1.minute_cross_section, "remember"):
+            result = asyncio.run(capture_level1_snapshot(
+                fetch_snapshot=fetch, persist=persist, persist_document=persist_document, session_open=session_open,
+                storage=storage, now=MINUTE))
+        return result, written
+
+    def test_a_main_source_minute_is_stored_and_reported_as_before(self):
+        result, written = self.capture(FUYAO_ROW, FUYAO_METADATA)
+        self.assertEqual(written["per_symbol"], ("fuyao_ths", "a_share_prices_snapshot", 1))
+        self.assertEqual(written["document"], (MINUTE, FUYAO_METADATA, FUYAO_METADATA))
+        self.assertEqual({key: value for key, value in result.items() if key != "timings"}, {
+            "status": "completed", "received": 1, "stored": 1, "provider": "fuyao_ths",
+            "capability": "a_share_prices_snapshot", "upstream_timestamp_ms": 1, "freshness_status": "fresh",
+            "cross_sectional": True, "storage": "both", "document": {"rows": 1}, "document_error": None,
+        })
+        # Metadata from before snapshots named their provider is the main source's.
+        unnamed, written = self.capture(FUYAO_ROW, {"status": "fresh"})
+        self.assertEqual((unnamed["provider"], written["per_symbol"][0]), ("fuyao_ths", "fuyao_ths"))
+
+    def test_a_filled_minute_is_stored_and_reported_under_the_provider_that_filled_it(self):
+        for eligible in (False, True):
+            result, written = self.capture(TDX_ROW, tdx_metadata(eligible))
+            self.assertEqual(written["per_symbol"], ("tdx_public", "a_share_prices_snapshot", 1))
+            self.assertEqual(written["document"][1]["provider_key"], "tdx_public")
+            self.assertEqual((result["provider"], result["capability"]), ("tdx_public", "a_share_prices_snapshot"))
+            self.assertEqual((result["fallback_for"], result["fallback_reason"]), ("fuyao_ths", "Fuyao request failed"))
+            self.assertIs(result["decision_eligible"], eligible)
+
+
+class _Transactions:
+    @contextmanager
+    def transaction(self):
+        yield object()
+
+
+class Level1HealthTests(unittest.TestCase):
+    def run_capture(self, row, metadata, storage="document"):
+        health, documents = [], []
+
+        async def fetch():
+            if row is None:
+                raise RuntimeError("fuyao 502; tdx_public fallback: tdx_read_timeout:20s")
+            return [dict(row)], dict(metadata)
+
+        async def session_open(_now):
+            return True, "open"
+
+        def persist_document(_database, _observed_at, rows, given, *, provider="fuyao_ths", capability=None):
+            documents.append((provider, given.get("provider_key")))
+            return {"rows": len(rows)}
+
+        deps = Level1CaptureDependencies(
+            fetch_snapshot=fetch, persist_observations=lambda _provider, _capability, rows: len(rows),
+            run_database=_run, database=_Transactions(), session_open=session_open,
+            record_success=lambda _c, provider, capability, rows, _x: health.append(("ok", provider, capability, rows)),
+            record_failure=lambda _c, provider, capability, error, _x: health.append(("failed", provider, capability, error)),
+            safe_error=lambda text, _n: text,
+        )
+        with mock.patch.object(level1.minute_cross_section, "storage_mode", return_value=storage), \
+                mock.patch.object(level1.minute_cross_section, "persist_document", persist_document), \
+                mock.patch.object(level1.minute_cross_section, "remember"):
+            try:
+                asyncio.run(level1_capture(deps)())
+            except RuntimeError:
+                pass
+        return health, documents
+
+    def test_a_main_source_minute_records_one_success_as_before(self):
+        health, documents = self.run_capture(FUYAO_ROW, FUYAO_METADATA)
+        self.assertEqual(health, [("ok", "fuyao_ths", "a_share_prices_snapshot", 1)])
+        self.assertEqual(documents, [("fuyao_ths", "fuyao_ths")])
+
+    def test_a_failed_minute_records_the_main_failure_as_before(self):
+        health, documents = self.run_capture(None, None)
+        self.assertEqual(health, [("failed", "fuyao_ths", "a_share_prices_snapshot",
+                                   "fuyao 502; tdx_public fallback: tdx_read_timeout:20s")])
+        self.assertEqual(documents, [])
+
+    def test_a_filled_minute_records_the_main_failure_with_its_error_and_the_filler_success(self):
+        health, documents = self.run_capture(TDX_ROW, tdx_metadata())
+        self.assertEqual(health, [
+            ("failed", "fuyao_ths", "a_share_prices_snapshot", "Fuyao request failed"),
+            ("ok", "tdx_public", "all_a_snapshot", 1),
+        ])
+        self.assertEqual(documents, [("tdx_public", "tdx_public")])
+
+    def test_the_health_capabilities_are_the_catalog_aliases(self):
+        self.assertEqual(health_capability("tdx_public", "quote.all_a_snapshot"), "all_a_snapshot")
+        self.assertEqual(level1.snapshot_health_capability("tdx_public"), "all_a_snapshot")
+        self.assertEqual(level1.snapshot_health_capability("fuyao_ths"), "a_share_prices_snapshot")
+        self.assertEqual(EVIDENCE_CONTRACTS["tdx_public_all_a_snapshot"].capability, "all_a_snapshot")
+        self.assertEqual(EVIDENCE_CONTRACTS["fuyao_all_a_snapshot"].capability, "a_share_prices_snapshot")
+
+
+class MinuteDocumentReaderTests(unittest.TestCase):
+    def test_documents_are_read_by_capability_across_providers(self):
+        calls = []
+
+        class Connection:
+            def execute(self, sql, params=()):
+                calls.append((sql, params))
+                return mock.MagicMock(fetchone=lambda: None, fetchall=lambda: [])
+
+        class AsyncConnection:
+            async def execute(self, sql, params=()):
+                calls.append((sql, params))
+                return mock.MagicMock(fetchone=mock.AsyncMock(return_value=None))
+
+        day = date(2026, 10, 13)
+        minute_cross_section.latest(Connection())
+        minute_cross_section.latest(Connection(), day)
+        minute_cross_section.first_between(Connection(), MINUTE, MINUTE + timedelta(minutes=1))
+        minute_cross_section.day_documents(Connection(), day)
+        asyncio.run(minute_cross_section.latest_async(AsyncConnection()))
+        self.assertEqual(len(calls), 5)
+        for sql, params in calls:
+            self.assertIn("provider_key=ANY(%s)", sql)
+            self.assertEqual(params[:2], ("a_share_minute_cross_section", ["fuyao_ths", "tdx_public"]))
+            self.assertNotIn("a_share_minute_cross_section_shadow", params)
+        # Every source of the snapshot chain is among the providers the readers select.
+        self.assertEqual(set(minute_cross_section.DOCUMENT_PROVIDERS),
+                         {snapshot_sources.FUYAO_PROVIDER_KEY, snapshot_sources.TDX_PROVIDER_KEY})
+
+    def test_the_roster_reads_main_source_documents_only(self):
+        calls = []
+
+        class Connection:
+            def execute(self, sql, params=()):
+                calls.append((sql, params))
+                return mock.MagicMock(fetchone=lambda: {"total": 5580})
+
+        self.assertEqual(minute_cross_section.latest_main_total(Connection()), 5580)
+        sql, params = calls[0]
+        self.assertIn("provider_key=%s", sql)
+        self.assertEqual(params, ("a_share_minute_cross_section", "fuyao_ths", "fuyao_ths", "fuyao_ths"))
+
+    def test_the_latest_snapshot_items_name_the_provider_of_the_minute(self):
+        def item(row, metadata):
+            payload = {**row, "ts_code": row["symbol"], **({"snapshot_metadata": metadata} if metadata else {})}
+            return minute_cross_section.latest_level1_items(MINUTE, [payload], 10)[0]["normalized"]
+
+        for metadata in (FUYAO_METADATA, {"status": "fresh"}, None):
+            self.assertEqual(item(FUYAO_ROW, metadata)["provider_key"], "fuyao_ths")
+        filled = item(TDX_ROW, tdx_metadata())
+        self.assertEqual((filled["provider_key"], filled["capability"]), ("tdx_public", "a_share_prices_snapshot"))
+        self.assertEqual(filled["price_source"], "tdx_public_all_a_snapshot")
+
+    def test_a_document_defaults_to_the_main_provider_and_takes_the_one_it_is_given(self):
+        self.assertEqual(minute_cross_section.snapshot_provider(FUYAO_METADATA), "fuyao_ths")
+        self.assertEqual(minute_cross_section.snapshot_provider(None), "fuyao_ths")
+        self.assertEqual(minute_cross_section.snapshot_provider(tdx_metadata()), "tdx_public")
+        # A minute stored where no reader looks would be a silent gap.
+        with self.assertRaises(ValueError):
+            minute_cross_section.snapshot_provider({"provider_key": "some_other_source"})
+
+
+class MinuteDocumentHealthTests(unittest.TestCase):
+    def checks(self, fallback_documents):
+        summary = {"documents": 240, "max_bytes": 260_000, "last_at": MINUTE, "max_gap_seconds": 61}
+        if fallback_documents is not None:
+            summary["fallback_documents"] = fallback_documents
+        calls = []
+
+        class Connection:
+            def execute(self, sql, params=()):
+                calls.append(sql)
+                return mock.MagicMock(fetchone=lambda: summary)
+
+        checks = {item["name"]: item for item in minute_document_checks(Connection(), date(2026, 10, 13), MINUTE)}
+        return checks, calls[0]
+
+    def test_a_day_without_a_filled_minute_is_healthy_as_before(self):
+        for count in (0, None):
+            checks, sql = self.checks(count)
+            self.assertEqual({name: item["status"] for name, item in checks.items()},
+                             {"present": "ok", "continuity": "ok", "size": "ok", "fallback_minutes": "ok"})
+            self.assertEqual(checks["fallback_minutes"]["value"], 0)
+        self.assertNotIn("a_share_minute_cross_section_shadow", sql)
+        self.assertNotIn("AND provider_key=", sql)
+
+    def test_filled_minutes_are_counted_and_warn(self):
+        checks, _sql = self.checks(3)
+        self.assertEqual((checks["fallback_minutes"]["status"], checks["fallback_minutes"]["value"]), ("warn", 3))
+        self.assertEqual(checks["present"]["value"], 240)
+
+
+class ProviderHealthProjectionTests(unittest.TestCase):
+    now = datetime(2026, 10, 13, 2, 1, tzinfo=timezone.utc)
+
+    def project(self, sources, health=()):
+        payload = project_realtime_source_health(
+            {"observed_at": self.now, "items": list(health)},
+            {"observed_at": self.now, "summary": {"watched": 2}, "source_status": sources}, session_active=True)
+        return {item["source_key"]: item for item in payload["items"]}
+
+    def test_the_filler_has_its_own_entry_under_its_alias(self):
+        entry = next(item for item in HEALTH_SOURCES if item[0] == "tdx_public")
+        self.assertEqual(entry[1:3], ("tdx_public", health_capability("tdx_public", "quote.all_a_snapshot")))
+        self.assertEqual(next(item for item in HEALTH_SOURCES if item[0] == "fuyao_ths")[2], "a_share_prices_snapshot")
+
+    def test_on_a_main_source_scan_the_filler_is_not_tested_and_the_main_source_is_as_before(self):
+        snapshot = {"total": 5580, "matched_rows": 5580, "status": "fresh", "age_seconds": 0}
+        items = self.project({"fuyao": {"status": "completed", "rows": 5580, "matched": 2, "all_a_snapshot": snapshot}})
+        self.assertEqual((items["fuyao_ths"]["state"], items["fuyao_ths"]["requested"], items["fuyao_ths"]["received"]),
+                         ("healthy", 5580, 5580))
+        self.assertEqual((items["tdx_public"]["state"], items["tdx_public"]["received"]), ("not_tested", None))
+
+    def test_on_a_filled_scan_the_main_source_failed_and_the_filler_served(self):
+        snapshot = {**materialize_evidence_status("tdx_public_all_a_snapshot", tdx_status(False)),
+                    "fallback_reason": "Fuyao request failed", "flow_decision_eligible": False,
+                    "total": 5579, "matched_rows": 5560, "status": "fresh", "age_seconds": 0}
+        sources = scan_status({"000001.SZ": {"price_source": "tdx_public_all_a_snapshot"}}, [TDX_ROW], snapshot)
+        health = [
+            {"provider_key": "fuyao_ths", "capability": "a_share_prices_snapshot", "last_failure_at": self.now,
+             "last_error": "Fuyao request failed"},
+            {"provider_key": "tdx_public", "capability": "all_a_snapshot", "last_success_at": self.now,
+             "last_row_count": 5560},
+        ]
+        items = self.project(sources, health)
+        self.assertEqual(items["fuyao_ths"]["last_observation_state"], "unavailable")
+        self.assertEqual(items["fuyao_ths"]["state"], "degraded")
+        self.assertTrue(items["fuyao_ths"]["error_present"])
+        self.assertEqual((items["tdx_public"]["requested"], items["tdx_public"]["received"]), (5579, 5560))
+        self.assertEqual(items["tdx_public"]["last_observation_state"], "partial")
+        self.assertEqual(items["tdx_public"]["last_success_at"], self.now)
+        self.assertFalse(items["tdx_public"]["decision_eligible"])
 
 
 if __name__ == "__main__":

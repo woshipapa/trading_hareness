@@ -20,6 +20,12 @@ per-symbol rows see the same shape. Days before the switch still read the
 per-symbol rows through the legacy fallbacks here. The newest minute is also
 kept in this process's memory for the latest-snapshot read.
 
+A minute is stored under the provider its snapshot names: the main source's ``fuyao_ths``, or
+the source that filled a minute the main one failed. Readers select by capability across the
+providers of the snapshot chain (``DOCUMENT_PROVIDERS``), so a filled minute is read like any
+other; the shadow stream has a capability of its own and is never among them. Only the
+completeness roster (``latest_main_total``) reads the main source's documents alone.
+
 No DDL: the documents live in the existing table under their own capability.
 That document capability is not in the current hot/cold tiering or overflow
 archive allowlists, so documents remain hot; adding retention is a follow-up.
@@ -37,7 +43,10 @@ from zoneinfo import ZoneInfo
 from . import settings
 
 SCHEMA = "minute-cross-section-v1"
+#: The main source: the default provider of a document, and the only one the roster reads.
 PROVIDER_KEY = "fuyao_ths"
+#: Every provider a minute document may be stored under: the sources of the all-A snapshot chain.
+DOCUMENT_PROVIDERS = (PROVIDER_KEY, "tdx_public")
 CAPABILITY = "a_share_minute_cross_section"
 LEGACY_CAPABILITY = "a_share_prices_snapshot"
 CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -202,8 +211,20 @@ def persist_document(database: Any, observed_at: datetime, rows: Sequence[Mappin
 
 
 _DOCUMENT_SQL = """SELECT effective_at,normalized FROM quant.raw_market_observations
-                    WHERE capability=%s AND symbol IS NULL AND provider_key=%s{where}
+                    WHERE capability=%s AND symbol IS NULL AND provider_key=ANY(%s){where}
                     ORDER BY effective_at {order} LIMIT 1"""
+
+
+def snapshot_provider(metadata: Mapping[str, Any] | None) -> str:
+    """The provider a snapshot's metadata names; the main source when it names none.
+
+    A provider the readers do not know raises: a minute stored where no reader looks would be
+    a silent gap.
+    """
+    provider = str((metadata or {}).get("provider_key") or PROVIDER_KEY)
+    if provider not in DOCUMENT_PROVIDERS:
+        raise ValueError(f"no minute-document provider: {provider}")
+    return provider
 
 
 def _day_bounds(day: date) -> tuple[datetime, datetime]:
@@ -225,22 +246,24 @@ def _document(row: Any) -> tuple[datetime, dict[str, Any]] | None:
 
 
 def latest(connection: Any, day: date | None = None) -> tuple[datetime, dict[str, Any]] | None:
-    """The newest minute document, of ``day`` if given."""
+    """The newest minute document of any provider of the chain, of ``day`` if given."""
     if day is None:
         return _document(connection.execute(_DOCUMENT_SQL.format(where="", order="DESC"),
-                                            (CAPABILITY, PROVIDER_KEY)).fetchone())
+                                            (CAPABILITY, list(DOCUMENT_PROVIDERS))).fetchone())
     start, end = _day_bounds(day)
     return _document(connection.execute(
         _DOCUMENT_SQL.format(where=" AND effective_at>=%s AND effective_at<%s", order="DESC"),
-        (CAPABILITY, PROVIDER_KEY, start, end)).fetchone())
+        (CAPABILITY, list(DOCUMENT_PROVIDERS), start, end)).fetchone())
 
 
 def latest_main_total(connection: Any) -> int | None:
     """The upstream total of the newest minute the main source itself served.
 
-    A minute another source filled says so in its metadata and is passed over wherever it is
-    stored, so the completeness gate never measures the filler against its own count. Documents
-    from before the metadata named a provider are the main source's.
+    The one reader that stays on the main provider: a filled minute is stored under the
+    provider that filled it, so the completeness gate never measures the filler against its own
+    count. The metadata is checked as well, so a document that names another provider is
+    passed over wherever it is stored. Documents from before the metadata named a provider are
+    the main source's.
     """
     row = connection.execute(
         """SELECT (payload->'metadata'->>'total')::int AS total
@@ -257,7 +280,7 @@ def latest_main_total(connection: Any) -> int | None:
 def first_between(connection: Any, start: datetime, end: datetime) -> tuple[datetime, dict[str, Any]] | None:
     return _document(connection.execute(
         _DOCUMENT_SQL.format(where=" AND effective_at>=%s AND effective_at<%s", order="ASC"),
-        (CAPABILITY, PROVIDER_KEY, start, end)).fetchone())
+        (CAPABILITY, list(DOCUMENT_PROVIDERS), start, end)).fetchone())
 
 
 def day_documents(connection: Any, day: date) -> list[tuple[datetime, dict[str, Any]]]:
@@ -265,13 +288,14 @@ def day_documents(connection: Any, day: date) -> list[tuple[datetime, dict[str, 
     start, end = _day_bounds(day)
     rows = connection.execute(
         """SELECT effective_at,normalized FROM quant.raw_market_observations
-            WHERE capability=%s AND symbol IS NULL AND provider_key=%s AND effective_at>=%s AND effective_at<%s
-            ORDER BY effective_at""", (CAPABILITY, PROVIDER_KEY, start, end)).fetchall()
+            WHERE capability=%s AND symbol IS NULL AND provider_key=ANY(%s) AND effective_at>=%s AND effective_at<%s
+            ORDER BY effective_at""", (CAPABILITY, list(DOCUMENT_PROVIDERS), start, end)).fetchall()
     return [document for document in (_document(row) for row in rows) if document is not None]
 
 
 async def latest_async(connection: Any) -> tuple[datetime, dict[str, Any]] | None:
-    result = await connection.execute(_DOCUMENT_SQL.format(where="", order="DESC"), (CAPABILITY, PROVIDER_KEY))
+    result = await connection.execute(_DOCUMENT_SQL.format(where="", order="DESC"),
+                                      (CAPABILITY, list(DOCUMENT_PROVIDERS)))
     return _document(await result.fetchone())
 
 
@@ -296,15 +320,20 @@ def recent(now: datetime | None = None) -> tuple[datetime, list[dict[str, Any]]]
 def latest_level1_items(observed_at: datetime, rows: Sequence[Mapping[str, Any]], limit: int) -> list[dict[str, Any]]:
     """Items in the shape the per-symbol latest-snapshot read always returned."""
     ordered = sorted(rows, key=lambda row: str(row.get("ts_code") or row.get("symbol") or ""))
+
+    def provider(row: Mapping[str, Any]) -> str:
+        # What the row's own snapshot names; rows from before snapshots named one are the main source's.
+        return str((row.get("snapshot_metadata") or {}).get("provider_key") or PROVIDER_KEY)
+
     return [{
         "symbol": str(row.get("ts_code") or row.get("symbol") or "").upper(), "effective_at": observed_at,
         "available_at": observed_at, "payload_sha256": None,
-        "normalized": {**row, "provider_key": PROVIDER_KEY, "capability": LEGACY_CAPABILITY, "record_index": position},
+        "normalized": {**row, "provider_key": provider(row), "capability": LEGACY_CAPABILITY, "record_index": position},
     } for position, row in enumerate(ordered[:limit])]
 
 
 __all__ = [
-    "CAPABILITY", "LEGACY_CAPABILITY", "SCHEMA", "STORAGE_MODES", "build_document", "day_documents", "first_between",
+    "CAPABILITY", "DOCUMENT_PROVIDERS", "LEGACY_CAPABILITY", "SCHEMA", "STORAGE_MODES", "build_document", "day_documents", "first_between",
     "latest", "latest_async", "latest_level1_items", "latest_main_total", "persist_document", "recent", "remember", "rows_for", "rows_of",
-    "storage_mode", "symbol_index",
+    "snapshot_provider", "storage_mode", "symbol_index",
 ]

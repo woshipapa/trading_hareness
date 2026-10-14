@@ -27,6 +27,8 @@ CATALOG_VERSION: Final = "datasource-catalog-v2"
 # checks and resolver receipts from drifting independently.
 HEALTH_CAPABILITY_ALIASES: Final[dict[tuple[str, str], str]] = {
     ("fuyao_ths", "quote.all_a_snapshot"): "a_share_prices_snapshot",
+    # The filler of a minute the main source failed; its shadow stream has a capability of its own.
+    ("tdx_public", "quote.all_a_snapshot"): "all_a_snapshot",
     ("longhuvip", "quote.watch_snapshot"): "stock_quote",
     ("tencent_free", "quote.watch_snapshot"): "order_book_quote",
     ("sina_free", "quote.watch_snapshot"): "realtime_quote",

@@ -175,20 +175,27 @@ MAX_DOCUMENT_BYTES = 1_500_000
 
 
 def minute_document_checks(connection: Any, trade_date: date, now: datetime) -> list[dict[str, Any]]:
+    """The day's minute documents of every provider; the shadow stream has another capability.
+
+    A document under a provider other than the main source (``fuyao_ths``) is a minute the main
+    source failed and another source filled: counted, healthy at zero and a warning above.
+    """
     start, end = _day_bounds(trade_date)
     summary = _one(connection, """
         WITH documents AS (
             SELECT effective_at,(effective_at AT TIME ZONE 'Asia/Shanghai')::time AS clock,
-                   pg_column_size(normalized) AS bytes
+                   pg_column_size(normalized) AS bytes,provider_key
               FROM quant.raw_market_observations
-             WHERE capability='a_share_minute_cross_section' AND symbol IS NULL AND provider_key='fuyao_ths'
+             WHERE capability='a_share_minute_cross_section' AND symbol IS NULL
                AND effective_at>=%s AND effective_at<%s),
         continuous AS (
             SELECT effective_at - lag(effective_at) OVER (PARTITION BY clock<'12:00' ORDER BY effective_at) AS gap
               FROM documents WHERE clock BETWEEN '09:31' AND '11:30' OR clock BETWEEN '13:01' AND '15:00')
         SELECT (SELECT count(*) FROM documents)::int AS documents, (SELECT max(bytes) FROM documents) AS max_bytes,
                (SELECT max(effective_at) FROM documents) AS last_at,
-               (SELECT extract(epoch FROM max(gap)) FROM continuous) AS max_gap_seconds""", (start, end))
+               (SELECT extract(epoch FROM max(gap)) FROM continuous) AS max_gap_seconds,
+               (SELECT count(*) FROM documents WHERE provider_key<>'fuyao_ths')::int AS fallback_documents""",
+                   (start, end))
     if not summary.get("documents"):
         return [_check("present", MISSING, 0, ">0", "该日没有分钟文档（LEVEL1_STORAGE=per_symbol，或采集未运行）")]
     checks = [_check("present", OK, summary["documents"], ">0")]
@@ -199,6 +206,9 @@ def minute_document_checks(connection: Any, trade_date: date, now: datetime) -> 
     size = summary.get("max_bytes")
     checks.append(_check("size", _grade(float(size or 0), MAX_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES * 2, lower_is_better=True),
                          size, f"<={MAX_DOCUMENT_BYTES}", "单份文档的存储字节（压缩后）"))
+    fallback = int(summary.get("fallback_documents") or 0)
+    checks.append(_check("fallback_minutes", OK if fallback == 0 else WARN, fallback, "0",
+                         "主源失败、由补位源填充的分钟数（文档存于补位源的 provider 下）"))
     return checks
 
 
