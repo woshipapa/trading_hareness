@@ -773,6 +773,14 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
         else:
             strong = weak = None
             shown = None
+        # A leader that opened at the limit and never traded below it cannot be bought: the follower is then the
+        # substitute entry, and its outcome belongs to a different ledger than a follower of a tradeable leader.
+        # Reported, not gating: whether to follow such a leader is the teacher's call, not this rule's.
+        one_word = None
+        if isinstance(leader, Mapping) and all(leader.get(key) is not None for key in ("open", "low", "limit_up_price")):
+            limit = float(leader["limit_up_price"])
+            one_word = float(leader["open"]) >= limit - 0.005 and float(leader["low"]) >= limit - 0.005
+        sig.append(_sig(f"{p.get('leader_name') or '龙头'}一字（至今全天买不到，跟随票是替代买点）", one_word, None, "D", gating=False))
         sig += [_sig(f"{p.get('leader_name') or '龙头'}强（封板或涨幅≥{strong_pct:g}%且均价上方）", shown, strong, "D"),
                 _sig("分时放量 + 均价上方", f"{f['surge']}/{f['above_vwap']}", bool(f["surge"]) and bool(f["above_vwap"]), "I")]
         invalid = bool(weak) or (strong is False and f["price"] < (f["pre_close"] or 0))
@@ -900,7 +908,8 @@ def teacher_review_signals(
             features = scan_features(symbol, quote, minute_features, observed_at, name, previous_quote, tape_view)
             features["tape"] = tape_view
     if tape is not None:
-        tape.note_latest(symbol, observed_at, {key: features.get(key) for key in ("price", "pct", "sealed", "above_vwap")})
+        tape.note_latest(symbol, observed_at, {key: features.get(key) for key in (
+            "price", "pct", "sealed", "above_vwap", "open", "low", "limit_up_price")})
         if playbook == "sympathy_follow":
             leader = str((plan.get("extra") or {}).get("leader_ts_code") or "")
             features["leader_latest"] = tape.latest(leader, observed_at) if leader else None

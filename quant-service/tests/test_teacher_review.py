@@ -50,7 +50,8 @@ def at(hour: int, minute: int, day: date = date(2026, 9, 22)) -> datetime:
 
 
 def quote(price: float, pre_close: float, *, amount: float, volume_lot: float, volume_ratio: float = 2.0,
-          turnover: float = 5.0, sealed: bool = False, opened: float | None = None, high: float | None = None) -> dict:
+          turnover: float = 5.0, sealed: bool = False, opened: float | None = None, high: float | None = None,
+          low: float | None = None) -> dict:
     # A sealed book as parse_longhu_order_book returns it: bid-only, seal volume in lots.
     book = {"book_side": "bid_only", "bids": [{"price": price, "size": 200000}], "asks": [], "seal_volume_lot": 200000} if sealed else {
         "book_side": "two_sided", "bids": [{"price": price - 0.01, "size": 100}], "asks": [{"price": price, "size": 100}]}
@@ -59,7 +60,7 @@ def quote(price: float, pre_close: float, *, amount: float, volume_lot: float, v
         "volume_ratio": volume_ratio, "turnover_rate": turnover, "price_source": "longhuvip_watch_quote",
         "price_freshness": {"status": "fresh"},
         "raw": {"longhu_watch_quote": {"pre_close": pre_close, "open": opened or pre_close, "high": high or price,
-                                       "low": min(price, pre_close), "amount": amount, "volume": volume_lot,
+                                       "low": low if low is not None else min(price, pre_close), "amount": amount, "volume": volume_lot,
                                        "order_book": book}},
     }
 
@@ -329,6 +330,31 @@ class PrecisionTests(unittest.TestCase):
                                at(10, 1), tape=tape)
         quit_ = teacher_review_signals(follower, mine, minute, None, at(10, 1) + timedelta(seconds=10), tape=tape)
         self.assertTrue(any(item["signal_key"].endswith("teacher_review_invalid:sympathy_follow") for item in quit_))
+
+    def test_follower_report_names_a_leader_that_cannot_be_bought_without_gating_on_it(self):
+        def run(leader_low):
+            tape = SnapshotTape()
+            leader = watch("000530.SZ", "relay_race", {})
+            follower = watch("600202.SH", "sympathy_follow", {"leader": "000530", "leader_strong_pct": 9.5,
+                                                              "leader_weak_pct": 3.0}, {"leader_ts_code": "000530.SZ"})
+            minute = {"vwap": 6.0, "minute_volume_multiple": 3.0, "return_5m_pct": 0.4}
+            mine = quote(6.15, 5.59, amount=3e8, volume_lot=2.6e5, volume_ratio=2.0)
+            teacher_review_signals(leader, quote(6.3, 5.73, amount=1e8, volume_lot=1.8e5, sealed=True, opened=6.3, high=6.3,
+                                                 low=leader_low), {"vwap": 6.3}, None, at(10, 0), tape=tape)
+            return teacher_review_signals(follower, mine, minute, None, at(10, 0) + timedelta(seconds=10), tape=tape)
+
+        def lines(signals):
+            checklist = signals[0]["conditions"]["teacher_review"]
+            return {item["name"]: item for item in checklist["signals"]} if "signals" in checklist else {}
+
+        for leader_low, expected in ((6.3, True), (6.0, False)):
+            with self.subTest(leader_low=leader_low):
+                signals = run(leader_low)
+                self.assertEqual(signals[0]["signal_type"], "entry", "the follower's action does not depend on it")
+                found = [item for item in lines(signals).values() if "一字" in item["name"]]
+                self.assertEqual(len(found), 1)
+                self.assertIs(found[0]["value"], expected)
+                self.assertFalse(found[0]["gating"])
 
     def test_one_word_relay_reads_the_0925_auction_seal(self):
         book = TeacherMarketBook()
