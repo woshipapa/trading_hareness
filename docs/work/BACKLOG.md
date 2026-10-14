@@ -941,13 +941,14 @@
 
 ### B085 两个发布单元同机之后：host 注册表、发布工具的默认主机和隔离测试
 
-- state: open
+- state: doing
 - kind: follow-up
 - why: edge47 的 feishu-relay、xhs、itougu、paper 服务搬到 owner 主机后，`config/components.json` 的 `47edge` 与 `47owner` 如何表示、`OWNER_MARKERS`（只覆盖主 relay 热发布脚本和 owner code-only 脚本）要扩到 workflow、xhs、itougu、failover、status 脚本；`release-sync-status.sh:57`、`release_plan.py:39`、`hotfix-feishu-relay-edge.sh:41`、`hotfix-xhs-intel-edge.sh:40` 等默认还是 `root@47.114.113.152`，改之前发布会作用在旧主机上（来源：Codex 审计第 16、17 条，W015）
 - how: 先写决策记录，再改默认和测试；`failover-feishu-relay-to-local.sh` 与 `failback-...` 的表清单补上 `baidu_pan_archive_jobs`、`paper_kb_deliveries` 等
 - who: agent
-- needs: W015 切换完成并验证
+- needs: 用户装 root 钥匙（W015 Waiting）；`sync-secrets.sh` 之前先对账 `.env.edge`（B086）
 - updated: 2026-10-14
+- result: 2026-10-15 `ce737f26`：23 个中继侧脚本、主机注册表、工作站隧道、隔离测试、决策记录 0025 和文档都已改到统一主机；剩下的是 root 钥匙和对账。
 
 ### B086 切换之后的清理与对账（W015）
 
@@ -958,4 +959,3 @@
 - who: agent，删除类动作由用户确认
 - needs: 两个完整交易日的验证
 - updated: 2026-10-15
-

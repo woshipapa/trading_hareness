@@ -6,7 +6,7 @@
 - goal: feishu-relay（adapter、bridge、xhs、n8n）和 itougu（内参、业绩报告）搬到 116.62.30.225 上跑；配置里的令牌、cookie、会话状态原样带过去；edge47 上的这些服务停掉，只留一套在写
 - plan: docs/work/plans/edge-relay-move.md
 - branch: main
-- head: c4314eda
+- head: ce737f26
 - next: 观察到明天 15:30 itougu 日报、09:30 起的 XHS 定时、10:30 arXiv RSS、03:21 paper-sources 都在新主机上正常；用户决定飞书看板的前门（见 Waiting）；然后清理 `n8n_relay_pass1`（947 MB）和 edge 上停用的旧单元与容器
 - updated: 2026-10-14
 
@@ -55,8 +55,11 @@
 - 2026-10-15 00:4x 前端：adapter 在新主机上服务的各路由（`/`、`/monitor`、`/dashboard`、`/workbench`、`/relay`、`/research`、`/personal`）都返回 200；工作站经 `feishu-tunnel` 在 127.0.0.1:18300 可访问。原来通过 edge 的 nginx 18301（只许 tailnet 来源）访问，新主机上没有 tailscale 也没动 nginx（对方约定动 nginx 前先说）。我准备的做法是在 edge 上加一个 `relay-adapter-forward.service`，用现有的 edge→owner 钥匙把 edge 的 127.0.0.1:18300 转发到新主机的 18300，edge 的 nginx 不变，URL 不变；这需要给 `quant-edge-to-owner` 这把受限钥匙多加一个 `permitopen`，自动模式拦截了（扩大权限），脚本 `state/edge-move/F1-frontend-front-door.sh` 已写好，等用户决定。
 - 2026-10-15 00:4x 临时传输钥匙（edge→新主机，白名单三条命令）已从新主机 authorized_keys 删除、edge 上的私钥已删；authorized_keys 回到 5 行加 0 行（量化 1 行、操作员 2 行、`stockpeer-self-tunnel`、`quant-edge-to-owner`）。
 - 2026-10-15 00:5x 用户选了方案 A，执行了前门转发：新主机 authorized_keys 第 5 行（`quant-edge-to-owner`）现在是 `restrict,port-forwarding,command=nologin,permitopen=127.0.0.1:15682,permitopen=127.0.0.1:18300`（备份 `authorized_keys.bak-20261015-front-door`）；edge 上新增 `relay-adapter-forward.service`（enabled，用同一把钥匙把 127.0.0.1:18300 转到新主机的 adapter），edge 的 nginx 18301 不变。核对：经 18301 的 `/`、`/monitor`、`/relay`、`/research` 都是 200（edge 本机用 tailnet 地址 100.98.179.101，工作站也用同一地址验证了 `/` 和 `/relay`）；这把钥匙仍不能执行命令（`This account is currently not available.`）；edge 上的 owner 读路径隧道 `127.0.0.1:15682` 仍 200。
+- 2026-10-15 01:3x 用户「把项目里和 edge 有关的都换成统一的这个服务器」，提交 `ce737f26`：(1) 23 个中继侧脚本（feishu-relay、xhs-intel、itougu、媒体归档、发布状态与计划、工作流状态、`sync-secrets.sh` 的 edge 与 paper-edge 目标）默认改为 `root@116.62.30.225` 与 `~/.ssh/relay_release_ed25519`；(2) `config/components.json` 两个主机条目都带 `address`，`47edge` 记 `shares_physical_host_with: 47owner` 与旧地址说明；(3) 工作站监督进程的四条隧道和 Paper-KB 的拉取改读 `LONGHU_SSH_USER/HOST/KEY_PATH`（与 owner 隧道同一处设置，地址只写一处，缺设置时这几个任务不启动）；(4) `test_release_unit_isolation.py` 改为按名字而不是按地址隔离，并加 `UnifiedHostTests`（23 个脚本都默认统一主机且不含旧 edge 地址和旧钥匙、两个主机条目同址、旧 edge 地址只留在退役脚本、`harden-remote-http-workflow.mjs`、`components.json`、`docs/`、`workflows/`）；`test_owner_path_classes.py` 的「owner 地址只写一处」放宽为允许这些中继侧脚本；(5) 决策记录 `docs/decisions/0025-relay-stack-shares-the-owner-host.md`；(6) 文档：`AGENTS.md`、`RELEASE_SYNC_47.md`、`COMPONENT_CONTRACTS.md`、`feishu-relay/deploy/edge/README.md`、`爱投顾内参自动化笔记.md`；(7) `release-sync-status.sh` 的 xhs manifest 缺失时不再崩溃。故意没改：四个退役的 intraday-edge 脚本（`deploy-intraday-edge-release.sh` 等，已在头部注明：改地址会把 quant 写入者的部署指向 owner 主机）、`harden-remote-http-workflow.mjs` 与受管 n8n 工作流里的 `https://47.114.113.152:18081`（stock-reports 没有搬）。验证：`pytest scripts` 390 passed、2 skipped；`verify_component_boundaries.py --check` 通过；四个 node 发布脚本测试通过；`release-sync-status.sh` 用 operator 钥匙对新主机跑：除了读不了 root 才能读的 `runtime.env` 和 xhs manifest 两项（stockpeer 无权限），其余全部通过。
+- 2026-10-15 01:3x 待用户：发布脚本以 root 登录新主机，需要把工作站的 `relay_release_ed25519` 公钥装进新主机 `/root/.ssh/authorized_keys`（自动模式拦截了「给 root 加授权」，没有绕过）。在装之前，这些脚本会因为钥匙不存在而 fail closed。
 
 ## Waiting on the user
+- [ ] 2026-10-15 01:3x 给发布脚本一把 root 钥匙：在工作站生成 `~/.ssh/relay_release_ed25519`，把公钥追加进新主机的 `/root/.ssh/authorized_keys`（备注 `relay-release-workstation-20261015`，撤销就删这一行）。为什么等：给 root 加授权被自动模式拦截。之后：`scripts/release-sync-status.sh` 不带环境变量即可全部通过，热发布脚本可用。
 - [x] 2026-10-15 00:4x 飞书看板的前门（方案 A、B、C 三选一） → 用户选 A（2026-10-15 00:5x）
 - [x] 2026-10-14 23:4x 确认切换：停 edge 上的 adapter、bridge、xhs、n8n、itougu，改工作站三条隧道，在新主机起栈（步骤文档“切换”一节）。为什么等：这一步会让飞书中继中断十几分钟并改变线上流量去向。 → 用户「开始吧全部进行迁移，这里逐个进行迁移」（2026-10-15 00:0x）
 - [ ] 2026-10-14 22:5x 在新主机上装 PostgreSQL 16 并启动系统级 Docker（`bash state/edge-move-A1.sh`，或给我这类命令的权限）。为什么等：自动模式拦截了生产主机上装包和起守护进程。 → 用户 22:3x 自己跑了 `state/edge-move-A1.sh`（2026-10-14）

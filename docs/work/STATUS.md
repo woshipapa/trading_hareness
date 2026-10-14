@@ -29,6 +29,7 @@
 - W015 2026-10-14 17:5x 数据库方案：n8n_relay 库 2.4 GB 搬法。选项：只搬业务表（不含 `execution_data` 1.5 GB 的历史执行）进新主机上的 Postgres 容器（镜像从 edge `docker save` 过去）。为什么等：丢不丢执行历史、要不要保留 baidu 归档队列 878 MB 是用户的取舍。
 - W015 2026-10-14 22:5x 在新主机上装 PostgreSQL 16 并启动系统级 Docker（`bash state/edge-move-A1.sh`，或给我这类命令的权限）。为什么等：自动模式拦截了生产主机上装包和起守护进程。 → 用户 22:3x 自己跑了 `state/edge-move-A1.sh`（2026-10-14）
 - W014 2026-10-14 13:06 对方工作站上的库能承受多少并发连接（第 7.3 步要用）。为什么等：只有对方知道。之后：按这个数定两个容器的数据库线程和连接池上限。
+- W015 2026-10-15 01:3x 给发布脚本一把 root 钥匙：在工作站生成 `~/.ssh/relay_release_ed25519`，把公钥追加进新主机的 `/root/.ssh/authorized_keys`（备注 `relay-release-workstation-20261015`，撤销就删这一行）。为什么等：给 root 加授权被自动模式拦截。之后：`scripts/release-sync-status.sh` 不带环境变量即可全部通过，热发布脚本可用。
 
 ## 到点要做
 
@@ -46,7 +47,7 @@
 
 ## 待办清单
 
-open 36, ready 17, doing 3, waiting-user 1, done 27, dropped 2
+open 35, ready 17, doing 4, waiting-user 1, done 27, dropped 2
 
 在做的、可以开工的、等用户处理的:
 
@@ -71,3 +72,4 @@ open 36, ready 17, doing 3, waiting-user 1, done 27, dropped 2
 - B077 (ready) 每晚把当天龙头选股和候选的分钟线落本机
 - B083 (ready) 新主机的 7.0：先量一个完整交易日
 - B084 (waiting-user) edge47 的 feishu-relay 和 itougu 迁到新 owner 主机
+- B085 (doing) 两个发布单元同机之后：host 注册表、发布工具的默认主机和隔离测试
