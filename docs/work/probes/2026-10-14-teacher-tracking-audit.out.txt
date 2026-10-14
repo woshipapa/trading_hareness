@@ -1,0 +1,19 @@
+TEACHER_REVIEW_ENABLED in the container environment: None
+-- stage receipts (teacher stages and the daily review), last 6 sessions
+{'as_of_date': datetime.date(2026, 10, 13), 'stage': 'teacher_outcome_review', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 13), 'stage': 'teacher_review_roll', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 13), 'stage': 'watch_daily_review', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 13), 'stage': 'xiaojie_outcomes', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 12), 'stage': 'teacher_outcome_review', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 12), 'stage': 'teacher_review_roll', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 12), 'stage': 'watch_daily_review', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 12), 'stage': 'xiaojie_outcomes', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 9), 'stage': 'teacher_outcome_review', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 9), 'stage': 'teacher_review_roll', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 9), 'stage': 'watch_daily_review', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 9), 'stage': 'xiaojie_outcomes', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 8), 'stage': 'teacher_outcome_review', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 8), 'stage': 'teacher_review_roll', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 8), 'stage': 'watch_daily_review', 'status': 'completed', 'reason': ''}
+{'as_of_date': datetime.date(2026, 10, 8), 'stage': 'xiaojie_outcomes', 'status': 'completed', 'reason': ''}
+-- tables: []

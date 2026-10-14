@@ -1,0 +1,5 @@
+watchlist rows: {'n': 108, 'enabled': 19}
+metadata keys of the newest plan: ['source', 'teacher_review']
+-- source [('teacher_review', 102), ('manual', 5)]
+   plans last updated on 2026-10-14 18
+   plans last updated on 2026-10-13 84
