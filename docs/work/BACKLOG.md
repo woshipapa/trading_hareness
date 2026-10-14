@@ -597,6 +597,16 @@
 - found: 2026-10-14
 - updated: 2026-10-14
 
+### B061 短线来财 6.23.0 的北炒首板七闸 + 弹窗推送登记进试验台
+
+- state: open
+- kind: idea
+- why: 用户自有软件短线来财升级到 6.23.0，对比 6.18.0 的策略增量（`docs/archive/2026-10-13-desktop-tools-inventory/E-laicai-6.23-delta.md`）。原战法二「程咬金v2」被重写成「北炒首板」：七闸评分 + 一票否决；guard 加了市场级“炒家铁律”风控；新增盘中弹窗推送（一字排单/一进二/高位切低位/午后直线拉板）。这些是 B036/B038 之外的新候选，可喂进试验台 W006
+- how: 按 E 清单登记：①北炒七闸（G1 板块效应、G2 10:30 前时间门槛、G3 流通 30–80 亿、G4 低价 <20、G5 封单/成交≥20%、G6 换手 5–15%、G7 回封优先）+ 三条否决（一字/尾盘/孤板）+ 过线判定 `score>=55 && peers>=3 && 首封 092500–103000`；②guard 的 `discipline`（跌停≥20 强制空仓等）和 `winRateOf`（赢面→仓位）；③picker/push 的四组推送判据（出处分 `[原话]/[整理]`）。登记前按 E 给的 `beichao.js`/`picker.js` 行号回源码核阈值。注意这些是软件对北京炒家/养家语录的量化翻译，不是验证过的规则，进试验台只做样本观察，`live_effect: none`
+- who: agent 梳理并登记进 W006；纳入由用户定
+- needs: 涨停池含 firstSealTime/lastSealTime/fund/amount/floatCap/turnover/brokenTimes（已有 D01），板块当日涨停家数（同 B039 的板块口径）
+- updated: 2026-10-14
+
 ## Closed
 
 ### B057 龙版传媒（605577）缺的复权日线
