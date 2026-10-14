@@ -137,6 +137,30 @@ class FullReleaseRemoteOrderTests(unittest.TestCase):
         script = SCRIPT.read_text(encoding="utf-8")
         self.remote = script[script.index("<<'REMOTE'"):]
 
+    def test_free_memory_is_read_before_the_rollback_point_and_before_the_build(self) -> None:
+        guard = self.remote.index("refusing: under 700 MB available")
+        self.assertLess(self.remote.index("/proc/meminfo"), guard)
+        self.assertLess(guard, self.remote.index('docker tag "$IMAGE:latest"'), "a refusal leaves no rollback tag behind")
+        self.assertLess(guard, self.remote.index('"${C[@]}" build quant-research'))
+        self.assertIn('[ "$ALLOW_BUILD_ON_HOST" != 1 ]', self.remote)
+        self.assertIn("ALLOW_BUILD_ON_HOST='${RELEASE_ALLOW_BUILD_ON_HOST:-}'", SCRIPT.read_text(encoding="utf-8"))
+
+    def test_the_guard_refuses_a_small_host_and_passes_with_the_override(self) -> None:
+        guard = self.remote[self.remote.index("# --- memory guard"):self.remote.index("# --- rollback point")]
+        with tempfile.TemporaryDirectory() as directory:
+            meminfo = Path(directory) / "meminfo"
+            meminfo.write_text("MemTotal:  915000 kB\nMemAvailable:  297000 kB\nSwapFree:  1650000 kB\n", encoding="utf-8")
+            script = "set -euo pipefail\nARCHIVE=/nonexistent\n" + guard.replace("/proc/meminfo", str(meminfo)) + "echo passed\n"
+            refused = subprocess.run(["bash", "-c", script], env={**os.environ, "ALLOW_BUILD_ON_HOST": ""}, capture_output=True, text=True)
+            self.assertEqual(refused.returncode, 7)
+            self.assertIn("host memory: 290 MB available, 1611 MB swap free", refused.stdout)
+            self.assertIn("Nothing was changed", refused.stderr)
+            allowed = subprocess.run(["bash", "-c", script], env={**os.environ, "ALLOW_BUILD_ON_HOST": "1"}, capture_output=True, text=True)
+            self.assertEqual((allowed.returncode, allowed.stdout.splitlines()[-1]), (0, "passed"))
+            meminfo.write_text("MemAvailable:  2048000 kB\nSwapFree:  0 kB\n", encoding="utf-8")
+            roomy = subprocess.run(["bash", "-c", script], env={**os.environ, "ALLOW_BUILD_ON_HOST": ""}, capture_output=True, text=True)
+            self.assertEqual(roomy.returncode, 0)
+
     def test_the_rollback_point_is_recorded_before_anything_changes(self) -> None:
         recorded = self.remote.index('"$STATE/$RELEASE_LABEL.rollback"')
         self.assertLess(recorded, self.remote.index('bash "$STATE/activate-$RELEASE_LABEL.sh"'))
