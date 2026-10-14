@@ -50,7 +50,9 @@ from .akshare_provider import (
     akshare_tencent_all_a_spot,
     normalize_tencent_all_a_spot_rows,
 )
-from .all_a_snapshot_sources import main_source_reference, read as read_all_a_snapshot, shared_tdx_snapshot
+from .all_a_snapshot_sources import (
+    FailedFillMemory, main_source_reference, read as read_all_a_snapshot, shared_tdx_snapshot,
+)
 from .fuyao_provider import FuyaoProviderError, all_a_snapshot_rows as fuyao_all_a_snapshot_rows
 from .fuyao_provider import fetch as fetch_fuyao_data
 from .limit_up_anchor import live_limit_up_pool_rows, snapshot_anchor_source
@@ -1755,9 +1757,14 @@ async def tdx_all_a_snapshot() -> Any:
     return (await _tdx_all_a_snapshots.get())[0]
 
 
+# A failed fill is remembered here, so an outage with an unusable TDX snapshot is not one TDX read a caller.
+_tdx_failed_fills = FailedFillMemory()
+
+
 async def _fetch_intraday_all_a_snapshot_rows() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Fetch the Fuyao/THS cross-section; a failed Fuyao read is filled by one labelled TDX read."""
-    return await read_all_a_snapshot(fuyao_all_a_snapshot_rows, tdx_all_a_snapshot, tdx_fallback_roster_total)
+    return await read_all_a_snapshot(
+        fuyao_all_a_snapshot_rows, tdx_all_a_snapshot, tdx_fallback_roster_total, _tdx_failed_fills)
 
 
 _intraday_all_a_snapshots = SharedAsyncSnapshot(
