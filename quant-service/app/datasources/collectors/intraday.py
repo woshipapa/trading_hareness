@@ -37,6 +37,8 @@ from ..error_text import error_text
 CN_TZ = ZoneInfo("Asia/Shanghai")
 HEALTH_REFRESH_SECONDS = 600
 SENTIMENT_PROVIDER_KEY = "derived_market_sentiment"
+#: The tape label of a snapshot whose metadata names no source (a caller that predates the label).
+MAIN_TAPE_SOURCE = "fuyao_ths_all_a_snapshot"
 
 
 @dataclass(frozen=True)
@@ -282,7 +284,8 @@ async def build_sentiment(deps: CollectorDeps, state: CollectorState, now: datet
     pools = {}
     for capability in ("a_share_limit_up_pool", "a_share_limit_break_pool", "a_share_limit_down_pool"):
         pools[capability] = (await fetch_all_pool_pages(deps.fuyao_fetch, capability)).get("item") or []
-    snapshot_rows, _meta = await deps.fuyao_snapshot()
+    snapshot_rows, snapshot_meta = await deps.fuyao_snapshot()
+    snapshot_meta = snapshot_meta if isinstance(snapshot_meta, Mapping) else {}
     trade_date = now.astimezone(CN_TZ).date()
     previous = await eastmoney_ztb.fetch_pool("previous_limit_up", trade_date)
     previous_rows = [{"symbol": row["symbol"], "board_count": row.get("previous_board_count") or 1} for row in previous]
@@ -300,10 +303,14 @@ async def build_sentiment(deps: CollectorDeps, state: CollectorState, now: datet
         previous_limit_up_rows=previous_rows, snapshot_rows=snapshot_rows,
         previous_turnover_total=previous_total, index_quotes=index_quotes, concept_membership=membership,
     )
+    # The tape is labelled with the snapshot's own source: a minute the fallback filled is not
+    # stored as the main source's, here or in the day-close record built from this reading.
     return {**reading, "trade_date": trade_date.isoformat(), "observed_at": now.isoformat(),
-            "sources": {"pools": "fuyao_ths", "tape": "fuyao_ths_all_a_snapshot",
+            "sources": {"pools": "fuyao_ths", "tape": snapshot_meta.get("source") or MAIN_TAPE_SOURCE,
                         "previous_limit_up": "eastmoney_ztb", "concept_quotes": "fuyao_ths" if index_quotes else None,
-                        "concept_membership": "fuyao_ths_concept" if membership else None}}
+                        "concept_membership": "fuyao_ths_concept" if membership else None,
+                        **({"tape_fallback_for": snapshot_meta["fallback_for"]}
+                           if snapshot_meta.get("fallback_for") else {})}}
 
 
 async def capture_sentiment(deps: CollectorDeps, state: CollectorState, now: datetime) -> dict[str, Any]:
