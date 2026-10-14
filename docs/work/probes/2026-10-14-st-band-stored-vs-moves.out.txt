@@ -1,0 +1,32 @@
+  2026-09 stored band 0.04 *ST: 1 bars, 1 stocks, 0 moved beyond 5.5%, 0 traded above the stored up-limit, largest move 0.0449
+  2026-09 stored band 0.05 *ST: 611 bars, 70 stocks, 40 moved beyond 5.5%, 57 traded above the stored up-limit, largest move 0.1047
+  2026-09 stored band 0.05 ST : 652 bars, 73 stocks, 25 moved beyond 5.5%, 33 traded above the stored up-limit, largest move 0.1004
+  2026-09 stored band 0.10 *ST: 231 bars, 70 stocks, 16 moved beyond 5.5%, 0 traded above the stored up-limit, largest move 0.1019
+  2026-09 stored band 0.10 ST : 242 bars, 74 stocks, 10 moved beyond 5.5%, 0 traded above the stored up-limit, largest move 0.1000
+  2026-10 stored band 0.05 *ST: 272 bars, 69 stocks, 30 moved beyond 5.5%, 26 traded above the stored up-limit, largest move 0.1071
+  2026-10 stored band 0.05 ST : 296 bars, 74 stocks, 11 moved beyond 5.5%, 12 traded above the stored up-limit, largest move 0.1004
+  2026-10 stored band 0.06 *ST: 1 bars, 1 stocks, 1 moved beyond 5.5%, 0 traded above the stored up-limit, largest move 0.1000
+  2026-09-15 stored band 0.10: 5 bars, 0 traded above the stored up-limit
+  2026-09-16 stored band 0.05: 138 bars, 9 traded above the stored up-limit
+  2026-09-16 stored band 0.10: 5 bars, 0 traded above the stored up-limit
+  2026-09-17 stored band 0.05: 138 bars, 9 traded above the stored up-limit
+  2026-09-17 stored band 0.10: 5 bars, 0 traded above the stored up-limit
+  2026-09-18 stored band 0.05: 140 bars, 8 traded above the stored up-limit
+  2026-09-18 stored band 0.10: 3 bars, 0 traded above the stored up-limit
+  2026-09-21 stored band 0.05: 142 bars, 17 traded above the stored up-limit
+  2026-09-21 stored band 0.10: 1 bars, 0 traded above the stored up-limit
+  2026-09-22 stored band 0.05: 138 bars, 11 traded above the stored up-limit
+  2026-09-22 stored band 0.10: 1 bars, 0 traded above the stored up-limit
+  2026-09-23 stored band 0.05: 142 bars, 9 traded above the stored up-limit
+  2026-09-23 stored band 0.10: 1 bars, 0 traded above the stored up-limit
+  2026-09-24 stored band 0.04: 1 bars, 0 traded above the stored up-limit
+  2026-09-24 stored band 0.05: 141 bars, 7 traded above the stored up-limit
+  2026-09-24 stored band 0.10: 1 bars, 0 traded above the stored up-limit
+  2026-09-28 stored band 0.05: 142 bars, 10 traded above the stored up-limit
+  2026-09-28 stored band 0.10: 1 bars, 0 traded above the stored up-limit
+  2026-09-30 stored band 0.10: 142 bars, 0 traded above the stored up-limit
+  2026-10-08 stored band 0.05: 142 bars, 15 traded above the stored up-limit
+  2026-10-09 stored band 0.05: 142 bars, 9 traded above the stored up-limit
+  2026-10-12 stored band 0.05: 142 bars, 6 traded above the stored up-limit
+  2026-10-12 stored band 0.06: 1 bars, 0 traded above the stored up-limit
+  2026-10-13 stored band 0.05: 142 bars, 8 traded above the stored up-limit
