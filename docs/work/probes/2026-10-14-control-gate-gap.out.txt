@@ -1,0 +1,49 @@
+now (database): 2026-10-14 11:29:24.618096
+  2026-10-12 no fundamentals: BJ suspended=False traded=True bar from longhuvip_composite: 319
+  2026-10-12 no fundamentals: SZ suspended=False traded=True bar from longhuvip_composite: 39
+  2026-10-12 no fundamentals: SH suspended=False traded=True bar from longhuvip_composite: 32
+  2026-10-12 no fundamentals: SH suspended=False traded=True bar from eastmoney_free: 2
+  2026-10-12 no fundamentals: SZ suspended=False traded=True bar from eastmoney_free: 2
+  2026-10-12 fundamentals from longhuvip_composite: 5171
+  2026-10-13 no fundamentals: BJ suspended=False traded=True bar from longhuvip_composite: 321
+  2026-10-13 no fundamentals: SZ suspended=False traded=True bar from longhuvip_composite: 66
+  2026-10-13 no fundamentals: SH suspended=False traded=True bar from longhuvip_composite: 35
+  2026-10-13 no fundamentals: SH suspended=False traded=True bar from eastmoney_free: 2
+  2026-10-13 no fundamentals: SZ suspended=False traded=True bar from eastmoney_free: 2
+  2026-10-13 fundamentals from longhuvip_composite: 5138
+  sample 000001.SH volume=483305909 close=3800.86 suspended=False last fundamentals None first bar 2023-08-15
+  sample 000021.SZ volume=461508.0 close=30.5 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 000068.SZ volume=192735.0 close=3.36 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 000300.SH volume=180434103 close=4275.68 suspended=False last fundamentals None first bar 2023-08-15
+  sample 000426.SZ volume=332889.0 close=30.3 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 000541.SZ volume=116525.0 close=4.98 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 000628.SZ volume=92504.0 close=49.2 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 000685.SZ volume=114545.0 close=10.64 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 000705.SZ volume=47662.0 close=7.11 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 000715.SZ volume=275840.0 close=5.78 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 000753.SZ volume=588279.0 close=5.28 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 000875.SZ volume=533582.0 close=4.45 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 000906.SZ volume=76675.0 close=6.06 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 001225.SZ volume=24279.0 close=33.91 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 001356.SZ volume=246631.0 close=9.55 suspended=False last fundamentals 2026-10-12 first bar 2025-01-23
+  sample 002031.SZ volume=552541.0 close=5.1 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002052.SZ volume=49885.0 close=7.88 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002063.SZ volume=204863.0 close=5.35 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002082.SZ volume=186578.0 close=12.96 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002209.SZ volume=34424.0 close=12.92 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002310.SZ volume=496429.0 close=2.2 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002361.SZ volume=623941.0 close=9.27 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002377.SZ volume=459660.0 close=2.97 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002381.SZ volume=45047.0 close=5.64 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002432.SZ volume=107968.0 close=57.3 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002460.SZ volume=486160.0 close=41.93 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002469.SZ volume=84131.0 close=6.24 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002529.SZ volume=56562.0 close=6.69 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002548.SZ volume=204807.0 close=3.84 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  sample 002672.SZ volume=141859.0 close=3.79 suspended=False last fundamentals 2026-10-12 first bar 2023-08-15
+  run 2026-09-22 post_close_strategy completed: 1
+  run 2026-09-23 post_close_strategy completed: 1
+  run 2026-09-24 post_close_strategy completed: 1
+  run 2026-09-28 post_close_strategy completed: 1
+  run 2026-09-29 watchlist_main_wave completed: 1
+  run 2026-10-08 post_close_strategy completed: 1

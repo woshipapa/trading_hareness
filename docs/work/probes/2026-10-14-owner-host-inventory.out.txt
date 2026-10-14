@@ -1,0 +1,138 @@
+== system
+Ubuntu 24.04.2 LTS
+x86_64
+2
+Mem:            3499        1066        1571           3        1095        2432
+Swap:           2047           0        2047
+/dev/vda3        30G  6.8G   21G  25% /
+/dev/vda3        30G  6.8G   21G  25% /
+== user
+stockpeer
+Linger=yes
+== docker
+client 29.1.3 server 29.1.3 rootless=
+[name=seccomp,profile=builtin name=rootless name=cgroupns] storage=overlayfs root=/home/stockpeer/.local/share/docker
+2.40.3+ds1-0ubuntu1~24.04.1
+== images
+trading-hareness-peer-db-batch-tunnel:latest d7a028380b81 18.8MB
+trading-hareness-peer-db-tunnel:latest af13185f3ec3 18.8MB
+trading-hareness-peer-quant-research:latest 58da6ff8766c 1.12GB
+== containers
+trading-hareness-peer-quant-research-scheduler-1 | trading-hareness-peer-quant-research:latest | Up 22 minutes (healthy) | 127.0.0.1:15683->8000/tcp
+trading-hareness-peer-quant-research-1 | trading-hareness-peer-quant-research:latest | Up 22 minutes (healthy) | 127.0.0.1:15682->8000/tcp
+trading-hareness-peer-db-tunnel-1 | trading-hareness-peer-db-tunnel | Up 59 minutes (healthy) | 
+trading-hareness-peer-db-batch-tunnel-1 | trading-hareness-peer-db-batch-tunnel | Up 59 minutes (healthy) | 
+== volumes
+trading-hareness-peer_peer_quant_data ?
+trading-hareness-peer_peer_quant_research_data ?
+== networks
+trading-hareness-peer_default bridge
+== release tree
+/home/stockpeer/.local/share/trading-hareness/releases/owner-full-20261012-20/trading_hareness
+/home/stockpeer/wheelhouse
+owner-full-20261012-20
+83M	/home/stockpeer/.local/share/trading-hareness
+== hotfix overlay
+/home/stockpeer/.local/share/trading-hareness/releases/owner-full-20261012-20/trading_hareness/hotfix/quant-service/releases/owner-code-20261014-07
+owner-code-20261013-04
+owner-code-20261013-05
+owner-code-20261013-06
+owner-code-20261014-07
+== compose dir files
+total 44 total total 44
+drwxrwxr-x . 18:14 13
+drwxrwxr-x .. 22:21 12
+-rw-rw-r-- compose.intraday-owner.yaml 22:21 12
+-rw-rw-r-- compose.yaml 22:21 12
+-rw-rw-r-- Dockerfile.ssh-tunnel 22:21 12
+lrwxrwxrwx /home/stockpeer/.secrets/owner/.env.owner -> .env
+lrwxrwxrwx /home/stockpeer/.secrets/owner/.env.owner -> intraday-secrets.env
+-rwxrwxr-x ssh-tunnel-entrypoint.sh 22:21 12
+drwxrwxr-x systemd 22:21 12
+== env files: key names only
+/home/stockpeer/trading_hareness/deploy/shared-peer/.env -> /home/stockpeer/.secrets/owner/.env.owner (600) 46 keys
+PEER_SSH_HOST PEER_SSH_PORT PEER_SSH_USER PEER_SSH_KEY_PATH PEER_KNOWN_HOSTS_PATH PEER_SSH_HOST_KEY_ALIAS PEER_WHEELHOUSE_PATH PEER_DB_PASSWORD PEER_DB_USER PEER_QUANT_DATABASE PEER_N8N_DATABASE QUANT_SHARED_READ_API_KEY PEER_QUANT_WRITE_API_KEY QUANT_WRITE_API_KEY QUANT_WRITE_API_KEYS QUANT_ALERT_WEBHOOK_TOKEN QUANT_HOTFIX_ENABLED QUANT_HOTFIX_HOST_DIR PEER_BACKGROUND_TASKS_ENABLED PEER_REQUIRE_OWNER_SEMANTICS PEER_OWNER_CONTRACT_MODE PEER_RUNTIME_PROFILE PEER_RESEARCH_ASYNC_READ_POOL_MAX_SIZE PEER_RESEARCH_BOARD_BACKFILL_ENABLED PEER_RESEARCH_THS_BACKFILL_ENABLED PEER_FEISHU_DIRECT_ENABLED REMOTE_DB_PORT REMOTE_BATCH_DB_PORT REMOTE_API_PORT PEER_QUANT_PORT FEISHU_APP_ID FEISHU_APP_SECRET FEISHU_ALERT_RECEIVE_ID FEISHU_ALERT_RECEIVE_ID_TYPE QUANT_FEISHU_DIRECT_ENABLED QUANT_LONGHU_FULL_MARKET_ENABLED QUANT_PAPER_AUTO_EXECUTION_ENABLED FUYAO_API_KEY PEER_GUARD_FEISHU_WEBHOOK QUANT_ALERT_FEISHU_WEBHOOK_URL PEER_INTRADAY_SECRETS_FILE PEER_N8N_ENCRYPTION_KEY PEER_APP_GIT_SHA PEER_APP_RELEASE PEER_EXPECTED_RELEASE PEER_APP_BUILD_CREATED_AT 
+/home/stockpeer/trading_hareness/deploy/shared-peer/intraday-secrets.env -> /home/stockpeer/.secrets/owner/.env.owner (600) 46 keys
+PEER_SSH_HOST PEER_SSH_PORT PEER_SSH_USER PEER_SSH_KEY_PATH PEER_KNOWN_HOSTS_PATH PEER_SSH_HOST_KEY_ALIAS PEER_WHEELHOUSE_PATH PEER_DB_PASSWORD PEER_DB_USER PEER_QUANT_DATABASE PEER_N8N_DATABASE QUANT_SHARED_READ_API_KEY PEER_QUANT_WRITE_API_KEY QUANT_WRITE_API_KEY QUANT_WRITE_API_KEYS QUANT_ALERT_WEBHOOK_TOKEN QUANT_HOTFIX_ENABLED QUANT_HOTFIX_HOST_DIR PEER_BACKGROUND_TASKS_ENABLED PEER_REQUIRE_OWNER_SEMANTICS PEER_OWNER_CONTRACT_MODE PEER_RUNTIME_PROFILE PEER_RESEARCH_ASYNC_READ_POOL_MAX_SIZE PEER_RESEARCH_BOARD_BACKFILL_ENABLED PEER_RESEARCH_THS_BACKFILL_ENABLED PEER_FEISHU_DIRECT_ENABLED REMOTE_DB_PORT REMOTE_BATCH_DB_PORT REMOTE_API_PORT PEER_QUANT_PORT FEISHU_APP_ID FEISHU_APP_SECRET FEISHU_ALERT_RECEIVE_ID FEISHU_ALERT_RECEIVE_ID_TYPE QUANT_FEISHU_DIRECT_ENABLED QUANT_LONGHU_FULL_MARKET_ENABLED QUANT_PAPER_AUTO_EXECUTION_ENABLED FUYAO_API_KEY PEER_GUARD_FEISHU_WEBHOOK QUANT_ALERT_FEISHU_WEBHOOK_URL PEER_INTRADAY_SECRETS_FILE PEER_N8N_ENCRYPTION_KEY PEER_APP_GIT_SHA PEER_APP_RELEASE PEER_EXPECTED_RELEASE PEER_APP_BUILD_CREATED_AT 
+== secrets dir (names)
+/home/stockpeer/.secrets: /home/stockpeer/.secrets:
+total 12
+drwxr-xr-x .
+drwxr-x--- ..
+drwx------ owner
+ 
+/home/stockpeer/.secrets/owner: /home/stockpeer/.secrets/owner:
+total 12
+drwx------ .
+drwxr-xr-x ..
+-rw------- .env.owner
+== certs / keys used by tunnels (names)
+authorized_keys
+known_hosts
+known_hosts.old
+peer_tunnel_ed25519
+peer_tunnel_ed25519.pub
+authorized_keys lines: 5
+== systemd user units
+docker-057b360e8f4b6941a9b978d3d78c377491d5bba4b740d10d9c301f7133cf17e1.scope transient -
+docker-3010bd30caa0954311a7b0f131e4863722d5e994fbbbe1176c09375cd07af444.scope transient -
+docker-31ad1692e78fe72e12cb50a5138e7387c9792cb1ba893ee2b4cc1bc7f473fd8d.scope transient -
+docker-a711fe1b274fe080895e193a8991e0569b98b9149ea8016d5ff0a4d9478796d1.scope transient -
+docker.service                                                                enabled   enabled
+peer-daily-backfill.service                                                   static    -
+peer-session-guard@.service                                                   static    -
+peer-daily-backfill.timer                                                     enabled   enabled
+peer-session-guard-heal.timer                                                 enabled   enabled
+peer-session-guard-preopen.timer                                              enabled   enabled
+Wed 2026-10-14 12:06:55 CST 1min 38s Wed 2026-10-14 12:04:55 CST   21s ago peer-session-guard-heal.timer    peer-session-guard@heal.service
+Thu 2026-10-15 06:30:00 CST      18h -                                   - peer-daily-backfill.timer        peer-daily-backfill.service
+Thu 2026-10-15 08:40:00 CST      20h -                                   - peer-session-guard-preopen.timer peer-session-guard@preopen.service
+== crontab
+== listening
+0.0.0.0:22 0.0.0.0:443 0.0.0.0:80 127.0.0.1:15432 127.0.0.1:15433 127.0.0.1:15680 127.0.0.1:15681 127.0.0.1:15682 127.0.0.1:15683 127.0.0.53%lo:53 127.0.0.54:53 [::]:22 [::]:443 [::]:80 
+== who connects in (established ssh, remote addresses only)
+      3 114.94.106.60
+      2 172.19.35.9
+      3 39.182.0.157
+      1 47.114.113.152
+== outbound tunnels in compose (service: command summary)
+4:  db-tunnel:
+13:      PEER_SSH_HOST: ${PEER_SSH_HOST:?Set PEER_SSH_HOST}
+14:      PEER_SSH_PORT: ${PEER_SSH_PORT:-3535}
+16:      REMOTE_DB_PORT: ${REMOTE_DB_PORT:-15432}
+17:      REMOTE_BATCH_DB_PORT: ${REMOTE_BATCH_DB_PORT:-15433}
+18:      REMOTE_API_PORT: ${REMOTE_API_PORT:-15681}
+19:      # PEER_SSH_HOST may be a routing-internal address (VPN/overlay IP) that
+24:      PEER_SSH_HOST_KEY_ALIAS: ${PEER_SSH_HOST_KEY_ALIAS:-}
+27:      - ${PEER_KNOWN_HOSTS_PATH:?Set PEER_KNOWN_HOSTS_PATH}:/run/secrets/known_hosts:ro
+29:    # 对端拒绝**时同样成立。2026-09-30~10-08 就是这样：db-tunnel 顶着
+46:  db-batch-tunnel:
+55:      PEER_SSH_HOST: ${PEER_SSH_HOST:?Set PEER_SSH_HOST}
+56:      PEER_SSH_PORT: ${PEER_SSH_PORT:-3535}
+58:      REMOTE_DB_PORT: ${REMOTE_BATCH_DB_PORT:-15433}
+59:      LOCAL_DB_BIND_PORT: 5433
+62:      PEER_SSH_HOST_KEY_ALIAS: ${PEER_SSH_HOST_KEY_ALIAS:-}
+65:      - ${PEER_KNOWN_HOSTS_PATH:?Set PEER_KNOWN_HOSTS_PATH}:/run/secrets/known_hosts:ro
+90:      db-tunnel:
+93:      - "127.0.0.1:${PEER_QUANT_PORT:-15682}:8000"
+95:      PGHOST: db-tunnel
+114:      QUANT_SHARED_READ_API_BASE_URL: http://db-tunnel:5681
+158:      db-tunnel:
+163:      - "127.0.0.1:${PEER_N8N_PORT:-15678}:5678"
+166:      DB_POSTGRESDB_HOST: db-tunnel
+trading-hareness-peer_peer_quant_data: 132K agent_backfill backfill_boards.py boards.log feat.py feat.sh feat2.log feat2.py iit.log 
+trading-hareness-peer_peer_quant_research_data: 8.0K owner-peer-contract.json 
+0
+172.19.35.9 
+ls: cannot access '/home/stockpeer/wheelhouse': No such file or directory
+5
+ULTRATOUF-quant-cloud-peer-tunnel-202610
+stockpeer@ultratouf
+stockpeer@ultratouf
+stockpeer-self-tunnel
+quant-edge-to-owner
+no-passwordless-sudo
+default
+stockbrain
+LISTEN 0      511          0.0.0.0:443        0.0.0.0:*                                          
+LISTEN 0      511          0.0.0.0:80         0.0.0.0:*                                          

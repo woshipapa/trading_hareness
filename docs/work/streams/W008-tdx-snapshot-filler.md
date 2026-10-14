@@ -1,13 +1,13 @@
 # W008 通达信补主行情快照的缺口并作备用
 
 - state: released
-- holder: Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13
+- holder: Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14
 - goal: 主数据源（同花顺）某一分钟缺了或出错时，用通达信的全市场快照补上并带来源标记；不把通达信变成主数据源
 - plan: docs/work/plans/tdx-live-snapshot-fallback.md
 - branch: main
 - head: e8cb8dbf
 - release: owner-code-20261013-05
-- next: 10 月 14 日 09:16 核对新服务器上两条采集循环按新节拍落库（见 Due）；然后从 main 建 `tdx-live-snapshot-fallback` 工作区派工 6（B1 的读取链）。当日汇总从 10 月 14 日起才有可判的分钟：收盘后跑一次并把输出存到 `docs/work/probes/`，记为五个交易日观察的第 1 天
+- next: 等独立评审返回（Running）。逐条对代码核实，修掉高和中的（尤其是“缺键按可用”那一条），复跑 `COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path` 和 `python -m pytest scripts -q`，把 main 合进分支再 `--no-ff` 合回 main，回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`（先删 `frontend/node_modules` 符号链接）。发布 B 不随合并立刻做：它要等发布 A 之后五个完整交易日的当日汇总（从 10 月 15 日数起，每天收盘后跑一次并把输出存进 `docs/work/probes/`）。
 - updated: 2026-10-13
 
 ## Requirements
@@ -91,6 +91,10 @@
 - 2026-10-13 21:14 第二个分支合并：评审两轮（四条发现都已修），合并提交 c30dd28d（9 个文件，+196 −20），分支末端 ee89a50e 上主会话复跑 3050 项测试通过。合并后用主线自己的分类器看 26170231 到当前提交：2 个运行时文件、其余跳过，也就是纯代码发布（`scripts/tdx-promote.py` 不再触发全量）。工作区回收被脚本拒绝一次（十分钟内还有 Codex 会话活动），稍后重试：`bash ~/codebase/agent-skills/own/codex-flow/scripts/finishworktree.sh /Users/papa/codebase/n8n tdx-promote-gate --apply`。
 
 - 2026-10-13 22:40 第二次发布：用户 22:38 执行 `bash ~/codebase/n8n/state/rel05.sh --apply`，`owner-code-20261013-05`（源 e8cb8dbf）在新服务器生效，纯代码、2 个运行时文件。核对：`release-sync-status.sh` ALL CHECKS PASSED（`docs/work/probes/2026-10-13-release-status-05.out.txt`）；两个容器实际导入的是 `owner-code-20261013-05`，目录里有 `min_share`；发布后主机可用内存 323 MB。已记入 `docs/RELEASE_SYNC_47.md`。发布前出过一个岔子：改默认地址的提交动了两个被分类规则判为全量的手工脚本，发布计划变成全量，已撤回那两处（e8cb8dbf），由此开了 W012。
+- 2026-10-14 11:11 新会话 4a420907 接手本记录（旧会话已无动静）。用户 11:02：「你现在owner修复好之前，把代码部分现在需要做的升级完善都做完」。B033（两条通达信数据流进冷热分层）已随一批小修合进 main（c5da5fa0）。B1 开工：建工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`，派给只在该工作区里干活的 Claude 子代理（opus；用户 10 月 13 日夜说 Codex 太慢，不再用它），派工内容是方案的 B1 一节原文，要求两个提交、不碰 B2。09:16 的核对没做：主机连不上。
+- 2026-10-14 11:17 主机 11:15 恢复后补做了 Due 里 09:16 那条核对（FACTS F031，探针 `docs/work/probes/2026-10-14-session-capture-gaps.py`）：存下的 17 分钟里主源都在第 50 秒、通达信在第 52 秒（一份在第 0 秒，没查是哪一分钟），节拍与发布 A 一致；但今天只有 09:15–09:20、10:45、11:06 之后有文档，中间是主机故障（B058），不是采集循环的问题。今天不能算五个交易日观察里的一天；观察从下一个完整交易日（10 月 15 日）重新数。
+- 2026-10-14 11:29 B1 交回（99f8d5de、ae3800aa）。实现者报告：发布路径测试 `Ran 3147 tests in 41.877s OK (skipped=2)`、`pytest scripts -q` → `380 passed, 3 skipped`、数据源目录校验 0 个问题；主会话还没有复跑，也没有读 diff（放到 B2 交回后与整条分支一起验收）。它指出的要点：**只有 B1 的分支不能合并**——主源失败时通达信补的那一分钟会交给所有使用方，而使用方还当它是主源（派生资金流标成 `fuyao_ths_derived`，是规则可用的；落库也记在 `fuyao_ths` 名下），要 B2 做完才安全。它与方案不同或自己定的地方：限时等待用 `asyncio.wait` 而不是 `wait_for(shield)`（后者在 Python 3.14 下会把迟到的失败报成警告；镜像是 3.12，行为相同）；名册读取加了按文档元数据过滤主源的条件；链抛出的是 `FuyaoProviderError` 的子类；主源的 `decision_eligible` 写死为真（目录里那条绑定的默认值是假，照读会改变主源的行为）；共享读取器在 TTL 过后仍留着最后一份快照（约 5,580 行常驻内存）。B2 已派给另一个子代理（同一工作区），派工里带上了这些要点。
+- 2026-10-14 12:00 B2 交回（af6f1321、30c055ec、fd0d30e2）。主会话在工作区复跑：发布路径测试 → `Ran 3201 tests in 42.718s OK (skipped=2)`；`python -m pytest scripts -q` → `380 passed, 3 skipped`；`git diff --check c5da5fa0 HEAD` 无输出；整条分支 28 个文件、+2,146 −135。主会话还没有逐段读 diff。实现者报告里要定的一点：状态里没有 `decision_eligible` 这个键时按“可用”处理（存在时必须恰为真），理由是现有的桩和测试不带这个键；这是往放行方向的默认，交给独立评审判断是否必须收紧。它列出的方案清单之外、没有改的读取方（情绪采集器把来源写死为主源标签、估值任务、龙头资金流、十日轮动影子、联动挖掘读任意来源的锚点等）也交给评审逐个判断。评审已起（见 Running）。
 
 ## Waiting on the user
 
@@ -115,10 +119,14 @@
 - [x] 2026-10-13 评审第 2 轮 → APPROVED（2026-10-13 21:14）
 
 - [x] 2026-10-13 13:50 主会话派出的接手 agent 在做：查清四个前置问题（只读）、把方案改到第 3 版、送 Codex 审查（最多三轮）、更新本记录并提交。结束标志：它交回最终方案和待用户批准的问题，本记录的 Plan 一节写了各轮审查结果。之后：主会话把方案转给用户请批准。该 agent 挂在主会话上，主会话结束它就停：接手者看本记录的 Log 和方案文件的修订说明，从没做完的那一步继续。 → 2026-10-13 15:25 做完交回：方案第 3 版、三轮审查、待批准的问题都在本记录里；没做成的只有收盘后重跑容差探针（见 Due）。
+- [x] 2026-10-14 11:11 Claude 子代理实现 B1（派工 6、7），挂在会话 4a420907 上，会话结束它就停。工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`，分支 `codex/tdx-live-snapshot-fallback`。结束标志：主会话收到完成通知；分支在 c5da5fa0 之后有两个提交且 `git status --short` 只剩 `frontend/node_modules`。之后：主会话复跑 `COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path` 并读 diff。新会话接手而它没做完时：看分支上已有的提交，按方案 B1 一节补完剩下的。 → 11:24 交回，提交 99f8d5de、ae3800aa（2026-10-14）
+
+- [x] 2026-10-14 11:29 Claude 子代理实现 B2（派工 8、9、10），同一工作区和分支，挂在会话 4a420907 上。结束标志：主会话收到完成通知；分支在 ae3800aa 之后有三个提交。之后：主会话复跑验收命令、读 diff，再起一个独立评审看整条分支（`git diff main...codex/tdx-live-snapshot-fallback`），修完才合并。新会话接手而它没做完时：看分支已有的提交，按方案 B2 一节补完。 → 交回，提交 af6f1321、30c055ec、fd0d30e2（2026-10-14）
+- [ ] 2026-10-14 12:00 独立评审整条分支（只读 Claude 子代理，opus，挂在会话 4a420907 上）：范围 `git diff c5da5fa0 HEAD`，重点是通达信补的那一分钟有没有路径在绑定未放行时进到信号、纸面执行或决策报价。报告写到会话草稿目录的 `review_tdx_fallback.md`，返回后复制到 `docs/work/probes/2026-10-14-tdx-fallback-review.md`。结束标志：主会话收到完成通知。新会话接手而报告不在时，重新起一个，范围同上。
 
 ## Due
 
-- [ ] 2026-10-14 09:16 发布后第一个交易时段：核对两条采集循环按新节拍落库。只读查 owner（探针写法见 `docs/work/README.md`）：`quant.raw_market_observations` 里当天 `fuyao_ths` / `a_share_minute_cross_section` 和 `tdx_public` / `a_share_minute_cross_section_shadow` 的 `effective_at`，09:15 起每分钟各一份、秒数稳定（主源在第 50 秒之后几秒、通达信在第 52 秒之后），没有漏分钟。异常（没有文档、或漏得比原来多）立刻告诉用户：回滚命令是把 `owner-code-20261013-03` 重新发布，但 08:30–11:30 是不能发布的窗口，要用户决定是否破例。收盘后跑当日汇总看可判分钟数和是否达标，记为 5 个交易日观察的第 1 天。 2026-10-13 20:30 补充：对方当天把量化服务迁到了新服务器（BACKLOG B041）。这条核对要走新的 owner 读路径；探针的调用行用的是 `.env.local` 里的 `LONGHU_*`，B041 完成后自然指向新主机。新主机只有 1 GB 内存：在容器里跑的探针只查计数和时间，不要读文档正文。
+- [x] 2026-10-14 09:16 发布后第一个交易时段：核对两条采集循环按新节拍落库。只读查 owner（探针写法见 `docs/work/README.md`）：`quant.raw_market_observations` 里当天 `fuyao_ths` / `a_share_minute_cross_section` 和 `tdx_public` / `a_share_minute_cross_section_shadow` 的 `effective_at`，09:15 起每分钟各一份、秒数稳定（主源在第 50 秒之后几秒、通达信在第 52 秒之后），没有漏分钟。异常（没有文档、或漏得比原来多）立刻告诉用户：回滚命令是把 `owner-code-20261013-03` 重新发布，但 08:30–11:30 是不能发布的窗口，要用户决定是否破例。收盘后跑当日汇总看可判分钟数和是否达标，记为 5 个交易日观察的第 1 天。 2026-10-13 20:30 补充：对方当天把量化服务迁到了新服务器（BACKLOG B041）。这条核对要走新的 owner 读路径；探针的调用行用的是 `.env.local` 里的 `LONGHU_*`，B041 完成后自然指向新主机。新主机只有 1 GB 内存：在容器里跑的探针只查计数和时间，不要读文档正文。 → 主机故障到 11:15，恢复后补做：节拍对，当天文档不全，见 Log 11:17（2026-10-14）
 
 - [x] 2026-10-13 16:00 重跑容差探针取全天的表 → 17:33 完成（2026-10-13）：全天通达信 238 份、主源 244 份；数据时刻间隔 15 秒以内的 19 个分钟（14:17 那次是 15 个），19 个都达到“95% 的股票相差 0.5% 以内”，最低仍是 97.46%，规则的取值站得住。当天按“至少 30 个可判分钟”不算达标，这是修采集节拍之前的数据，间隔中位数 46 秒；P1 上线后两边差 2 秒，可判分钟会多得多。输出已覆盖到 `docs/work/probes/2026-10-13-tdx-tolerance.out.txt`，FACTS F016 已改；方案里引用的“15 个分钟”是 14:17 的数，方案正文没有改
 

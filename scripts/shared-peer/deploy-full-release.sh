@@ -10,6 +10,8 @@
 # .env symlink into ~/.secrets/owner; the tunnel is left alone; the main service
 # is healthy before the scheduler starts; and the rollback point is read from
 # the host at release time, not remembered. Any failed check rolls back.
+# The image is built on the host: with under 700 MB available there the release
+# refuses before it changes anything (exit 7) unless RELEASE_ALLOW_BUILD_ON_HOST=1.
 set -euo pipefail
 
 usage() {
@@ -66,9 +68,10 @@ grep -qx 'trading_hareness/scripts/shared-peer/activate-peer-release.sh' <<<"$li
 grep -qx 'trading_hareness/scripts/shared-peer/release-lock.sh' <<<"$listing" \
   || { echo "refusing: $target_sha predates the guard lock; release a newer commit" >&2; exit 5; }
 
-owner_host="${OWNER_PEER_HOST:-stockpeer@118.178.133.37}"
-owner_port="${OWNER_PEER_PORT:-22}"
-owner_key="${OWNER_PEER_SSH_KEY:-$HOME/.ssh/stockpeer_ed25519}"
+. "$tool_root/scripts/shared-peer/owner-host.sh"
+owner_host="$OWNER_PEER_HOST"
+owner_port="$OWNER_PEER_PORT"
+owner_key="$OWNER_PEER_SSH_KEY"
 
 # --- schema gate ----------------------------------------------------------------
 # Code must never run ahead of its schema. schema-gate.sh holds the rules; the
@@ -85,10 +88,24 @@ remote_archive="/tmp/trading_hareness-${release_label}.tar"
 scp -q -i "$owner_key" -P "$owner_port" "$archive" "$owner_host:$remote_archive"
 
 ssh -i "$owner_key" -p "$owner_port" "$owner_host" \
-  "TARGET_SHA='$target_sha' RELEASE_LABEL='$release_label' ARCHIVE='$remote_archive' bash -s" <<'REMOTE'
+  "TARGET_SHA='$target_sha' RELEASE_LABEL='$release_label' ARCHIVE='$remote_archive' ALLOW_BUILD_ON_HOST='${RELEASE_ALLOW_BUILD_ON_HOST:-}' bash -s" <<'REMOTE'
 set -euo pipefail
 export XDG_RUNTIME_DIR="/run/user/$(id -u)" DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
 IMAGE=trading-hareness-peer-quant-research
+
+# --- memory guard, before anything changes -------------------------------------
+# This release builds the image on this host while the services keep running. The host that took over on
+# 2026-10-13 has 894 MB; a build that pushes it into swap stalls the capture loops and the database tunnels.
+available_mb="$(awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo)"
+swap_free_mb="$(awk '/^SwapFree:/ { print int($2 / 1024) }' /proc/meminfo)"
+echo "host memory: ${available_mb} MB available, ${swap_free_mb} MB swap free"
+if [ "${available_mb:-0}" -lt 700 ] && [ "$ALLOW_BUILD_ON_HOST" != 1 ]; then
+  echo "refusing: under 700 MB available, an image build on this host is not safe." >&2
+  echo "  Nothing was changed. If the build must happen here, in a window the owner agreed to," >&2
+  echo "  rerun with RELEASE_ALLOW_BUILD_ON_HOST=1." >&2
+  rm -f "$ARCHIVE"
+  exit 7
+fi
 STATE="$HOME/.local/state/owner-release"
 mkdir -p "$STATE"
 

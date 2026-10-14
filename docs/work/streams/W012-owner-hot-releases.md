@@ -5,7 +5,7 @@
 - goal: owner 的量化服务只保留一个镜像，只有镜像自己的输入变了（依赖、Dockerfile）才重建；其余改动，包括现在要走“全量发布”的 compose、在主机上执行的脚本、迁移文件和分类规则不认识的路径，都在现有镜像上不构建地发布
 - plan: docs/work/plans/owner-hot-releases.md
 - branch: main
-- head: 2a69145b
+- head: 556a9a2c
 - next: A 段已合进本地 main（86831925），随 W006 的发布一起到 owner（见 W006 的 Waiting on the user）。接着：(1) owner 主机恢复后（BACKLOG B058），发布之前只读核对主机上 `scripts/backfill-full-market-daily.sh` 和 `scripts/fill-longhu-sector-membership.py` 与目标提交的是否相同（`sha256sum ~/trading_hareness/scripts/<名字>` 对 `git show <sha>:scripts/<名字> | shasum -a 256`）：这两个脚本的目录登记在本线改成了 `47owner`，分类会把它们报成 `full` 而拒绝纯代码发布。相同就照 `state/rel07.sh` 里已写好的 `RELEASE_RELABELLED_CURRENT` 放行；不同就告诉用户（要么手工把这两个文件拷上主机，要么做一次全量发布，后者要在 894 MB 的主机上构建镜像），并把 `rel07.sh` 里那一行去掉。(2) 第一次用新规则的发布之后，把检查模式和发布的输出存进 `docs/work/probes/`，状态才改 `released`。(3) 回收工作区 `/Users/papa/codebase/.codex-wt/n8n-owner-hot-a`。(4) 之后才是 B 段（Steps 里的 1–4），先为它建分支。
 - updated: 2026-10-14
 
@@ -63,6 +63,9 @@
 - 2026-10-14 10:44 correction: 10 月 14 日 00:37 那条说 `fill-longhu-sector-membership.py` “归跳过…要用新版本时从工作站拷过去”。`OPERATIONS.md:374-377` 写的做法是在 peer 上从主机目录 `docker cp`，所以它属于主机的目录树；已按上面第 1 条改正。
 - 2026-10-14 10:57 A 段合并：main 合进分支（919aa056）复跑通过后 `--no-ff` 合回 main（86831925）。这一轮评审修正没有第二个评审者看过；合并的依据是用户 10 月 13 日 17:02 的话（W006 的 Requirements：两条实现线做到可发布为止）。
 - 2026-10-14 10:59 correction: 本会话上面两条最初写的时刻（10:40、12:10）是估的；已按提交时间改成 10:31、10:44。
+- 2026-10-14 11:14 用户 11:02 要求 owner 修好之前把现在能做的代码都做完。B 段里与主机无关、今天就有用的一项先做了：全量发布在构建镜像之前读主机的可用内存，不足 700 MB 就拒绝（退出码 7，此时什么都没改），放行要带 `RELEASE_ALLOW_BUILD_ON_HOST=1`（提交 599ee1e3，合进 main 556a9a2c；`python -m pytest scripts -q` → `382 passed, 3 skipped`，其中一条测试把这段检查拿出来对着假的 `/proc/meminfo` 实际执行）。700 这个数是主会话定的，方案没有给数；894 MB 的主机上它总是拒绝，这是有意的。B 段其余部分（主机目录树的不构建发布）没有开工：方案写明要等 A 段用过一阵、并先把第 2 轮审计的 11 条并进方案；切换脚本也只能在主机上演练。
+- 2026-10-14 11:17 主机恢复后做了 next 第 (1) 点的只读核对：主机上那两个脚本与 main 上的内容相同（FACTS F032）。所以这次发布可以用 `RELEASE_RELABELLED_CURRENT` 放行这两个脚本；`state/rel07.sh` 在每次运行时自己再比一遍。主机内存已是 3,499 MB（F030），全量发布的内存检查在它上面会通过。
+- 2026-10-14 11:42 A 段的第一次真实使用：用户执行 `state/rel07.sh`（检查，再 `--apply`），`owner-code-20261014-07`（`861ecbfa`）生效。检查模式的输出：两个登记跨线的脚本 `host copy is the commit's`、`schema: owner database 20261010_ow0121, release head 20261010_ow0121: at_head`、23 个运行时文件、其余为跳过，没有 `full`、`image`、`unclassified`。状态脚本 ALL CHECKS PASSED（`docs/work/probes/2026-10-14-release-status-07.out.txt`）。检查模式和发布的终端输出在用户的终端里，没有另存成文件；要点已抄在这里和发布表里。
 
 ## Waiting on the user
 

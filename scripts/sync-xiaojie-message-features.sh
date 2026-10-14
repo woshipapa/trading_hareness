@@ -14,9 +14,10 @@ set -euo pipefail
 
 edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
 edge_key="${RELAY_EDGE_SSH_KEY:-$HOME/.ssh/feishu_relay_edge_ed25519}"
-peer_host="${PEER_SSH_HOST:-stockpeer@118.178.133.37}"
-peer_port="${PEER_SSH_PORT:-22}"
-peer_key="${PEER_SSH_KEY:-$HOME/.ssh/stockpeer_ed25519}"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/shared-peer/owner-host.sh"
+peer_host="${PEER_SSH_HOST:-$OWNER_PEER_HOST}"
+peer_port="${PEER_SSH_PORT:-$OWNER_PEER_PORT}"
+peer_key="${PEER_SSH_KEY:-$OWNER_PEER_SSH_KEY}"
 peer_container="${PEER_CONTAINER:-trading-hareness-peer-quant-research-scheduler-1}"
 peer_app_dir="${PEER_APP_DIR:-/app/hotfix/current}"
 # 小杰夜报 (history relay) and the 小杰交流 group.

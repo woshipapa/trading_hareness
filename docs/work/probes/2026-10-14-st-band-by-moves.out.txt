@@ -1,0 +1,11 @@
+  2026-05: 2588 ST main-board bars, 18 moved more than 5.5%, 9 closed up more than 9.5%, largest 0.1008 / -0.0999
+  2026-06: 3010 ST main-board bars, 14 moved more than 5.5%, 5 closed up more than 9.5%, largest 0.1013 / -0.0833
+  2026-07: 3322 ST main-board bars, 474 moved more than 5.5%, 80 closed up more than 9.5%, largest 0.1034 / -0.1026
+  2026-08: 3034 ST main-board bars, 224 moved more than 5.5%, 54 closed up more than 9.5%, largest 0.1040 / -0.1019
+  2026-09: 1883 ST main-board bars, 95 moved more than 5.5%, 21 closed up more than 9.5%, largest 0.1047 / -0.1039
+  2026-10: 569 ST main-board bars, 42 moved more than 5.5%, 9 closed up more than 9.5%, largest 0.1003 / -0.1071
+  302132.SZ longhuvip_l2history_pankou band 0.20: 52 bars 2026-04-15 .. 2026-09-30, largest move 0.1078
+  302132.SZ tushare_primary band 0.20: 5 bars 2026-08-14 .. 2026-08-31, largest move 0.0241
+  302132.SZ tushare_super_get band 0.20: 8 bars 2026-08-18 .. 2026-09-03, largest move 0.0506
+  302132.SZ longhuvip_composite band 0.10: 17 bars 2026-09-01 .. 2026-10-13, largest move 0.0819
+  302132.SZ tushare_super_get band 0.10: 4 bars 2026-09-16 .. 2026-09-22, largest move 0.0070

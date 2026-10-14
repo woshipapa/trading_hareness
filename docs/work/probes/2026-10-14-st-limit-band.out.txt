@@ -1,0 +1,33 @@
+now (database): 2026-10-14 11:29:26.654728
+  ST main board 2026-05 band 0.05 bar from longhuvip_l2history_pankou: 2479 bars, 138 stocks
+  ST main board 2026-05 band 0.10 bar from longhuvip_l2history_pankou: 108 bars, 6 stocks
+  ST main board 2026-05 band 0.06 bar from longhuvip_l2history_pankou: 1 bars, 1 stocks
+  ST main board 2026-06 band 0.05 bar from longhuvip_l2history_pankou: 2891 bars, 139 stocks
+  ST main board 2026-06 band 0.10 bar from longhuvip_l2history_pankou: 119 bars, 6 stocks
+  ST main board 2026-07 band 0.10 bar from tushare_primary: 2906 bars, 145 stocks
+  ST main board 2026-07 band 0.05 bar from tushare_primary: 416 bars, 139 stocks
+  ST main board 2026-08 band 0.10 bar from tushare_primary: 2032 bars, 145 stocks
+  ST main board 2026-08 band 0.10 bar from tushare_super_get: 858 bars, 145 stocks
+  ST main board 2026-08 band 0.11 bar from tushare_primary: 1 bars, 1 stocks
+  ST main board 2026-09 band 0.10 bar from tushare_super_get: 302 bars, 144 stocks
+  ST main board 2026-09 band 0.05 bar from longhuvip_composite: 709 bars, 143 stocks
+  ST main board 2026-09 band 0.10 bar from longhuvip_l2history_pankou: 165 bars, 143 stocks
+  ST main board 2026-09 band 0.05 bar from tushare_super_get: 554 bars, 142 stocks
+  ST main board 2026-09 band 0.10 bar from longhuvip_composite: 6 bars, 2 stocks
+  ST main board 2026-09 band 0.04 bar from longhuvip_composite: 1 bars, 1 stocks
+  ST main board 2026-10 band 0.05 bar from longhuvip_composite: 568 bars, 143 stocks
+  ST main board 2026-10 band 0.06 bar from longhuvip_composite: 1 bars, 1 stocks
+  limits table 2026-09 longhuvip_composite band 0.05: 2362 rows
+  limits table 2026-09 tushare band 0.10: 1697 rows
+  limits table 2026-09 tushare_super_sdk band 0.10: 288 rows
+  limits table 2026-09 longhuvip_composite band 0.10: 161 rows
+  limits table 2026-09 tushare band 0.05: 12 rows
+  limits table 2026-09 tushare band 0.11: 2 rows
+  limits table 2026-09 longhuvip_composite band 0.04: 1 rows
+  limits table 2026-10 longhuvip_composite band 0.05: 560 rows
+  limits table 2026-10 tencent_free band 0.10: 418 rows
+  limits table 2026-10 tencent_free band 0.05: 8 rows
+  limits table 2026-10 longhuvip_composite band 0.06: 1 rows
+  limits table 2026-10 tencent_free band 0.11: 1 rows
+  302132.SZ band 0.20: 65 bars, 2026-04-15 .. 2026-09-30
+  302132.SZ band 0.10: 21 bars, 2026-09-01 .. 2026-10-13

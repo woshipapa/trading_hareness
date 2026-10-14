@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ("scripts/release_plan.py", "scripts/release_window.py", "scripts/shared-peer/classify-owner-paths.sh",
+         "scripts/shared-peer/owner-host.sh",
          "config/release-windows.json", "quant-service/scripts/migration_lineage.py", "scripts/CATALOG.md")
 MIGRATIONS = "quant-service/migrations/versions"
 

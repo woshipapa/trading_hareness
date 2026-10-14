@@ -1,0 +1,12 @@
+pool 93 scored rows 67 first ['000668.SZ', '002917.SZ', '002322.SZ']
+  auction_bid_daily: 93 documents, stored 11:07:59 .. 11:10:38
+  auction_curve_daily: 95 documents, stored 10:45:41 .. 11:07:59
+  auction_pool_snapshot: 42 documents, stored 09:15:05 .. 09:21:54
+  last pool snapshot: 2026-10-14T09:21:45+08:00 failed rows 0
+  curve of 000530.SZ points 68
+  first two: [{"time": "09:15:00", "price": 6.300000190734863, "symbol": "000530.SZ", "matched_raw": 5389, "unmatched_raw": 2283313, "unmatched_side": "B"}, {"time": "09:15:09", "price": 6.300000190734863, "symbol": "000530.SZ", "matched_raw": 24719, "unmatched_raw": 2790851, "unmatched_side": "B"}]
+  last two: [{"time": "09:24:48", "price": 6.300000190734863, "symbol": "000530.SZ", "matched_raw": 47355, "unmatched_raw": 1676795, "unmatched_side": "B"}, {"time": "09:24:57", "price": 6.300000190734863, "symbol": "000530.SZ", "matched_raw": 47932, "unmatched_raw": 1679682, "unmatched_side": "B"}]
+total 3 timestamp 1791948148004
+now from the provider: auction_phase closed data_status final keys ['auction_phase', 'data_status', 'item', 'timestamp', 'total']
+  items 3
+  first item: {"thscode": "000668.SZ", "ticker": "000668", "name": "荣丰控股", "auction_price": 22.62, "auction_pct": 10.0195, "auction_volume": 1389.0, "auction_amount": 3141918.0, "auction_unmatched": 13170.0, "auction_turnover_pct": 0.0946, "auction_yesterday_ratio_pct": 15.4385, "auction_volume_ratio": 0.6466, "pre_close_price": 20.56, "open_price": 22.62, "last_price": 22.62, "float_market_cap": 3321563551.8}

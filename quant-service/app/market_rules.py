@@ -18,8 +18,8 @@ def cn_today(now: datetime | None = None) -> date:
 
 # Main-board risk-warning (ST/*ST) stocks moved from a 5% to a 10% daily band
 # when the revised SSE/SZSE trading rules took effect on Monday 2026-07-06.
-# Open (BACKLOG B009): the limits stored for 2026-10-12 showed 141 main-board ST stocks at 5% and the one 302xxx
-# code not at 20% (decision 0018). Neither is changed here until the stored limits are read again by source.
+# Confirmed on the owner's bars on 2026-10-14 (FACTS F034): since July main-board ST stocks close up to 10% from
+# the previous close. The 5% limits stored for them from 2026-09-16 are the wrong ones (BACKLOG B009).
 MAIN_BOARD_ST_TEN_PERCENT_FROM = date(2026, 7, 6)
 # ChiNext uses 300/301/302 and STAR uses 688/689; both keep a 20% band for
 # ST names too, since the ST 5% band was only ever a main-board rule.
