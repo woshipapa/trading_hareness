@@ -54,6 +54,13 @@ def _broken_board_symbols(database: Any, previous: date | None) -> list[str]:
     return list(dict.fromkeys(str(row["symbol"]) for row in rows))
 
 
+def table_stored(database: Any, session_date: date) -> bool:
+    """Whether the session already has its 09:25 table."""
+    from . import derived_daily_readings
+    with database.transaction() as connection:
+        return bool(derived_daily_readings.stored_days(connection, "auction_open_desk_daily", session_date, session_date))
+
+
 def read_pool(database: Any, session_date: date) -> list[str]:
     """Build the prior-risk, broken-board, and enabled-watch pool."""
     previous, reading = _previous_reading(database, session_date)
