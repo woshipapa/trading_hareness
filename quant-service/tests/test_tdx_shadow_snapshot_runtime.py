@@ -1,4 +1,6 @@
 import asyncio
+import dataclasses
+import os
 import threading
 import unittest
 from contextlib import contextmanager
@@ -311,6 +313,51 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertNotIn("normalized", calls[0][0])
         self.assertIn("payload", calls[0][0])
 
+    def test_main_roster_query_passes_over_a_minute_another_source_filled(self):
+        from app.minute_cross_section import latest_main_total
+
+        calls = []
+
+        class Connection:
+            def execute(self, sql, params):
+                calls.append((" ".join(sql.split()), params))
+                return SimpleNamespace(fetchone=lambda: None)
+
+        self.assertIsNone(latest_main_total(Connection()))
+        sql, params = calls[0]
+        self.assertIn("provider_key=%s", sql)
+        self.assertIn("COALESCE(payload->'metadata'->>'provider_key', %s)=%s", sql)
+        self.assertEqual(params, ("a_share_minute_cross_section", "fuyao_ths", "fuyao_ths", "fuyao_ths"))
+
+    def test_after_a_fallback_minute_the_shadow_has_no_reference(self):
+        from app import minute_cross_section
+        from app.all_a_snapshot_sources import main_source_reference
+
+        self.addCleanup(minute_cross_section._LATEST.update, observed_at=None, rows=None)
+        remembered_at = NOW - timedelta(seconds=2)
+        minute_cross_section.remember(remembered_at, [FUYAO_ROW | {
+            "price_source": "tdx_public_all_a_snapshot",
+            "snapshot_metadata": {"provider_key": "tdx_public", "fallback_for": "fuyao_ths"},
+        }])
+        self.assertIsNotNone(minute_cross_section.recent(NOW))
+        self.assertIsNone(main_source_reference(minute_cross_section.recent(NOW)))
+
+        persisted = []
+        runtime, _ = self.dependencies(persisted=persisted)
+        runtime = TdxShadowSnapshotRuntime(dataclasses.replace(
+            runtime.deps, recent_reference=lambda now: main_source_reference(minute_cross_section.recent(now)),
+        ))
+        result = asyncio.run(runtime.capture(NOW))
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(persisted[0][4]["status"], "no_reference")
+        self.assertIsNone(persisted[0][4]["comparison"])
+
+        minute_cross_section.remember(remembered_at, [FUYAO_ROW | {
+            "snapshot_metadata": {"provider_key": "fuyao_ths", "age_seconds": 20.0},
+        }])
+        asyncio.run(runtime.capture(NOW))
+        self.assertEqual(persisted[1][4]["status"], "compared")
+
     def test_data_gap_uses_shadow_available_time_and_reference_cache_age(self):
         from app.all_a_snapshot_sources import project_tdx_snapshot_rows
         from app.tdx_shadow_snapshot_runtime import _comparison_row
@@ -483,3 +530,39 @@ class TdxShadowSummaryTests(unittest.TestCase):
         self.assertEqual(result["worst_price_within_one_tick"], 1.0)
         self.assertEqual(result["median_volume_ratio"], 1.01)
         self.assertEqual(result["largest_seconds_apart"], 2.0)
+
+
+@unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
+class MainRosterStoredDocumentTests(unittest.TestCase):
+    """The roster against stored documents: a fallback document does not change it."""
+
+    FIRST = datetime(2099, 1, 5, 2, 0, tzinfo=timezone.utc)
+
+    def test_a_fallback_document_does_not_change_the_roster(self):
+        from app.main import db
+        from app.minute_cross_section import latest_main_total, persist_document
+
+        def cleanup():
+            with db.transaction() as connection:
+                connection.execute(
+                    "DELETE FROM quant.raw_market_observations WHERE effective_at>=%s AND effective_at<%s",
+                    (self.FIRST, self.FIRST + timedelta(hours=1)))
+
+        def roster():
+            with db.transaction() as connection:
+                return latest_main_total(connection)
+
+        cleanup()
+        self.addCleanup(cleanup)
+        row = [{"symbol": "000001.SZ", "price": 11.73}]
+        persist_document(db, self.FIRST, row, {"provider_key": "fuyao_ths", "total": 5580})
+        self.assertEqual(roster(), 5580)
+        # Until the level1 capture stores under the snapshot's own provider, a filled minute lands
+        # in the main stream; and its own stream is never the main one.
+        fallback = {"provider_key": "tdx_public", "fallback_for": "fuyao_ths", "total": 5300}
+        persist_document(db, self.FIRST + timedelta(minutes=1), row, fallback)
+        persist_document(db, self.FIRST + timedelta(minutes=2), row, fallback, provider="tdx_public")
+        self.assertEqual(roster(), 5580)
+        # A document from before the metadata named its provider is the main source's.
+        persist_document(db, self.FIRST + timedelta(minutes=3), row, {"total": 5581})
+        self.assertEqual(roster(), 5581)

@@ -13,7 +13,9 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .all_a_snapshot_sources import compare, project_tdx_snapshot_rows, tdx_snapshot_completeness
+from .all_a_snapshot_sources import (
+    TDX_READ_TIMEOUT_SECONDS, compare, project_tdx_snapshot_rows, tdx_snapshot_completeness,
+)
 from .datasources.contracts import CapabilityEvidence
 from .datasources.catalog import SESSION_AGREEMENT_RULES
 from .error_detail import safe_error_detail
@@ -30,7 +32,6 @@ SHADOW_PROVIDER = "tdx_public"
 SHADOW_CAPABILITY = "a_share_minute_cross_section_shadow"
 AGREEMENT_PROVIDER = "local_derived"
 AGREEMENT_CAPABILITY = "all_a_snapshot_source_agreement"
-TDX_READ_TIMEOUT_SECONDS = 20.0
 SESSION_GATE_TIMEOUT_SECONDS = 10.0
 # The shadow boundary has one worker and no queue: a step that outlives its deadline keeps the worker
 # until its thread returns, and the next step is refused. Both are the same outcome for a capture.

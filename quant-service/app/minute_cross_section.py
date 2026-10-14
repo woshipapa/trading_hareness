@@ -236,13 +236,20 @@ def latest(connection: Any, day: date | None = None) -> tuple[datetime, dict[str
 
 
 def latest_main_total(connection: Any) -> int | None:
+    """The upstream total of the newest minute the main source itself served.
+
+    A minute another source filled says so in its metadata and is passed over wherever it is
+    stored, so the completeness gate never measures the filler against its own count. Documents
+    from before the metadata named a provider are the main source's.
+    """
     row = connection.execute(
         """SELECT (payload->'metadata'->>'total')::int AS total
              FROM quant.raw_market_observations
             WHERE capability=%s AND symbol IS NULL AND provider_key=%s
               AND payload->'metadata'->>'total' IS NOT NULL
+              AND COALESCE(payload->'metadata'->>'provider_key', %s)=%s
             ORDER BY effective_at DESC LIMIT 1""",
-        (CAPABILITY, PROVIDER_KEY),
+        (CAPABILITY, PROVIDER_KEY, PROVIDER_KEY, PROVIDER_KEY),
     ).fetchone()
     return int(row["total"]) if row else None
 
