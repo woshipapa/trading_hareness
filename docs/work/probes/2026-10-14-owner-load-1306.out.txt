@@ -1,0 +1,7 @@
+13:03:20
+ 13:03:20 up  1:59,  8 users,  load average: 0.82, 0.38, 0.31
+trading-hareness-peer-quant-research-scheduler-1 cpu=0.11% mem=128.9MiB / 3.417GiB net=640kB / 696kB
+trading-hareness-peer-quant-research-1 cpu=44.47% mem=324.6MiB / 3.417GiB net=235MB / 202MB
+trading-hareness-peer-db-tunnel-1 cpu=0.64% mem=8.785MiB / 3.417GiB net=4.96GB / 4.84GB
+trading-hareness-peer-db-batch-tunnel-1 cpu=0.00% mem=8.125MiB / 3.417GiB net=387kB / 309kB
+eth0: rx=4293MB tx=1204MB

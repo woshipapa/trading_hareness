@@ -607,6 +607,17 @@
 - needs: 涨停池含 firstSealTime/lastSealTime/fund/amount/floatCap/turnover/brokenTimes（已有 D01），板块当日涨停家数（同 B039 的板块口径）
 - updated: 2026-10-14
 
+### B061 换到 4 核 8 GB、200 Mbps 的主机之后可以放开的限制
+
+- state: open
+- kind: follow-up
+- why: 用户 2026-10-14 13:05「我后续会升级为4c8g的服务器，200M得带宽上限，你可以看看对于我们的量化服务整体来说，那些硬编码部分或者有些功能可以升级加速」。13:03 现主机（2 核 3.5 GB）盘中一次采样（`docs/work/probes/2026-10-14-owner-load-1306.out.txt`）：负载 0.82，主服务 CPU 44%、内存 325 MiB，调度 129 MiB；db-tunnel 两小时进出各约 4.9 GB（全 A 快照经它写到 Windows 上的库）。决定速度的主要不是这台主机：每条语句约 52 毫秒的往返（库在对方工作站，经反向 SSH）和授权接口约 7.4 次/秒的上限（F027）都不随主机变快
+- how: 新主机跑满一个交易日后先量（各容器 CPU 与内存峰值、db-tunnel 流量、扫描与采集每轮耗时），再按收益从大到小放开：(1) 为内存拿掉的两个晚间阶段 `market_temperature_intraday`、`minute_panel_export` 加进晚间循环（`docs/work/plans/peer-evening-stages.md:102`），先单独量一次峰值；(2) 数据库并发：`QUANT_DB_BLOCKING_MAX_WORKERS` 主服务 8、调度 4（`deploy/shared-peer/compose.intraday-owner.yaml:46,149`，代码上限 8，`app/runtime_executors.py:131`），`QUANT_DB_POOL_MAX_SIZE` 12（上限 32，`app/database.py:1863`）——瓶颈是往返延迟，加并发比加 CPU 有用，但要先问清对方工作站上的库能承受多少连接；(3) 公共数据源：`MARKET_SNAPSHOT_PUBLIC_CONCURRENCY` 2、`REALTIME_VENDOR_MAX_WORKERS` 4、`LONGHU_MINUTE_BATCH_WORKERS` 4，受对方限流约束，按各源的限流再定，授权接口批量仍守 6/8 的规矩；(4) 单进程：两个容器各一个 uvicorn 进程，CPU 重的晚间计算（战法总结、回放、风险分）和盘中采集抢同一个 GIL，可以把晚间计算挪到单独的进程或容器；(5) 能在主机上构建镜像了（构建前内存检查 700 MB 会通过），但依赖包目录缺失（B050）；(6) 逐行写库改成批量（`owner-db-write-path` 那类问题），这一项比任何硬件都快。每一项改完记一条事实再改下一项
+- who: agent 量与改，配置改动随发布由用户执行
+- needs: W014（新主机到位）
+- found: 2026-10-14
+- updated: 2026-10-14
+
 ## Closed
 
 ### B057 龙版传媒（605577）缺的复权日线
