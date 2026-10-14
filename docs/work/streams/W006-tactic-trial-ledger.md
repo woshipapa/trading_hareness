@@ -1,12 +1,12 @@
 # W006 战法试验台（条件登记、组合成战法、卖出规则、每日总结）
 
-- state: reviewing
-- holder: Claude Code 会话 93ba6e1d（主会话；第 9 步之后自己实现，不再派给 Codex），2026-10-14
+- state: building
+- holder: Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14
 - goal: 把每条短线规则登记成条件、组合成战法并配卖出规则，每天收盘和 09:25 在当天样本上试，自动出每日总结和竞价看板，全部只作研究证据
 - plan: docs/work/plans/tactic-trial-ledger.md
 - branch: codex/tactic-trials
-- head: 92d13594
-- next: 等独立评审（只读的 Claude 子代理，报告写到会话草稿目录的 `review_tactic.md`，结论抄进本记录的 Log）返回：逐条在代码里核实，属实的修掉并复跑发布路径测试；然后把 main 合进分支再合回 main（先确认 `docs/decisions/` 里 0023 仍空着）、推送，用 `scripts/release plan <sha>` 确认 owner 仍是纯代码发布，备好 `state/rel07.sh`（owner，起点是 owner 当前的 e8cb8dbf，一次带上 W011 和本线）交给用户执行；edge 的中继和控制台各自的发布命令同样交给用户。发布后的顺序见 Due。
+- head: 910b171d
+- next: 第 16 步：把 main 合进 `codex/tactic-trials`（`docs/decisions/README.md` 里 0023 和 W012 的 0024 两行并排保留），复跑三条验收命令（见 Resume here），`--no-ff` 合回 main，请用户推送；然后按 Due 备三个单元的发布命令（短包装脚本放 `state/`）。owner 主机 10 月 14 日上午没有应答（BACKLOG B058），发布和回放都要等它恢复。发布后先回放再让晚间阶段跑（没有回放它一直是 blocked，这是有意的；回放之前早上的竞价循环也不会落库，状态是 `waiting_for_close`）。第二轮修正（a9c6efe5）没有再请评审看，主会话把这一轮的 diff 重读了一遍，又改了两处（910b171d，见 Log 12:55）。
 - updated: 2026-10-14
 
 ## Requirements
@@ -62,7 +62,7 @@
 - [x] 13 控制台页签“战法试验台” — 72c78f06 — `npm run typecheck` 退出 0；`npm run test -- --run` → `Test Files 14 passed (14)  Tests 58 passed (58)`；`npm run build` → `✓ built in 4.99s`；`npm run api:check` → `generated API types are current`（对着分支代码导出的 OpenAPI 文档）
 - [x] 14 决策记录 `docs/decisions/0023-tactic-trial-ledger.md`（0021、0022 已被 W011、W010 用掉）、架构文档一段 — 70a66e7a — 发布路径测试 → `Ran 3123 tests in 45.636s OK (skipped=2)`
 - [x] 14' 回放的内存上界：一次 20 个交易日，历史窗口按天读；命令行输出 `peak_rss_mb` — 92d13594 — 发布路径测试 → `Ran 3123 tests in 46.252s OK (skipped=2)`
-- [ ] 15 独立评审并修正（进行中，见 Running）
+- [x] 15 独立评审并修正 — 第一次评审 22 条，修正轮 4d1b9306（后端）、45643b6b（前端）、c7c97702（决定 0023）；第二次评审 0 高、3 中、8 低，修正 a9c6efe5 — 发布路径测试 → `Ran 3127 tests in 48.570s OK (skipped=2)`；前端 `Tests 61 passed (61)`、构建通过；`python -m pytest scripts -q` → `1 failed, 365 passed, 3 skipped`（B035）
 - [ ] 16 合并、推送、三个单元的发布、owner 上的回放（见 Due）
 
 ## Log
@@ -108,6 +108,40 @@
 - 2026-10-14 00:21 评审：主会话写了全部改动，所以另起一个只读的 Claude 子代理（opus）独立评审 `b04be9b9..HEAD` 里本线的文件和 `main..HEAD` 里接线的几个文件，只给代码和约束，不给主会话的结论。结果返回后记在这里。
 - 2026-10-14 00:40 correction: 上面 10 月 13 日 23:59 到 10 月 14 日 00:21 的各条，最初写的时刻是主会话估的（写成了 00:10 到 01:55），没有看钟；已按各提交的时间（`TZ=Asia/Shanghai git log --date=format-local:...`）改正。
 - 2026-10-14 00:38 顺手做了 B055 的取数：用 W013 的工具取 10 月 13 日那一天 11 个代码的分钟数据（11 次调用，经 owner 读通道 `http://127.0.0.1:15682`，非交易时段），都取到了（上证指数 242 个点、300ETF 241 个点），存进 `state/research/vshape_20261013/data/`。重跑五个研究脚本并把这一天补进报告还没做。
+- 2026-10-14 00:50 独立评审返回（报告存为 `docs/work/probes/2026-10-14-tactic-review.md`，22 条）。主会话逐条对着代码核实了前 4 条，都属实，而且都在更早交回、主会话当时接受了的基础代码里（b04be9b9 及之前）——correction: 10 月 13 日 22:40 记的“实时和回放共用 `_build_auction_reading`…改用 `scheduled_at`”是实现者的说法，主会话没有核实；实际上处置表读数里根本没有 `scheduled_at` 这个键，竞价行的基准价也读错了键。已核实的四条：
+  - 1 `refresh_auction` 读 `desk[-1]["scheduled_at"]`，而存下来的处置表（`auction_open_desk.build_auction_table`）没有这个键：早上的循环和晚间阶段的第一句都会抛 `KeyError`。
+  - 2 收盘读数里的 `reference_close` 和结算结果里的收益都是 `Decimal`，存储层用 `Json(payload)`（默认的 `json.dumps`）写不进去：`TypeError`。
+  - 3 `_settle_reading` 把前几天的收盘价换算成 `float` 再传给 `evaluate_pick`，后者拿它乘 `Decimal`：`TypeError`，从第二个晚上起每个有后续日线的选股都会碰到。
+  - 4 竞价行的 `reference_close` 读的是前一日收盘行的 `close`，那一行只有 `reference_close`：所有竞价行的基准价都是空，竞价档“持有”的结果永远是缺数据，竞价日永远结算不完。
+  测试没发现，是因为运行模块的测试把存储和 `evaluate_pick` 都模拟掉了，处置表的测试数据是手写的。其余各条（按报告编号）：5 结算文档、摘要、两两组合分三次存，中途停掉会留下“已完成但没有摘要”的一天；6 一次读入全部未结算日的出场日线，估计 80–160 MB；7 晚间总结的“当日”各节取的是当天刚存的、还没有任何结果的那一天，所以每晚都是“无数据”；8 改了登记表之后旧摘要会让总结抛错或悄悄丢历史；9 重建摘要只能靠回放，而回放会用回放读数盖掉真实读数；10 漏掉的一晚不会补，第二天的竞价读数在没有前一日收盘读数的情况下也会被存成完整；11 案例接口一次读 20 天的结算文档；12 看板的条件列里 `prev.` 条件显示成原始键；13 早上点“刷新”总结和战绩表会消失；14 等价性测试是折叠结果自己跟自己比；15–22 是读取范围、阶段顺序、竞价循环的日志与异常、排序依赖 `jsonb` 键序、无用和重复代码、日期没有下界、前端请求没有先后保护、晚间之后默认看板。评审认为没问题的：折叠与改前计算的一致性（读代码核对，误差至多 1e-19）、`deque(maxlen=60)`、分块顺序、折叠的内存、看板标签的时点、`evening` 的状态映射、竞价循环的时钟、任务登记、路由校验和中继路径、前端字段名。
+- 2026-10-14 01:00 修正轮的设计（方案第 9 版；还没写进方案文件）。主会话另外估了存储量：结算文档每份 0.3–0.8 MB，一个选股日在结算完之前每晚存一个新版本（最多约 10 个），两个时点一年约 2.5 GB，放在 owner 库的原始观测表里太多。所以改成：
+  - **不再存结算文档。** 结果随时可以由“读数 + 日线”重算。每晚对最近 12 个交易日里还没有最终摘要的选股日，逐日读它的出场日线、在内存里结算、算摘要和两两组合；一天的规则全部出场了（或者它是窗口里最老的一天、马上要移出窗口），才把摘要和两两组合各存一份（先存两两组合，后存摘要：摘要在，这一天就算定稿）。这样每个选股日每个时点只存一个版本，约 25 + 35 KB。
+  - 总结 = 窗口之前的已存摘要（按 60 个交易日一批）+ 窗口内的已存摘要和当晚现算的摘要，按日期折叠。“当日”各节用每个时点**最新的、已有结果的那个选股日**（T 日晚上就是 T-1 日的选股在 T 日的表现），节里写明选股日，另报今天自己的样本行数。
+  - 摘要带登记表指纹（战法定义、每条战法留的结果、卖出规则）。折叠时按登记表严格取数；窗口内指纹不符的自动重算，窗口外的计数报在总结里（`stale_digest_days`），用命令行 `--digests` 从已存读数和日线重建，不动读数。
+  - 回放不覆盖真实读数：某天已有非回放的读数就沿用它。回放也按天读出场日线。
+  - `evening`：最近 12 个交易日里一份收盘读数都没有时返回 `blocked`（先做历史回放）；前一交易日的收盘读数缺了就先补它（漏掉的一晚第二天补，与决定 0021 一致），再做当天的竞价读数、收盘读数、总结。
+  - 竞价读数的定格时刻取处置表那一行的存储时间（仓储新增一个读取）；竞价行的基准价取前一日收盘行的 `reference_close`；进 `evaluate_pick` 的价格一律 `Decimal`；存库前所有文档转成纯 JSON 类型。
+  - 读取：按“某日及之前最新一份”取一行；总结接口给某天时返回该日及之前最新的总结；看板默认日期是“最新收盘读数的下一个交易日”（晚间之后就是明天的看板：今天的收盘选股已有，竞价待 09:25）；案例接口逐日现算、只在该战法当天有选股时才读日线。
+  - 阶段顺序：`peer_tactic_trials` 排到最后；竞价循环只在配置了授权数据源的地方启用，交易日只问一次，数据库一直忙到 09:45 时日志写 `database_busy` 而不是 `no_table`。
+  - 纯模块（已在工作区改完、未提交）：`Tactic.combination` 一个说法；`json_safe` 公开；`registry_fingerprint`；摘要带 `registry` 和 `resolved`；折叠严格取数；卖点分档和两两组合并列时的排序固定；“当日”的出场表和卖点均值用只折叠一天的 `History`，删掉重复的 `_day_exit_tables`；条件名统一走 `_condition_name`（前一日条件加“昨日”）；删掉只有测试用的 `build_records`、`build_switch_records`、`build_sell_points`、`build_pairs`、`build_daily_summary`、`history_of`、`_latest_days`（测试自己搭折叠）；`daily_summary` 多一个 `today_rows` 参数。
+- 2026-10-14 01:00 reality: 本线不可能赶在 08:30 前发布。W011 已在线上，今晚的涨停榜、风险分等照常自动产生；战法试验台等修正轮和第二次评审完成后再发布、再回放。
+- 2026-10-14 10:30 修正轮的进度（工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`，都还没提交到这条记录写下时；见下一条的提交号）。做完的：纯模块、仓储的两个单行读取和 `read_sessions_after`、运行模块的存储与读取部分（不存结算文档；摘要定稿才存；`summarise` 自己结算窗口内未定稿的日子；`evening` 的两个阻塞条件和补前一交易日；三个读取函数自己管事务）、回放不覆盖真实读数并按天读出场日线、命令行的 `--digests`、三个接口、阶段排到最后、竞价任务的启用条件。测试：新增 `tests/test_tactic_trial_integration.py`，对着真实测试库跑通“回放（收盘、竞价）→ 用处置表自己的构建函数存一张 09:25 表 → 竞价读数 → 晚间运行 → 总结 → 看板（指定日和默认）→ 案例 → 漏掉一晚的补做 → 指纹不符的摘要计数 → 摘要重建 → 回放不覆盖真实读数”，通过；它第一次运行时还抓到一个时点问题（结算用了统计日之后的日线），已给结算加了“截至某日”。纯模块的测试改成与改前代码（b04be9b9）在同一批确定性的日子上算出的基准比较（`tests/fixtures/tactic_fold_reference_b04be9b9.json`，生成脚本 `docs/work/probes/2026-10-14-tactic-fold-reference.py`；20 条组合都有选股，四种标签都出现）：主结果的三种战绩、全部保留结果的指纹、开关表、卖点、两两组合都一致。`tests.test_tactic_trials` 10 项、`tests.test_tactic_trial_runtime` 与 `tests.test_tactic_trial_repository` 共 24 项通过。还没做：`tests/test_tactic_trial_reads.py` 改成新的函数签名；全量后端测试；前端（类型去掉三个不再下发的字段、战绩表按登记顺序、请求先后保护、总结里显示选股日、案例默认 10 天）；决定 0023 和方案改成第 9 版；提交；第二次独立评审。
+- 2026-10-14 10:35 修正轮后端提交 4d1b9306。验收：`COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path` → `Ran 3125 tests in 41.652s OK (skipped=2)`。前端、决定和方案的文字、第二次评审还没做（见 next）。
+- 2026-10-14 10:40 新会话 4a420907 接手（用户：「请你对于当前的事项继续推进」；旧会话 93ba6e1d 最后一次笔记提交在 00:49，工作区没有未提交的改动）。旧会话挂着的第一次评审早已返回并入了 Log 00:50，Running 里那一条当时没有勾，现已勾掉。
+- 2026-10-14 11:05 修正轮的前端（45643b6b）：`BoardRow` 去掉后端不再下发的三个字段；总结类型加 `day.sample_sizes`、`open_days`、`stale_digest_days`；战绩表里组合战法按看板卡片的顺序（即登记顺序）、单条件按名称排，不再依赖 `records` 的键序；看板加总结、案例两类请求各有先后保护（`latestOnly`，只采用最后一次请求的结果，较早请求的失败也不显示）；案例改成 `days=10`；总结卡片写明两个时点的选股日、今日样本行数、未定稿天数和待重建天数。`generated.ts` 按 Log 00:15 的做法从分支代码导出的 OpenAPI 文档重新生成（只差一行：日期下界）。验收：`npm run typecheck` 退出 0；`npm run test -- --run` → `Test Files 14 passed (14)  Tests 61 passed (61)`；`npm run build` → `✓ built in 3.24s`；`npm run api:check` → `generated API types are current`。
+- 2026-10-14 11:15 决定 0023 改成与代码一致（c7c97702，分支里）：第 4、5、7 条重写，加 5a–5c，“后果”“怎样保证”跟着改，末尾留一段说明改前的做法和为什么改。方案文件（主检出 `docs/work/plans/tactic-trial-ledger.md`）加 “Rev 9” 一段，正文里三处与它冲突的句子加了注。写之前对着 `summarise`、`evening`、`read_board`、`read_cases` 的代码核对过；“两个时点一年约 2.5 GB”是旧会话的估算，没有实测，决定里照此标注。
+- 2026-10-14 11:20 全部验收复跑（工作区，head c7c97702）：发布路径测试 → `Ran 3125 tests in 50.195s OK (skipped=2)`；`python -m pytest scripts -q` → `1 failed, 365 passed, 3 skipped`（失败的是 `test_runtime_hosts`，即 B035 那一个）；`git diff --check 92d13594 HEAD` 无输出。
+- 2026-10-14 11:20 第二次独立评审：只读的 Claude 子代理（opus），范围 `git diff 92d13594 HEAD`，给了第一次评审的报告让它逐条核对是否关闭，没有给主会话对这些改动的结论。
+- 2026-10-14 11:45 第二次独立评审返回（报告 `docs/work/probes/2026-10-14-tactic-review-2.md`）：新发现 0 高、3 中、8 低，都是读代码得出、没有靠执行复现；第一次的 22 条里 19 条关闭、3 条部分关闭（8、10、17）。主会话逐条对着代码看过，属实。
+- 2026-10-14 12:40 第二轮修正（a9c6efe5）：
+  - 中 1 没定稿就出了窗口的选股日以后没人管：`summarise` 先只按日期比对窗口之前“有读数”和“有摘要”的日子（新读取 `read_capability_days`，每个时点两条语句），缺的从新到旧每晚最多补 10 天、按日期插回折叠顺序，其余天数报在 `missing_digest_days`。集成测试：删掉一份窗口外的摘要再跑总结，摘要补回，战绩与删之前逐字段相同。
+  - 中 2 早上的竞价循环在没有前一日收盘读数时也落库，而回放不再覆盖它：`refresh_auction` 这时返回 `waiting_for_close`、不存；晚间阶段补好前一日后再建。集成测试在回放之前验证了不落库。
+  - 中 3 删掉或改名一个条件会让总结和看板抛 `KeyError`：指纹加上条件的键；两两组合文档带指纹，只折叠当前指纹的；不在登记表里的条件按键显示。
+  - 低：案例接口的读数一次读完（原来每个交易日一个事务）；补前一日补不出来时当晚 `blocked`；命令行 `--summarise --apply` 只允许最新交易日；指纹的说明写清它不含规则的参数；`evening` 判断“有没有收盘读数”只读日期；看板对超过下一交易日的日期不给收盘选股；阶段顺序的测试断言它是最后一个；一个选股日至少过 3 个交易日才算定稿（空间指标要看 3 天）。
+  - 没做：评审第 17 条剩下的那一点（竞价循环不接 `PoolTimeout`；别的数据库错误会结束任务，由任务管理器重启，文档字符串已这样写）。
+  - 前端和决定 0023 跟着改（`missing_digest_days`、上面四处）。
+- 2026-10-14 12:45 验收（工作区，head a9c6efe5）：发布路径测试 → `Ran 3127 tests in 48.570s OK (skipped=2)`；`npm run typecheck` 退出 0、`npm run test -- --run` → `Tests 61 passed (61)`、`npm run build` → `✓ built in 2.64s`；`python -m pytest scripts -q` → `1 failed, 365 passed, 3 skipped`（B035）；`git diff --check 92d13594 HEAD` 无输出。这一轮没有再请评审。
+- 2026-10-14 12:55 重读第二轮修正的 diff，发现自己引入的两处并改掉（910b171d）：补定稿时读到别的版本的读数会对 `None` 取值而抛错；案例接口改成一次读完后丢了“只看当前版本读数”的过滤。六个相关测试模块 → `Ran 51 tests in 6.670s OK`（全量没有再跑）。另外把 Due 里回放之后手工 `--summarise` 的一步去掉了（见那一条）。
 
 ## Waiting on the user
 
@@ -122,13 +156,14 @@
 - [x] 2026-10-13 17:26 第 9 步 → 18:18 前交回 5f0e0b25、2673fd39，测试通过但预审未接受（2026-10-13）
 - [x] 2026-10-13 18:18 Codex 实现者在做第 9 步的修正第 1 部分（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 2673fd39 之后有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上；主会话结束它就停，判断死活和续派的办法见 Resume here。 20:30 补充：18:34 本机休眠把调用切断，当时已有两个提交（88dc8851 仓储的窗口和涨跌停价、7bc74226 收盘回放和结算路径）；20:20 用 `codex-reply` 续上，让它先逐条核对哪些已做、再补完其余和缺的测试。续派的调用立刻返回空内容但线程在跑，用 `docs/work/probes/2026-10-13-wait-codex.py 01a1339e` 等它结束（主会话的后台命令）。 → 交回 df44f56b，主会话复跑 `Ran 3084 tests ... OK (skipped=2)` 并读了收盘读数、结算和收盘回放的代码，接受（2026-10-13 21:10）
 - [x] 2026-10-13 21:10 Codex 实现者在做第 9 步修正的第 2 部分（同一线程、同一工作区）。结束标志：分支在 df44f56b 之后有提交且 `git status --short` 为空。之后见 next。`codex-reply` 这次又是立刻返回上一条回复，实际在后台跑，主会话用 `docs/work/probes/2026-10-13-wait-codex.py 01a1339e` 等它。 → 交回 13b81e76，`Ran 3084 tests ... OK (skipped=2)`（实现者报告；主会话还没复跑和读 diff）（2026-10-13 22:17）
-- [ ] 2026-10-14 00:21 独立评审（只读 Claude 子代理，挂在主会话 93ba6e1d 上；主会话结束它就停）。报告写到会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/93ba6e1d-d513-4b99-8ce8-0ca62ebc19e1/scratchpad/review_tactic.md`（会话结束后可能不在）。结束标志：主会话收到完成通知。之后：逐条核实，把发现和处理记进 Log。新会话接手而文件不在时，重新起一个评审，评审范围的两条 `git diff` 命令见 Log 2026-10-14 00:21。
+- [x] 2026-10-14 00:21 独立评审（只读 Claude 子代理，挂在主会话 93ba6e1d 上；主会话结束它就停）。报告写到会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/93ba6e1d-d513-4b99-8ce8-0ca62ebc19e1/scratchpad/review_tactic.md`（会话结束后可能不在）。结束标志：主会话收到完成通知。之后：逐条核实，把发现和处理记进 Log。新会话接手而文件不在时，重新起一个评审，评审范围的两条 `git diff` 命令见 Log 2026-10-14 00:21。 → 00:50 返回，22 条，报告 `docs/work/probes/2026-10-14-tactic-review.md`（2026-10-14 00:50）
+- [x] 2026-10-14 11:20 第二次独立评审（只读 Claude 子代理，挂在会话 4a420907 上；会话结束它就停）。报告写到会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/4a420907-b482-4360-8848-a5feb4d76d14/scratchpad/review_tactic_2.md`，返回后复制到 `docs/work/probes/2026-10-14-tactic-review-2.md`。结束标志：主会话收到完成通知。新会话接手而文件不在时重新起一个，范围 `git -C /Users/papa/codebase/.codex-wt/n8n-tactic-trials diff 92d13594 HEAD`，并把第一次的报告给它逐条核对。 → 返回，0 高 3 中 8 低，报告 `docs/work/probes/2026-10-14-tactic-review-2.md`（2026-10-14 11:45）
 
 ## Due
 
 - [ ] 2026-10-14 11:30 评审修完并合并后（owner 发布窗口：08:30 前、11:30–13:00、15:10–18:45；10 月 14 日 16:15 前发布，当晚就自动跑）：三个单元各自发布，命令交给用户。owner 纯代码（`scripts/release plan <sha>` 先确认仍是纯代码；起点 e8cb8dbf，一次带上 W011）、edge 中继（`research-routes.mjs` 三条路由；W010 的会话也在发中继，发之前看它的记录）、edge 控制台（新页签）。提交要先在 origin/main。
 - [ ] 2026-10-14 13:00 （时间随发布顺延）owner 发布后、回放前：在 owner 容器里干跑一个分块，读 `peak_rss_mb` 和年度报告（先看 `free -m`；只读）：`python -m app.tactic_trial_runtime --slot close --start 2026-09-01 --end 2026-09-28`。峰值超过约 300 MB 就不要跑全量，先把分块再调小。
-- [ ] 2026-10-14 15:10 （时间随发布顺延）干跑通过后：全量回放（写 owner 库，命令交给用户）：先 `--slot close --start 2023-09-01 --end <上一个交易日> --apply`，再 `--slot auction` 同样的区间，最后 `--summarise <上一个交易日> --apply`。不一致率超过 0.5% 回放会自己停下并报告是哪一年。
+- [ ] 2026-10-14 15:10 （时间随发布顺延）干跑通过后：全量回放（写 owner 库，命令交给用户）：先 `--slot close --start 2023-09-01 --end <上一个交易日> --apply`，再 `--slot auction` 同样的区间，不用再手工跑总结：回放之后晚间阶段的下一轮（每 10 分钟一次，到次日 09:00）自己建当天的读数并出总结；`--summarise --apply` 现在只接受最新交易日。不一致率超过 0.5% 回放会自己停下并报告是哪一年。
 - [ ] 2026-10-15 09:26 （10 月 14 日 08:30 前发布了就是当天）发布后的第一个交易日 09:26：核对竞价读数已存（`tactic_auction` 的日志行、接口 `/api/research/market/tactic-trials/board`）、与 09:25 处置表同一批股票，页面可见。
 - [ ] 2026-10-14 16:50 （16:15 前没发布就顺延一个交易日）发布后的第一个交易日 16:50：核对 `peer_tactic_trials` 的回执是 `completed`、当天的总结已存，各战法当日结果与手算的两三条一致；调度进程的内存与发布前比较。
 
@@ -149,7 +184,7 @@
 
 ## Resume here
 
-现状（2026-10-14）：方案第 8 版的代码全部写完并提交在 `codex/tactic-trials`（工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`，head 92d13594，已含 main 到 83b9a96b 的内容），发布路径测试 3123 项通过；在等独立评审。主线上还没有本工作线的代码。
+现状（2026-10-14 11:20）：方案第 9 版的代码、前端和决定都提交在 `codex/tactic-trials`（工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`，head a9c6efe5，已含 main 到 83b9a96b 的内容），发布路径测试 3127 项通过；两次独立评审的发现都已修，等合并。主线上还没有本工作线的代码。
 
 第一件事：`git -C /Users/papa/codebase/.codex-wt/n8n-tactic-trials log --oneline --first-parent -n 8` 和 `git status --short`（工作区里 `frontend/node_modules` 是指向主检出的符号链接，未跟踪，不要提交，回收工作区前删掉）。head 仍是记录里的值且评审没有结果，就按 Running 那条重新起评审；有结果就按 next 往下做。
 

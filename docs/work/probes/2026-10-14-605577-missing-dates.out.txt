@@ -1,0 +1,15 @@
+# 2026-10-14 00:55 Asia/Shanghai; owner host 118.178.133.37, scheduler container; read-only
+sessions of 2026 without a bar: ['2026-09-09', '2026-09-10', '2026-09-11']
+  2026-09-09: whole market {'bars': 5582, 'with_factor': 5550, 'from_longhu': 5546, 'from_tushare': 8}
+     neighbours: [('2026-09-07', '17.11', '15.55', 'longhuvip_composite'), ('2026-09-08', '18.67', '17.11', 'longhuvip_composite')]
+  2026-09-10: whole market {'bars': 5556, 'with_factor': 5549, 'from_longhu': 5545, 'from_tushare': 8}
+     neighbours: [('2026-09-07', '17.11', '15.55', 'longhuvip_composite'), ('2026-09-08', '18.67', '17.11', 'longhuvip_composite'), ('2026-09-14', '16.8', '18.67', 'longhuvip_composite')]
+  2026-09-11: whole market {'bars': 5557, 'with_factor': 5550, 'from_longhu': 5546, 'from_tushare': 8}
+     neighbours: [('2026-09-07', '17.11', '15.55', 'longhuvip_composite'), ('2026-09-08', '18.67', '17.11', 'longhuvip_composite'), ('2026-09-14', '16.8', '18.67', 'longhuvip_composite'), ('2026-09-15', '15.12', '16.8', 'longhuvip_composite')]
+bars of 2026 without limit_up: ['2026-08-27', '2026-09-29']
+bars of 2023 without adj_factor: whole market by month (bars, with factor)
+   {'month': '2023-08', 'bars': 68449, 'with_factor': 21034}
+   {'month': '2023-09', 'bars': 105612, 'with_factor': 10561}
+   {'month': '2023-10', 'bars': 90020, 'with_factor': 15865}
+   {'month': '2023-11', 'bars': 116844, 'with_factor': 79597}
+   {'month': '2023-12', 'bars': 111873, 'with_factor': 111726}

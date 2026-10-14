@@ -10,12 +10,12 @@
 | [W002](streams/W002-auction-capture-and-desk.md) | 竞价池采集与 09:25 处置表 | verified | none | W006 的竞价看板上线后，决定处置表自己的页签和中继路由是否还要做（BACKLOG B017）；不做就关闭本记录 | 2026-10-13 |
 | [W003](streams/W003-daily-close-completion.md) | 日线收盘补全 | released | Claude Code 会话 93ba6e1d，2026-10-13 | 把剩下的两件事定下来再改状态：(1) 28 只一直“缺日线”的股票（6 只北交所，其余多半停牌）应归到“未交易”，否则这个阶段永远是 partial；(2) 控制面现在卡在每日指标 5,138/5,560 上，对账循环每 5 分钟调一次补全，后 21 次都是空跑（BACKLOG B043）。先只读查清每日指标的缺口是不是常态，再写修正方案 | 2026-10-13 |
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
-| [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | reviewing | Claude Code 会话 93ba6e1d（主会话；第 9 步之后自己实现，不再派给 Codex），2026-10-14 | 等独立评审（只读的 Claude 子代理，报告写到会话草稿目录的 `review_tactic.md`，结论抄进本记录的 Log）返回：逐条在代码里核实，属实的修掉并复跑发布路径测试；然后把 main 合进分支再合回 main（先确认 `docs/decisions/` 里 0023 仍空着）、推送，用 `scripts/release plan <sha>` 确认 owner 仍是纯代码发布，备好 `state/rel07.sh`（owner，起点是 owner 当前的 e8cb8dbf，一次带上 W011 和本线）交给用户执行；edge 的中继和控制台各自的发布命令同样交给用户。发布后的顺序见 Due。 | 2026-10-14 |
+| [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | building | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | 第 16 步：把 main 合进 `codex/tactic-trials`（`docs/decisions/README.md` 里 0023 和 W012 的 0024 两行并排保留），复跑三条验收命令（见 Resume here），`--no-ff` 合回 main，请用户推送；然后按 Due 备三个单元的发布命令（短包装脚本放 `state/`）。owner 主机 10 月 14 日上午没有应答（BACKLOG B058），发布和回放都要等它恢复。发布后先回放再让晚间阶段跑（没有回放它一直是 blocked，这是有意的；回放之前早上的竞价循环也不会落库，状态是 `waiting_for_close`）。第二轮修正（a9c6efe5）没有再请评审看，主会话把这一轮的 diff 重读了一遍，又改了两处（910b171d，见 Log 12:55）。 | 2026-10-14 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | released | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 10 月 14 日 09:16 核对新服务器上两条采集循环按新节拍落库（见 Due）；然后从 main 建 `tdx-live-snapshot-fallback` 工作区派工 6（B1 的读取链）。当日汇总从 10 月 14 日起才有可判的分钟：收盘后跑一次并把输出存到 `docs/work/probes/`，记为五个交易日观察的第 1 天 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在编辑框里改了备注名并保存后，核对飞书里的备注名和会员表（这是经线上 bridge 接口的第一次写入）；其余见 Open questions 和待办 B056 的 (2)、(4)。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
-| [W011](streams/W011-peer-evening-stages.md) | 每晚该跑的阶段由我们这一侧自己触发 | released | Claude Code 会话 93ba6e1d（主会话），2026-10-14 | 10 月 14 日 16:50 核对第一次真正的当晚自动运行（见 Due）：用 `docs/work/probes/2026-10-14-peer-evening-receipts.py` 的做法查 10 月 14 日五个 `peer_` 回执和读数（把脚本里的日期改成 10 月 13、14 日另存一份），再看调度容器日志有没有“left open”。通过后把本记录改成 `verified`；连续两晚通过后删掉手工脚本 `state/lists13.sh` 那条 Due。 | 2026-10-14 |
-| [W012](streams/W012-owner-hot-releases.md) | owner 只用一套镜像，其余改动全部热部署 | reviewing | Claude Code 会话 93ba6e1d（主会话），2026-10-14 | A 段在独立评审里（只读 Claude 子代理，报告写到会话草稿目录的 `review_classifier.md`）。返回后逐条核实、修正、复跑 `python -m pytest scripts -q` 和 `node scripts/shared-peer/deploy-code-only.test.mjs`，然后把 main 合进分支再 `--no-ff` 合回 main 并推送，回收工作区。合并后第一次真实使用：用 `scripts/release plan <sha>` 看一次本来会被判成全量发布的改动（例如只改了工作站脚本的提交）现在的结论。B 段（目录发布）等 A 段用过一阵再排。 | 2026-10-14 |
+| [W011](streams/W011-peer-evening-stages.md) | 每晚该跑的阶段由我们这一侧自己触发 | released | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | 10 月 14 日 16:50 核对第一次真正的当晚自动运行（见 Due）：用 `docs/work/probes/2026-10-14-peer-evening-receipts.py` 的做法查 10 月 14 日五个 `peer_` 回执和读数（把脚本里的日期改成 10 月 13、14 日另存一份），再看调度容器日志有没有“left open”。通过后把本记录改成 `verified`；连续两晚通过后删掉手工脚本 `state/lists13.sh` 那条 Due。 | 2026-10-14 |
+| [W012](streams/W012-owner-hot-releases.md) | owner 只用一套镜像，其余改动全部热部署 | building | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | A 段的评审修正已提交（3598250f、09743272，见 Log 2026-10-14 12:10），没有第二个评审者看过这一轮修正。接着：(1) 把 main 合进 `codex/owner-hot-a`（`docs/decisions/README.md` 会和 W006 的 0023 那一行相邻，手工并排保留两行），复跑 `python -m pytest scripts -q`（只应剩 B035 那一个失败）、`node scripts/shared-peer/deploy-code-only.test.mjs`、`node scripts/release-sync-status.test.mjs`，`--no-ff` 合回 main，回收工作区；(2) 合并后的第一次 owner 发布，分类会把 `scripts/backfill-full-market-daily.sh` 和 `scripts/fill-longhu-sector-membership.py` 报成 `full`（它们的目录登记在本分支里改成了 `47owner`）：owner 主机恢复后只读核对主机上这两份文件与目标提交的是否相同（`sha256sum ~/trading_hareness/scripts/<名字>` 对 `git show <sha>:scripts/<名字> \| shasum -a 256`），相同就在发布命令前加 `RELEASE_RELABELLED_CURRENT='scripts/backfill-full-market-daily.sh scripts/fill-longhu-sector-membership.py'`，不同就告诉用户（那就真的需要一次全量发布，或手工把这两个文件拷上去）；(3) 之后才是 B 段（Steps 里的 1–4）。 | 2026-10-14 |
 
 ## 等用户处理
 
@@ -29,7 +29,7 @@
 - W008 2026-10-14 09:16 发布后第一个交易时段：核对两条采集循环按新节拍落库。只读查 owner（探针写法见 `docs/work/README.md`）：`quant.raw_market_observations` 里当天 `fuyao_ths` / `a_share_minute_cross_section` 和 `tdx_public` / `a_share_minute_cross_section_shadow` 的 `effective_at`，09:15 起每分钟各一份、秒数稳定（主源在第 50 秒之后几秒、通达信在第 52 秒之后），没有漏分钟。异常（没有文档、或漏得比原来多）立刻告诉用户：回滚命令是把 `owner-code-20261013-03` 重新发布，但 08:30–11:30 是不能发布的窗口，要用户决定是否破例。收盘后跑当日汇总看可判分钟数和是否达标，记为 5 个交易日观察的第 1 天。 2026-10-13 20:30 补充：对方当天把量化服务迁到了新服务器（BACKLOG B041）。这条核对要走新的 owner 读路径；探针的调用行用的是 `.env.local` 里的 `LONGHU_*`，B041 完成后自然指向新主机。新主机只有 1 GB 内存：在容器里跑的探针只查计数和时间，不要读文档正文。
 - W006 2026-10-14 11:30 评审修完并合并后（owner 发布窗口：08:30 前、11:30–13:00、15:10–18:45；10 月 14 日 16:15 前发布，当晚就自动跑）：三个单元各自发布，命令交给用户。owner 纯代码（`scripts/release plan <sha>` 先确认仍是纯代码；起点 e8cb8dbf，一次带上 W011）、edge 中继（`research-routes.mjs` 三条路由；W010 的会话也在发中继，发之前看它的记录）、edge 控制台（新页签）。提交要先在 origin/main。
 - W006 2026-10-14 13:00 （时间随发布顺延）owner 发布后、回放前：在 owner 容器里干跑一个分块，读 `peak_rss_mb` 和年度报告（先看 `free -m`；只读）：`python -m app.tactic_trial_runtime --slot close --start 2026-09-01 --end 2026-09-28`。峰值超过约 300 MB 就不要跑全量，先把分块再调小。
-- W006 2026-10-14 15:10 （时间随发布顺延）干跑通过后：全量回放（写 owner 库，命令交给用户）：先 `--slot close --start 2023-09-01 --end <上一个交易日> --apply`，再 `--slot auction` 同样的区间，最后 `--summarise <上一个交易日> --apply`。不一致率超过 0.5% 回放会自己停下并报告是哪一年。
+- W006 2026-10-14 15:10 （时间随发布顺延）干跑通过后：全量回放（写 owner 库，命令交给用户）：先 `--slot close --start 2023-09-01 --end <上一个交易日> --apply`，再 `--slot auction` 同样的区间，不用再手工跑总结：回放之后晚间阶段的下一轮（每 10 分钟一次，到次日 09:00）自己建当天的读数并出总结；`--summarise --apply` 现在只接受最新交易日。不一致率超过 0.5% 回放会自己停下并报告是哪一年。
 - W006 2026-10-14 16:50 （16:15 前没发布就顺延一个交易日）发布后的第一个交易日 16:50：核对 `peer_tactic_trials` 的回执是 `completed`、当天的总结已存，各战法当日结果与手算的两三条一致；调度进程的内存与发布前比较。
 - W011 2026-10-14 16:50 第一次真正的当晚自动运行：核对 10 月 14 日五个 `peer_` 回执和读数；另在 19:00 后干跑一次风险分，与 16:20 左右那份比较。没出来再手工跑（下一条）。
 - W011 2026-10-14 17:00 （只在自动运行没出结果时）手工补跑：15:00 之后、24:00 之前执行 `bash ~/codebase/n8n/state/lists13.sh`（写 owner 库；会话的安全检查可能拦，拦了就请用户执行）。本线若已在当天发布，就等 16:40 看自动运行的结果，没出来再手工跑。
@@ -37,12 +37,11 @@
 
 ## 正在运行
 
-- W006 2026-10-14 00:21 独立评审（只读 Claude 子代理，挂在主会话 93ba6e1d 上；主会话结束它就停）。报告写到会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/93ba6e1d-d513-4b99-8ce8-0ca62ebc19e1/scratchpad/review_tactic.md`（会话结束后可能不在）。结束标志：主会话收到完成通知。之后：逐条核实，把发现和处理记进 Log。新会话接手而文件不在时，重新起一个评审，评审范围的两条 `git diff` 命令见 Log 2026-10-14 00:21。
-- W012 2026-10-14 00:37 A 段独立评审（只读 Claude 子代理，挂在主会话 93ba6e1d 上；主会话结束它就停）。报告：会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/93ba6e1d-d513-4b99-8ce8-0ca62ebc19e1/scratchpad/review_classifier.md`（会话结束后可能不在）。结束标志：主会话收到完成通知。新会话接手而文件不在时重新起一个评审，范围是 `git -C /Users/papa/codebase/.codex-wt/n8n-owner-hot-a show a3783f22`。
+无。
 
 ## 待办清单
 
-open 31, ready 15, doing 2, waiting-user 1, done 6, dropped 1
+open 32, ready 15, doing 2, waiting-user 1, done 7, dropped 1
 
 在做的、可以开工的、等用户处理的:
 

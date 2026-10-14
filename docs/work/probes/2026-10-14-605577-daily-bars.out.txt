@@ -1,0 +1,32 @@
+# 2026-10-14 00:55 Asia/Shanghai; owner host 118.178.133.37, scheduler container (release owner-code-20261013-06); read-only
+now (database): 2026-10-14 00:55:19.027472
+instrument: {'symbol': '605577.SH', 'exchange': 'SH', 'name': '龙版传媒', 'industry': '出版业', 'list_date': '2021-08-24', 'is_st': 'False', 'source': 'longhuvip_composite', 'updated_at': '2026-10-13 16:01:43.638916+08:00'}
+universe: [('all_a', True)]
+bars by year: sessions of the calendar, bars stored, bars with adj_factor, bars with limit_up, suspended
+   {'year': 2023, 'sessions': 93, 'bars': 93, 'with_factor': 45, 'with_limit': 88, 'suspended': 0, 'first_missing': None, 'last_missing': None, 'first_no_factor': datetime.date(2023, 8, 15), 'last_no_factor': datetime.date(2023, 11, 9)}
+   {'year': 2024, 'sessions': 242, 'bars': 242, 'with_factor': 242, 'with_limit': 242, 'suspended': 0, 'first_missing': None, 'last_missing': None, 'first_no_factor': None, 'last_no_factor': None}
+   {'year': 2025, 'sessions': 243, 'bars': 243, 'with_factor': 243, 'with_limit': 243, 'suspended': 0, 'first_missing': None, 'last_missing': None, 'first_no_factor': None, 'last_no_factor': None}
+   {'year': 2026, 'sessions': 186, 'bars': 182, 'with_factor': 182, 'with_limit': 180, 'suspended': 0, 'first_missing': datetime.date(2026, 9, 9), 'last_missing': datetime.date(2026, 10, 14), 'first_no_factor': None, 'last_no_factor': None}
+factor table by provider:
+   {'provider': 'longhu_qfq_derived', 'rows': 17, 'first': datetime.date(2026, 9, 4), 'last': datetime.date(2026, 10, 13)}
+   {'provider': 'longhuvip_composite', 'rows': 9, 'first': datetime.date(2026, 9, 1), 'last': datetime.date(2026, 9, 18)}
+   {'provider': 'tushare_primary', 'rows': 479, 'first': datetime.date(2023, 8, 17), 'last': datetime.date(2026, 9, 17)}
+   {'provider': 'tushare_super_get', 'rows': 2, 'first': datetime.date(2026, 9, 9), 'last': datetime.date(2026, 9, 10)}
+   {'provider': 'tushare_super_sdk', 'rows': 267, 'first': datetime.date(2023, 8, 15), 'last': datetime.date(2026, 9, 7)}
+last 12 bars:
+   {'trading_date': '2026-10-13', 'close': '19.6', 'pre_close': '17.82', 'adj_factor': '1.0542', 'limit_up': '19.60', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'longhuvip_composite'}
+   {'trading_date': '2026-10-12', 'close': '17.82', 'pre_close': '16.2', 'adj_factor': '1.0542', 'limit_up': '17.82', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'longhuvip_composite'}
+   {'trading_date': '2026-10-09', 'close': '16.2', 'pre_close': '14.73', 'adj_factor': '1.0542', 'limit_up': '16.20', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'longhuvip_composite'}
+   {'trading_date': '2026-10-08', 'close': '14.73', 'pre_close': '16.28', 'adj_factor': '1.0542', 'limit_up': '17.91', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'longhuvip_composite'}
+   {'trading_date': '2026-09-30', 'close': '16.28', 'pre_close': '14.80', 'adj_factor': '1.0542', 'limit_up': '16.28', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'longhuvip_l2history_pankou'}
+   {'trading_date': '2026-09-29', 'close': '14.8', 'pre_close': '14.87', 'adj_factor': '1.0542', 'limit_up': 'None', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'tushare_super_get'}
+   {'trading_date': '2026-09-28', 'close': '14.87', 'pre_close': '16.52', 'adj_factor': '1.0542', 'limit_up': '18.17', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'longhuvip_composite'}
+   {'trading_date': '2026-09-24', 'close': '16.52', 'pre_close': '15.92', 'adj_factor': '1.0542', 'limit_up': '17.51', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'longhuvip_composite'}
+   {'trading_date': '2026-09-23', 'close': '15.92', 'pre_close': '17.69', 'adj_factor': '1.0542', 'limit_up': '19.46', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'longhuvip_composite'}
+   {'trading_date': '2026-09-22', 'close': '17.69', 'pre_close': '16.56', 'adj_factor': '1.0542', 'limit_up': '18.22', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'tushare_super_get'}
+   {'trading_date': '2026-09-21', 'close': '16.56', 'pre_close': '15.72', 'adj_factor': '1.0542', 'limit_up': '17.29', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'longhuvip_composite'}
+   {'trading_date': '2026-09-18', 'close': '15.72', 'pre_close': '15.0', 'adj_factor': '1.0542', 'limit_up': '16.50', 'is_suspended': 'False', 'quality_status': 'fresh', 'selected_provider': 'tushare_super_get'}
+whole market on the last 3 sessions: bars and bars with adj_factor
+   {'trading_date': datetime.date(2026, 10, 13), 'bars': 5564, 'with_factor': 5560}
+   {'trading_date': datetime.date(2026, 10, 12), 'bars': 5565, 'with_factor': 5561}
+   {'trading_date': datetime.date(2026, 10, 9), 'bars': 5561, 'with_factor': 5557}

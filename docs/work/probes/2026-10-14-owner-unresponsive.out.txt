@@ -1,0 +1,14 @@
+# 2026-10-14, Asia/Shanghai. The owner quant host (118.178.133.37) during the session, seen from the Mac and from the edge.
+# Commands run by the main session; outputs copied from the session (addresses left out).
+
+00:58   last contact before the gap: the host answered (free -m: available 291 MB, swap used 433 MB); release owner-code-20261013-06 active since 00:43.
+01:0x-10:16  the Mac was asleep (clock jump seen at 10:20; logs/svc-supervisor.log has no lines in between).
+10:16:42 logs/svc-supervisor.log: "start daemon owner-tunnel" / 10:16:48 "daemon owner-tunnel exited rc=255; restart in 60s"; the same at 10:17:48 and 10:18:50.
+10:20   curl http://127.0.0.1:15682/health (the Mac's owner tunnel): no listener (the tunnel cannot be set up).
+10:21   ssh to the owner host, ConnectTimeout 12 s: "Connection timed out during banner exchange".
+10:22   nc -z <owner> 22: the TCP port is open.
+10:22   curl http://127.0.0.1:18300/api/research/market/temperature/intraday (edge adapter -> owner): http 503 after 10.6 s; .../limit-up-risk/daily: http 503 after 10.5 s. The edge adapter's own /health: 200.
+10:23   on the edge host: systemctl is-active quant-longhu-owner-tunnel -> active; curl http://127.0.0.1:15682/health through it: no answer in 12 s (http 000). No start/stop/failure lines of that unit in today's journal.
+10:23:35-10:25:32  ssh to the owner host, ConnectTimeout 110 s: "Connection to <owner> port 22 timed out".
+
+Not known: since when; whether the 09:15-09:26 auction capture and the session captures ran; the cause. A port that accepts TCP while sshd never sends its banner fits a host that is out of memory and swapping (894 MB, first full session on this host), but nothing on the host has been read.

@@ -1,12 +1,12 @@
 # W012 owner 只用一套镜像，其余改动全部热部署
 
-- state: reviewing
-- holder: Claude Code 会话 93ba6e1d（主会话），2026-10-14
+- state: building
+- holder: Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14
 - goal: owner 的量化服务只保留一个镜像，只有镜像自己的输入变了（依赖、Dockerfile）才重建；其余改动，包括现在要走“全量发布”的 compose、在主机上执行的脚本、迁移文件和分类规则不认识的路径，都在现有镜像上不构建地发布
 - plan: docs/work/plans/owner-hot-releases.md
 - branch: codex/owner-hot-a
-- head: da300c04
-- next: A 段在独立评审里（只读 Claude 子代理，报告写到会话草稿目录的 `review_classifier.md`）。返回后逐条核实、修正、复跑 `python -m pytest scripts -q` 和 `node scripts/shared-peer/deploy-code-only.test.mjs`，然后把 main 合进分支再 `--no-ff` 合回 main 并推送，回收工作区。合并后第一次真实使用：用 `scripts/release plan <sha>` 看一次本来会被判成全量发布的改动（例如只改了工作站脚本的提交）现在的结论。B 段（目录发布）等 A 段用过一阵再排。
+- head: 09743272
+- next: A 段的评审修正已提交（3598250f、09743272，见 Log 2026-10-14 12:10），没有第二个评审者看过这一轮修正。接着：(1) 把 main 合进 `codex/owner-hot-a`（`docs/decisions/README.md` 会和 W006 的 0023 那一行相邻，手工并排保留两行），复跑 `python -m pytest scripts -q`（只应剩 B035 那一个失败）、`node scripts/shared-peer/deploy-code-only.test.mjs`、`node scripts/release-sync-status.test.mjs`，`--no-ff` 合回 main，回收工作区；(2) 合并后的第一次 owner 发布，分类会把 `scripts/backfill-full-market-daily.sh` 和 `scripts/fill-longhu-sector-membership.py` 报成 `full`（它们的目录登记在本分支里改成了 `47owner`）：owner 主机恢复后只读核对主机上这两份文件与目标提交的是否相同（`sha256sum ~/trading_hareness/scripts/<名字>` 对 `git show <sha>:scripts/<名字> | shasum -a 256`），相同就在发布命令前加 `RELEASE_RELABELLED_CURRENT='scripts/backfill-full-market-daily.sh scripts/fill-longhu-sector-membership.py'`，不同就告诉用户（那就真的需要一次全量发布，或手工把这两个文件拷上去）；(3) 之后才是 B 段（Steps 里的 1–4）。
 - updated: 2026-10-14
 
 ## Requirements
@@ -22,7 +22,8 @@
 
 - [x] 方案审计（Codex，只读，两轮；第 2 轮的 11 条留给 B 段，见 Log）— 第 1 轮 11 条异议全部接受，方案改成第 2 版（2026-10-13 23:17）；第 2 轮在跑
 - [x] A 段（方案第 3 版）：分类的六个种类、`schema-gate.sh`、三处使用方、测试、文档 — a3783f22、3288e1ed（分支 `codex/owner-hot-a`，工作区 `/Users/papa/codebase/.codex-wt/n8n-owner-hot-a`，基点 39bcc7ee）— `python -m pytest scripts -q` → `1 failed, 371 passed, 3 skipped`（失败的是 B035 那一个）；`node scripts/shared-peer/deploy-code-only.test.mjs` 退出 0；`node scripts/release-sync-status.test.mjs` 退出 0
-- [ ] A 段独立评审、合并
+- [x] A 段独立评审并修正 — 评审 11 条（`docs/work/probes/2026-10-14-classifier-review.md`），修正 3598250f、09743272 — `python -m pytest scripts -q` → `1 failed, 379 passed, 3 skipped`（失败的是 B035 那一个）；`node scripts/shared-peer/deploy-code-only.test.mjs` 退出 0；`node scripts/release-sync-status.test.mjs` 退出 0；`generate_scripts_catalog.py --check` → `scripts catalog is current`；`verify_component_boundaries.py --check` 通过
+- [ ] A 段合并
 - [ ] （以下是 B 段）1 `switch-owner-tree.sh` 与测试、脚本目录规则（先不被任何东西调用）
 - [ ] 2 `schema-gate.sh`：迁移版本检查抽成共用脚本，并加“发布后 peer 不会自己执行建表”的开关检查
 - [ ] 3 分类的新种类与所有使用方一起落地（分类规则、`deploy-code-only.sh`、发布计划、命令行、镜像路径的内存检查）及相关测试
@@ -46,13 +47,27 @@
   - 没做（留给 B 段）：compose、systemd 单元、主机脚本的不构建发布；构建前的内存检查；决策记录。
 - 2026-10-14 00:37 评审：另起一个只读的 Claude 子代理（opus）独立评审提交 a3783f22，重点是“有没有主机或镜像实际在用的路径被判成了跳过”。结果返回后记在这里。
 - 2026-10-14 00:41 同一分支上加了一个提交（da300c04）：B041 的遗留，把文档里仍指向旧 owner 地址的操作命令改到新服务器（发布流程、读接口说明、股票数据接口说明、老师复盘说明、运维页；搭建那一节保留原命令并加注），`scripts/sync-xiaojie-message-features.sh` 的默认地址改成新服务器（它在目录里登记为工作站脚本，新规则下是跳过；10 月 13 日撤回这处改动只是因为旧规则把它判成全量发布）。`python -m pytest scripts -q` → `1 failed, 371 passed, 3 skipped`（B035）。
+- 2026-10-14 01:00 A 段独立评审返回（报告 `docs/work/probes/2026-10-14-classifier-review.md`）。评审者自己跑了新旧规则对全仓库的分类并逐类看了从全量变成跳过的 211 个路径：除 `fill-longhu-sector-membership.py` 一个外没有发现主机或镜像在用的；全量发布的行为没有变（闸门搬出去后内容相同、退出码和提示相同）；两条高、六条中、三条低，都还没修（见 next）。主会话还没逐条对代码核实。
+- 2026-10-14 10:40 新会话 4a420907 接手（旧会话 93ba6e1d 已无动静，工作区干净，head da300c04）。
+- 2026-10-14 12:10 A 段评审的 11 条逐条对代码核实后修正（3598250f 代码与测试，09743272 文档与决定 0024）：
+  - 1（高）`fill-longhu-sector-membership.py` 的目录登记改成 `47owner (copied into the container)`，它是 `full`。规则里把跳过的登记值逐个写明（`workstation…`、`owner-windows`、`never run`、`no host runs it`），别的登记值一律 `unclassified`。评审怀疑同类的另两个脚本（`backfill-eastmoney-hot-rank-history.py`、`probe-public-sources.py`）没有改：它们的说明只写了在容器里执行 `/tmp/…`，没有说文件从主机目录拷，仍登记为工作站。
+  - 2（高）目录里某个脚本的登记在两个提交之间跨过 `47owner` 这条线时，它输出 `full`，不在差异里也输出（行尾注明原因）；反方向且脚本在差异里的也是 `full`。放行方式是环境变量 `RELEASE_RELABELLED_CURRENT`（空格分隔的路径），含义是“核对过主机上那份就是目标提交的”。没有解决的那一半写进了决定 0024 的“后果”：改分类规则本身把一类路径从跳过改成全量时，规则管不到此前被跳过的改动。
+  - 3 隧道镜像的两个文件单列 `tunnel-image`：纯代码发布拒绝；发布计划仍给出全量发布命令，另加一行说明全量发布只把文件带上主机、不重建隧道。全量发布脚本本身没有改（它不读分类）。
+  - 4 两处 `git diff --name-only` 加 `--no-renames`。5 干跑的那句改成“the schema gate passed: see the schema: line”。6 闸门改成每次纯代码发布都跑；代价是检查模式也要 SSH 读一次对方的 `/health`，对方主机不通时检查模式会失败。
+  - 7 COPY 测试：跳过的来源逐个列出（测试目录和两个工具脚本），每个来源至少匹配一个被跟踪的路径；`.dockerignore` 是 `image`、`alembic.ini` 和 `env.py` 是 `migration` 各有断言。
+  - 8 新测试（`PairOfCommitsTests`，在临时仓库里对两个提交分类）：名单之外的登记值、被删除的脚本、被移动的文件、登记跨线及其放行、目录生成器不收的路径。主机上手工执行或被主机脚本调用的七个脚本必须是 `full`。
+  - 9 `scripts/` 下跳过的模式与目录生成器不收的范围一致；`deploy/*.conf` 改成点名三个网关配置。
+  - 10 决定 0002、0003 加了带日期的更正；`RELEASE_SYNC_47.md` 两处；发布计划在库落后时给纯代码发布命令加注“refused until…”；`deploy-code-only.sh` 的用法说明写了检查模式会读对方的 `/health`；新决定 0024（0023 被 W006 用了）。
+  - 11 提交里没有目录文件时在 stderr 说明；三个重复的循环合成一个 `refuse`。主机地址默认值在四处重复，没有改。
+  - 用新规则把 owner 现在跑的 0a57d7fb 到本分支 head 分了一遍：95 个跳过、2 个 `full`，就是上面说的登记跨线的两个脚本（见 next 的第 2 点）。
+- 2026-10-14 12:10 correction: 10 月 14 日 00:37 那条说 `fill-longhu-sector-membership.py` “归跳过…要用新版本时从工作站拷过去”。`OPERATIONS.md:374-377` 写的做法是在 peer 上从主机目录 `docker cp`，所以它属于主机的目录树；已按上面第 1 条改正。
 
 ## Waiting on the user
 
 ## Running
 
 - [x] 2026-10-13 23:17 Codex 方案审计第 2 轮在跑（线程 01a135b0-5382-74e2-b25b-a52af7b9ead2，只读）。结束标志：它交回 SOUND 或编号的异议。之后见 next。挂在主会话 93ba6e1d 上。 → 11 条（2026-10-13 23:30）
-- [ ] 2026-10-14 00:37 A 段独立评审（只读 Claude 子代理，挂在主会话 93ba6e1d 上；主会话结束它就停）。报告：会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/93ba6e1d-d513-4b99-8ce8-0ca62ebc19e1/scratchpad/review_classifier.md`（会话结束后可能不在）。结束标志：主会话收到完成通知。新会话接手而文件不在时重新起一个评审，范围是 `git -C /Users/papa/codebase/.codex-wt/n8n-owner-hot-a show a3783f22`。
+- [x] 2026-10-14 00:37 A 段独立评审（只读 Claude 子代理，挂在主会话 93ba6e1d 上；主会话结束它就停）。报告：会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/93ba6e1d-d513-4b99-8ce8-0ca62ebc19e1/scratchpad/review_classifier.md`（会话结束后可能不在）。结束标志：主会话收到完成通知。新会话接手而文件不在时重新起一个评审，范围是 `git -C /Users/papa/codebase/.codex-wt/n8n-owner-hot-a show a3783f22`。
 
 ## Due
 
