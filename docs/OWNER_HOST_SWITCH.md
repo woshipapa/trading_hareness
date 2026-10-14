@@ -126,6 +126,46 @@ scripts/release plan                                       # 能读到新主机
 09:25 的竞价处置表，16:15 之后晚间阶段的回执。写进 `docs/work/FACTS.md`，并在本文件顶部和 `AGENTS.md` 里
 更新“现在是哪台”。
 
+### 7. 换到 4 核 8 GB、200 Mbps 之后的推进（用户 2026-10-14 的计划规格）
+
+先说清楚边界：决定速度的主要不是中转主机。库在对方 Windows 工作站上，每条语句往返约 52 毫秒（经反向 SSH）；
+授权接口约 7.4 次/秒封顶（`docs/work/FACTS.md` F027）。这两样不随主机变快。2026-10-14 13:03 现主机（2 核
+3.5 GB）盘中一次采样：负载 0.82，主服务 CPU 44%、内存 325 MiB，调度 129 MiB，db-tunnel 两小时进出各约
+4.9 GB（`docs/work/probes/2026-10-14-owner-load-1306.out.txt`）。所以顺序是先量、再一项一项放开，每放开一项
+记一条事实、量一次，再做下一项。待办里对应的条目是 `docs/work/BACKLOG.md` B062。
+
+**7.0 先量一个完整交易日（会话，只读）。** 新主机跑满一个交易日后：各容器 CPU 与内存的峰值（盘中每 10 分钟
+一次 `docker stats`，存进 `docs/work/probes/`）；db-tunnel 与主机网卡的流量；扫描和两条分钟采集每轮的耗时；
+晚间循环各阶段的耗时（回执里的时间）。和上面那次采样对照，写进 FACTS。
+
+**7.1 逐行写库改批量（代码，收益最大，与硬件无关）。** 每条语句 52 毫秒，逐行写几千行就是几分钟（2026-10-14
+补一只股票 48 天的复权因子：290 条语句 18 秒，FACTS F029）。先列出盘后和补数据路径上逐行写的地方，按耗时排序，
+改成一条语句一批。
+
+**7.2 补回为省内存拿掉的两个晚间阶段。** `market_temperature_intraday`（盘中温度序列）和 `minute_panel_export`
+（分钟面板导出）要把当天全部分钟文档读进内存，894 MB 的主机上没放进晚间循环
+（`docs/work/plans/peer-evening-stages.md:102`）。先在新主机上单独跑一次量峰值，再加进
+`quant-service/app/peer_close_research.py` 的阶段表，走纯代码发布。
+
+**7.3 数据库并发。** 主服务的阻塞线程 `QUANT_DB_BLOCKING_MAX_WORKERS` 是 8（已是代码上限，
+`quant-service/app/runtime_executors.py:131`），调度是 4（`deploy/shared-peer/compose.intraday-owner.yaml:46,149`），
+连接池上限 `QUANT_DB_POOL_MAX_SIZE` 12（上限 32，`quant-service/app/database.py:1863`）。瓶颈是往返延迟，
+加并发比加 CPU 有用；但**先问对方工作站上的库能承受多少连接**，再定数。放到 16 要改代码上限；compose 的默认值
+不改（改 compose 会让发布变成全量），改主机配置里的 `PEER_*` 键。
+
+**7.4 晚间重计算移出盘中进程。** 两个容器各只有一个 Python 进程，战法总结、历史回放、风险分这些晚间计算和盘中
+采集抢同一把全局锁。4 核下把晚间计算放到单独的进程（或第三个容器），盘中采集不受影响。这一项要方案和审查。
+
+**7.5 公共数据源并发。** `MARKET_SNAPSHOT_PUBLIC_CONCURRENCY` 2、`REALTIME_VENDOR_MAX_WORKERS` 4、
+`LONGHU_MINUTE_BATCH_WORKERS` 4（`quant-service/app/settings.py`）。主要受各家限流约束，换机后按各源的限流
+逐个试；授权接口的批量读取仍守 6 个、最多 8 个并发、盘中不跑的规矩（F027）。
+
+**7.6 镜像构建。** 构建前的内存检查（可用不足 700 MB 拒绝）在 8 GB 上会通过；但主机上的依赖包目录
+（`~/wheelhouse`）是空的，要先定依赖从哪里来（B050），否则仍只能搬镜像。
+
+**7.7 顺带修的。** edge 到 owner 的隧道单元加握手超时（B060）；`scripts/teacher_review_daily.py` 的默认地址
+改成读 `scripts/shared-peer/owner-host.sh`；本文件顶部和 `AGENTS.md` 里“现在是哪台”的说法更新。
+
 ### 回退
 
 第 4 步之后、第 5 步之前出问题：在新主机上停两个服务容器和定时器，在旧主机上把它们起回来（第 4 步的
