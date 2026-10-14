@@ -1,0 +1,6 @@
+  tactic_trials_auction_daily          sessions  749 documents   749 2023-09-04 .. 2026-10-13
+  tactic_trials_close_daily            sessions  750 documents   750 2023-09-01 .. 2026-10-13
+  tactic_trials_digest_auction_daily   sessions  739 documents   739 2023-09-04 .. 2026-09-21
+  tactic_trials_digest_close_daily     sessions  739 documents   739 2023-09-01 .. 2026-09-18
+  tactic_trials_pairs_auction_daily    sessions  739 documents   739 2023-09-04 .. 2026-09-21
+  tactic_trials_pairs_close_daily      sessions  739 documents   739 2023-09-01 .. 2026-09-18

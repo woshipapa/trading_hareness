@@ -10,7 +10,7 @@
 | [W002](streams/W002-auction-capture-and-desk.md) | 竞价池采集与 09:25 处置表 | verified | Claude Code 会话 4a420907，2026-10-14 | B059 的代码已随 `owner-code-20261014-07` 发布；它的验证要等下一次采集循环在 09:25 之后才启动（或在 09:25–11:30 之间重启一次服务）时看日志行里的 `late_table=`。此外：W006 的竞价看板上线后，决定处置表自己的页签和中继路由是否还要做（BACKLOG B017）；不做就关闭本记录。 | 2026-10-13 |
 | [W003](streams/W003-daily-close-completion.md) | 日线收盘补全 | released | Claude Code 会话 93ba6e1d，2026-10-13 | 把剩下的两件事定下来再改状态：(1) 28 只一直“缺日线”的股票（6 只北交所，其余多半停牌）应归到“未交易”，否则这个阶段永远是 partial；(2) 控制面现在卡在每日指标 5,138/5,560 上，对账循环每 5 分钟调一次补全，后 21 次都是空跑（BACKLOG B043）。先只读查清每日指标的缺口是不是常态，再写修正方案 | 2026-10-13 |
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
-| [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | released | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | 三个单元都已发布。等全量回放跑完（Running），然后只读核对：`tactic_trials_close_daily`、`tactic_trials_auction_daily` 和两类摘要在库里的天数、`/api/v1/market/tactic-trials/board` 有前一交易日的收盘选股。之后按 Due：16:50 核对 `peer_tactic_trials` 的回执是 completed、当天总结已存、今天的竞价读数（来自补录的处置表）已建；10 月 15 日 09:26 核对竞价读数。在浏览器里看一次新页签（还没看）。全部通过后状态改 `verified`，回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials` 和 `n8n-release-07`。 | 2026-10-14 |
+| [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | released | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | 回放已写完（Log 12:35）。下一件是 Due 里 16:50 那条：核对 `peer_tactic_trials` 的回执是 completed、10 月 14 日的总结已存（`/api/v1/market/tactic-trials/summary` 不再是 `reading: null`，`open_days` 约 11）、今天的竞价读数已由晚间阶段建出（来自补录的处置表，`decided_at` 是 11:45 的存储时间）、看板的标签有了；调度容器的内存与现在（128 MiB）比较。然后 10 月 15 日 09:26 核对竞价读数；在浏览器里看一次新页签。全部通过后改 `verified`，回收工作区 `n8n-tactic-trials` 和 `n8n-release-07`。 | 2026-10-14 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | merged | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | B1、B2 已合进 main（86cbd62d），等用户定发布 B 的时机（Waiting on the user）。同时从 10 月 15 日起每个交易日收盘后跑一次当日汇总并把输出存进 `docs/work/probes/`，数满五个通过的交易日（10 月 14 日因主机故障不算）。发布 B 之后的核对：`/health`、状态脚本、指标健康里的 `fallback_minutes`、一次真实的主源失败时补的那一分钟确实记在 `tdx_public` 名下。 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在编辑框里改了备注名并保存后，核对飞书里的备注名和会员表（这是经线上 bridge 接口的第一次写入）；其余见 Open questions 和待办 B056 的 (2)、(4)。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
@@ -39,7 +39,7 @@
 
 ## 正在运行
 
-- W006 2026-10-14 11:59 全量回放（写 owner 库），会话的后台命令 `bash state/replay14.sh --apply`，挂在会话 4a420907 上；输出 `docs/work/probes/2026-10-14-tactic-replay.apply.out.txt`。结束标志：输出文件末尾有第二个日期行，且有两行 JSON（收盘、竞价各一）。之后：只读核对读数和摘要的天数。中断了（合盖、会话结束）就重跑同一条命令，没变的文档不重写。
+无。
 
 ## 待办清单
 
