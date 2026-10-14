@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from unittest import mock
 
 from app import tactic_trial_runtime as runtime
@@ -68,20 +69,32 @@ class TacticTrialRuntimeTests(unittest.TestCase):
         self.assertEqual(result["status"], "already_stored")
         self.assertTrue(result["research_only"])
 
-    def test_refresh_auction_builds_unknown_prev_row(self):
+    def test_refresh_auction_is_decided_when_the_table_was_stored(self):
         database = Database()
         day = date(2026, 10, 13)
-        desk = {"trade_date": day.isoformat(), "rows": [{
+        table = {"stored_at": "2026-10-13T09:25:04+08:00", "rows": [{
             "symbol": "000001.SZ", "name": "A", "open": 10.5, "gap": 0.05,
             "opens_at_limit": False, "bucket": "3-5", "boards": 2, "amount": 100,
-        }], "scheduled_at": "2026-10-13T09:25:00+08:00"}
-        with mock.patch.object(runtime.tactic_trial_repository, "read_capability", side_effect=[[], [desk], []]), \
+        }]}
+        with mock.patch.object(runtime.tactic_trial_repository, "read_capability", return_value=[]), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_auction_table", return_value=table), \
              mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=[]), \
              mock.patch.object(runtime.derived_daily_readings, "store", return_value={"stored": 1, "unchanged": 0}) as store:
             result = runtime.refresh_auction(database, day)
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["rows"], 1)
-        self.assertEqual(store.call_args.args[2][0]["decided_at"], desk["scheduled_at"])
+        self.assertEqual((result["status"], result["rows"]), ("completed", 1))
+        stored = store.call_args.args[2][0]
+        self.assertEqual(stored["decided_at"], table["stored_at"])
+        self.assertIsNone(stored["rows"][0]["reference_close"], "no close reading of the session before: nothing to measure from")
+        with mock.patch.object(runtime.tactic_trial_repository, "read_capability", return_value=[]), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_auction_table", return_value=None):
+            self.assertEqual(runtime.refresh_auction(database, day)["status"], "not_ready")
+
+    def test_an_auction_row_is_measured_from_the_reference_close_of_the_close_reading(self):
+        previous = {"day": {"flags": [], "unknown": []}, "rows": [{"symbol": "000001.SZ", "reference_close": 10.0, "flags": [], "unknown": []}]}
+        desk = [{"symbol": "000001.SZ", "name": "A", "open": 10.5, "gap": 0.05, "bucket": "3-5", "boards": 2, "amount": 100},
+                {"symbol": "000002.SZ", "name": "B", "open": 9.0, "gap": -0.02, "bucket": "<0", "boards": 1, "amount": 50}]
+        reading = runtime._build_auction_reading(date(2026, 10, 13), desk, previous, "2026-10-13T09:25:04+08:00", "auction_open_desk_daily")
+        self.assertEqual([row["reference_close"] for row in reading["rows"]], [10.0, None])
 
     def test_settle_splits_prior_closes_from_pick_path(self):
         reading = {"trade_date": "2026-10-13", "slot": "close", "rows": [{"symbol": "000001.SZ"}]}
@@ -93,7 +106,8 @@ class TacticTrialRuntimeTests(unittest.TestCase):
         outcome = {"entries": {"held": {"close": {"status": "settled"}}, "buy_open": {"close": {"status": "no_trade"}}}}
         with mock.patch.object(runtime, "evaluate_pick", return_value=outcome) as evaluate:
             document = runtime._settle_reading(reading, {"000001.SZ": bars})
-        evaluate.assert_called_once_with("000001.SZ", "close", bars[1:], None, [18.0])
+        evaluate.assert_called_once_with("000001.SZ", "close", bars[1:], None, [Decimal("18")])
+        self.assertIsInstance(evaluate.call_args.args[4][0], Decimal, "prices enter the settlement as Decimal")
         self.assertTrue(document["complete"])
 
     def test_replay_keeps_missing_session_slots_in_previous_roles(self):
@@ -166,7 +180,7 @@ class TacticTrialRuntimeTests(unittest.TestCase):
                 result = runtime.replay(Database(), "close", day1, session_days[-1])
             return result, captured
         window_calls = []
-        with mock.patch.object(runtime, "_settle_reading", return_value={}):
+        with mock.patch.object(runtime, "_settle_reading", return_value={"rows": [], "complete": False}):
             one, one_readings = run([day1])
             two, two_readings = run([day1, day2])
         self.assertEqual(one_readings[0]["rows"][0]["runup_20"], two_readings[0]["rows"][0]["runup_20"])
@@ -191,9 +205,9 @@ class TacticTrialRuntimeTests(unittest.TestCase):
 
     def test_auction_replay_uses_yesterday_close_pool(self):
         day1, day2 = date(2026, 5, 4), date(2026, 5, 5)
-        previous_rows = [{"symbol": "000001.SZ", "name": "A", "close": 10, "boards": 2, "board_bucket": "2", "sector": "x",
+        previous_rows = [{"symbol": "000001.SZ", "name": "A", "reference_close": 10, "boards": 2, "board_bucket": "2", "sector": "x",
                           "sealed_from_open": False, "flags": [], "unknown": []},
-                         {"symbol": "000002.SZ", "name": "B", "close": 10, "boards": 1, "board_bucket": "1", "sector": "x",
+                         {"symbol": "000002.SZ", "name": "B", "reference_close": 10, "boards": 1, "board_bucket": "1", "sector": "x",
                           "sealed_from_open": False, "flags": [], "unknown": []}]
         close = {"trade_date": day1.isoformat(), "slot": "close", "complete": True,
                  "rows": previous_rows, "day": {"flags": [], "unknown": []}}
@@ -204,7 +218,7 @@ class TacticTrialRuntimeTests(unittest.TestCase):
                       dict(self._bar(day2 + timedelta(days=1), "000002.SZ", close=10, limit_up=12), pick_day=day2)]
         complete = {"entries": {"held": {"close": {"status": "settled", "raw_return": 0.1}},
                                  "buy_open": {"close": {"status": "no_trade"}}}}
-        with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", side_effect=[[day1, day2], [day1]]), \
+        with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", side_effect=[[day1, day2], [day1], [day1, day2]]), \
              mock.patch.object(runtime.tactic_trial_repository, "read_auction_lists", return_value=auction_list), \
              mock.patch.object(runtime.tactic_trial_repository, "read_capability", return_value=[close]), \
              mock.patch.object(runtime.tactic_trial_repository, "read_day_bars", return_value=bars), \
@@ -217,104 +231,81 @@ class TacticTrialRuntimeTests(unittest.TestCase):
         self.assertEqual(stored["decided_at"], "2026-05-05T09:25:00+08:00")
         self.assertEqual(stored["rows"][0]["amount"], 900)
         self.assertIsNone(stored["rows"][1]["amount"])
-        settled = store.call_args_list[1].args[2][0]
-        self.assertTrue(settled["complete"])
-        self.assertEqual(evaluate.call_args.args[3], 10)
+        self.assertEqual([call.args[1] for call in store.call_args_list],
+                         [runtime.AUCTION_CAPABILITY, runtime.PAIRS_CAPABILITY["auction"], runtime.DIGEST_CAPABILITY["auction"]],
+                         "a settled day is closed by its pairs and then its digest; no settled document is stored")
+        self.assertEqual(store.call_args_list[2].args[2][0]["resolved"], 2)
+        self.assertEqual(evaluate.call_args.args[3], Decimal("10"))
 
-    def test_settle_becomes_complete_on_the_next_evening(self):
-        pick_day, next_day = date(2026, 4, 1), date(2026, 4, 2)
-        reading = {"trade_date": pick_day.isoformat(), "slot": "close", "complete": True,
-                   "rows": [{"symbol": "000001.SZ", "reference_close": 10}]}
-        state = []
-        incomplete = {"entries": {"held": {"close": {"status": "not_resolved"}}, "buy_open": {"close": {"status": "settled"}}}}
-        complete = {"entries": {"held": {"close": {"status": "settled"}}, "buy_open": {"close": {"status": "no_trade"}}}}
-
-        def capability(_connection, capability, _first, _last):
-            if capability == runtime.CLOSE_CAPABILITY:
-                return [] if state and state[-1]["complete"] else [reading]
-            if capability == runtime.SETTLED_CAPABILITY["close"]:
-                return list(state)
-            return []
-
-        bars = [{"symbol": "000001.SZ", "pick_day": pick_day, "trading_date": pick_day, "close": 10},
-                {"symbol": "000001.SZ", "pick_day": pick_day, "trading_date": next_day, "close": 11}]
-        stored_under = []
-
-        def store(_database, capability, documents):
-            stored_under.append(capability)
-            if capability == runtime.SETTLED_CAPABILITY["close"]:
-                state[:] = documents
-            return {"stored": 1, "unchanged": 0}
-
-        with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", side_effect=[[pick_day], [pick_day, next_day]]), \
-             mock.patch.object(runtime.tactic_trial_repository, "read_capability", side_effect=capability), \
-             mock.patch.object(runtime.tactic_trial_repository, "read_exit_bars", return_value=bars), \
-             mock.patch.object(runtime, "evaluate_pick", side_effect=[incomplete, complete]) as evaluate, \
-             mock.patch.object(runtime.derived_daily_readings, "store", side_effect=store):
-            first = runtime.settle(Database(), pick_day)
-            second = runtime.settle(Database(), next_day)
-        self.assertFalse(first["days"][0]["complete"])
-        self.assertTrue(second["days"][0]["complete"])
-        self.assertEqual(evaluate.call_args_list[1].args[2], bars)
-        self.assertEqual(stored_under[:3], [runtime.SETTLED_CAPABILITY["close"], runtime.DIGEST_CAPABILITY["close"],
-                                            runtime.PAIRS_CAPABILITY["close"]],
-                         "each settled day is stored with its digest and its pairs, under the slot's own capabilities")
-
-    def test_summarise_folds_digests_in_chunks_and_reads_only_the_latest_day_in_full(self):
+    def test_summarise_reads_old_digests_in_chunks_and_readings_only_for_the_window(self):
         sessions = [date(2026, 1, 1) + timedelta(days=offset) for offset in range(130)]
         last = sessions[-1]
         reads = []
 
         def readings(_connection, capability, first, end):
             reads.append((capability, first, end))
-            if capability == runtime.SETTLED_CAPABILITY["close"]:
-                return [{"trade_date": last.isoformat(), "slot": "close", "complete": True, "rows": []}]
-            if capability == runtime.CLOSE_CAPABILITY:
-                return [{"trade_date": last.isoformat(), "slot": "close", "rows": [], "day": {}}]
             return []
 
         with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=sessions), \
              mock.patch.object(runtime.tactic_trial_repository, "read_capability", side_effect=readings), \
-             mock.patch.object(runtime.derived_daily_readings, "newest", return_value=[]) as newest, \
+             mock.patch.object(runtime.tactic_trial_repository, "read_newest", return_value=None), \
              mock.patch.object(runtime.derived_daily_readings, "store", return_value={"stored": 1, "unchanged": 0}) as store:
             result = runtime.summarise(Database(), last)
-        digest_reads = [item for item in reads if item[0] in runtime.DIGEST_CAPABILITY.values()]
-        self.assertEqual(len(digest_reads), 2 * 3, "130 sessions are three chunks of at most 60, for two slots")
-        self.assertTrue(all((end - first).days < 60 for _capability, first, end in digest_reads))
-        self.assertEqual([item for item in reads if item[0] == runtime.CLOSE_CAPABILITY], [(runtime.CLOSE_CAPABILITY, last, last)],
-                         "the readings are read for the latest settled day only, never as history")
-        self.assertFalse([item for item in reads if item[0] == runtime.AUCTION_CAPABILITY])
-        self.assertLessEqual((last - newest.call_args.args[2]).days, 15, "the previous summary is looked for in the last days only")
+        window_first = sessions[-runtime.WINDOW_SESSIONS]
+        older = [item for item in reads if item[0] in runtime.DIGEST_CAPABILITY.values() and item[2] < window_first]
+        self.assertEqual(len(older), 2 * 2, "118 older sessions are two chunks of at most 60, for two slots")
+        self.assertTrue(all((end - first).days < 60 for _capability, first, end in older))
+        self.assertEqual([item for item in reads if item[0] in runtime.READING_CAPABILITY.values()],
+                         [(runtime.CLOSE_CAPABILITY, window_first, last), (runtime.AUCTION_CAPABILITY, window_first, last)],
+                         "the readings are read for the window only, never as history")
+        pair_reads = [item for item in reads if item[0] in runtime.PAIRS_CAPABILITY.values()]
+        self.assertTrue(all(first >= sessions[-runtime.PAIR_SESSIONS:][0] for _capability, first, _end in pair_reads))
         self.assertEqual(store.call_args.args[1], runtime.SUMMARY_CAPABILITY)
-        self.assertEqual(result["status"], "completed")
+        self.assertEqual((result["status"], result["summary"]["open_days"], result["summary"]["stale_digest_days"]), ("completed", 0, 0))
 
 
 class EveningTests(unittest.TestCase):
-    def test_the_evening_run_is_blocked_without_the_days_inputs_and_otherwise_runs_in_order(self):
-        day = date(2026, 10, 14)
+    SESSIONS = [date(2026, 10, 12), date(2026, 10, 13), date(2026, 10, 14)]
+
+    def _run(self, known_days, close_status="completed"):
         calls = []
 
         def step(name, result):
-            def run(_database, _day, **_kwargs):
-                calls.append(name)
+            def run(_database, day, **_kwargs):
+                calls.append((name, day))
                 return result
             return run
 
-        with mock.patch.object(runtime, "refresh_auction", step("auction", {"status": "not_ready"})), \
-             mock.patch.object(runtime, "refresh_close", step("close", {"status": "blocked"})), \
-             mock.patch.object(runtime, "settle", step("settle", {"days": []})), \
-             mock.patch.object(runtime, "summarise", step("summarise", {"summary": {}})):
-            self.assertEqual(runtime.evening(Database(), day)["status"], "blocked")
-            self.assertEqual(calls, ["auction", "close"], "nothing is settled or summarised on a day without its inputs")
-        calls.clear()
-        with mock.patch.object(runtime, "refresh_auction", step("auction", {"status": "completed"})), \
-             mock.patch.object(runtime, "refresh_close", step("close", {"status": "already_stored"})), \
-             mock.patch.object(runtime, "settle", step("settle", {"days": [{"trade_date": "2026-10-13", "slot": "close", "complete": True}]})), \
+        known = [{"trade_date": day.isoformat()} for day in known_days]
+        with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=self.SESSIONS), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_capability", return_value=known), \
+             mock.patch.object(runtime, "refresh_auction", step("auction", {"status": "not_ready"})), \
+             mock.patch.object(runtime, "refresh_close", step("close", {"status": close_status})), \
              mock.patch.object(runtime, "summarise", step("summarise", {"summary": {"lines": 80}})):
-            result = runtime.evening(Database(), day)
-        self.assertEqual(calls, ["auction", "close", "settle", "summarise"])
-        self.assertEqual((result["status"], result["close"], result["summary"]), ("completed", "already_stored", {"lines": 80}))
+            return runtime.evening(Database(), self.SESSIONS[-1]), calls
+
+    def test_nothing_is_built_before_the_history_replay(self):
+        result, calls = self._run([])
+        self.assertEqual((result["status"], calls), ("blocked", []))
+        self.assertIn("replay", result["reason"])
+
+    def test_an_ordinary_evening_builds_the_readings_then_the_summary(self):
+        today = self.SESSIONS[-1]
+        result, calls = self._run(self.SESSIONS[:2])
+        self.assertEqual(calls, [("auction", today), ("close", today), ("summarise", today)])
+        self.assertEqual((result["status"], result["repaired"], result["summary"]), ("completed", None, {"lines": 80}))
         self.assertTrue(result["research_only"])
+
+    def test_a_missed_evening_is_built_first(self):
+        today, missed = self.SESSIONS[-1], self.SESSIONS[-2]
+        result, calls = self._run(self.SESSIONS[:1])
+        self.assertEqual(calls, [("auction", missed), ("close", missed), ("auction", today), ("close", today), ("summarise", today)])
+        self.assertEqual(result["repaired"], {"auction": "not_ready", "close": "completed"})
+
+    def test_a_day_without_its_lists_or_risk_reading_is_blocked_and_not_summarised(self):
+        result, calls = self._run(self.SESSIONS[:2], close_status="blocked")
+        self.assertEqual(result["status"], "blocked")
+        self.assertNotIn("summarise", [name for name, _day in calls])
 
 
 class _Stop(Exception):
@@ -369,6 +360,9 @@ class AuctionLoopTests(unittest.TestCase):
         calls, _sleeps, lines = self._run("2026-10-14T09:25:05", [busy, TimeoutError(), "completed"])
         self.assertEqual(len(calls), 3)
         self.assertEqual(lines, ["tactic_auction trade_date=2026-10-14 status=completed"])
+        _calls, _sleeps, lines = self._run("2026-10-14T09:25:05", [busy])
+        self.assertEqual(lines, ["tactic_auction trade_date=2026-10-14 status=database_busy"],
+                         "a database busy until 09:45 is not reported as a missing table")
 
     def test_no_reading_on_a_closed_day_or_outside_the_window(self):
         calls, _sleeps, lines = self._run("2026-10-14T09:30:00", ["completed"], session=False)

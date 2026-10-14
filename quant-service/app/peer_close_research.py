@@ -43,8 +43,8 @@ from .market_temperature_runtime import refresh as refresh_market_temperature
 #: The teacher stages keep their place; the daily products follow, so none of them can delay the first five.
 STAGES = ("teacher_review_roll", "teacher_outcome_review", "watch_daily_review", "xiaojie_outcomes",
           "daily_digest",
-          "peer_limit_performance_lists", "peer_limit_up_risk", "peer_tactic_trials", "peer_market_temperature",
-          "peer_broad_etf_flow", "peer_market_timing")
+          "peer_limit_performance_lists", "peer_limit_up_risk", "peer_market_temperature",
+          "peer_broad_etf_flow", "peer_market_timing", "peer_tactic_trials")
 STAGE_TIMEOUT_SECONDS = {"teacher_review_roll": 300.0, "teacher_outcome_review": 240.0,
                          "watch_daily_review": 240.0, "xiaojie_outcomes": 150.0, "daily_digest": 120.0,
                          "peer_limit_performance_lists": 120.0, "peer_limit_up_risk": 120.0,

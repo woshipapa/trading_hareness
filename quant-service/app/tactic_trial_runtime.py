@@ -9,6 +9,7 @@ import resource
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from statistics import median
 from typing import Any, Mapping, Sequence
 
@@ -23,7 +24,8 @@ from .tactic_exits import evaluate_pick
 from .t1_settlement import SettlementBar, opens_at_up_limit
 from .auction_open_desk import gap_bucket
 from .tactic_trials import (
-    TACTICS, History, PairHistory, Tactic, daily_summary, day_board, day_digest, day_pairs, tactic_card, tactic_day,
+    TACTICS, History, PairHistory, Tactic, daily_summary, day_board, day_digest, day_pairs, json_safe,
+    registry_fingerprint, tactic_card, tactic_day,
 )
 
 VERSION = "tactic-trials-v1"
@@ -31,14 +33,14 @@ CLOSE_CAPABILITY = "tactic_trials_close_daily"
 AUCTION_CAPABILITY = "tactic_trials_auction_daily"
 # One document a session and capability is what the store keeps (`derived_daily_readings.newest`), so everything
 # that exists per slot has a capability per slot.
+SLOTS = ("close", "auction")
 READING_CAPABILITY = {"close": CLOSE_CAPABILITY, "auction": AUCTION_CAPABILITY}
-SETTLED_CAPABILITY = {"close": "tactic_trials_settled_close_daily", "auction": "tactic_trials_settled_auction_daily"}
 DIGEST_CAPABILITY = {"close": "tactic_trials_digest_close_daily", "auction": "tactic_trials_digest_auction_daily"}
 PAIRS_CAPABILITY = {"close": "tactic_trials_pairs_close_daily", "auction": "tactic_trials_pairs_auction_daily"}
-PAIR_SESSIONS = 250   # the mined pairs look at this many sessions back: their day digests are the large ones
+PAIR_SESSIONS = 250    # the mined pairs look at this many sessions back: their day documents are the large ones
+WINDOW_SESSIONS = 12   # a pick day is settled again every evening until every sell rule has left it, at most this long
 SUMMARY_CAPABILITY = "tactic_trials_summary_daily"
 RISK_CAPABILITY = "limit_up_risk_daily"
-DESK_CAPABILITY = "auction_open_desk_daily"
 REPLAY_DISAGREEMENT_LIMIT = 0.005
 # Sessions a replay holds at once. The owner host has 894 MB: a chunk's bars, exit paths and settled documents
 # are tens of megabytes at 20 sessions; the 250-session windows are read one day at a time.
@@ -46,7 +48,12 @@ REPLAY_CHUNK_SESSIONS = 20
 
 
 def _research(payload: Mapping[str, Any]) -> dict[str, Any]:
-    return {**payload, "research_only": True, "live_effect": "none"}
+    """The payload marked as research evidence, in plain JSON types (the store's adapter takes no Decimal)."""
+    return json_safe({**payload, "research_only": True, "live_effect": "none"})
+
+
+def _today() -> date:
+    return datetime.now(CN_TZ).date()
 
 
 def _read(database: Any, function: Any, *args: Any) -> Any:
@@ -54,11 +61,16 @@ def _read(database: Any, function: Any, *args: Any) -> Any:
         return function(connection, *args)
 
 
-def _reading_version(readings: Sequence[Mapping[str, Any]], day: date) -> Mapping[str, Any] | None:
-    for reading in reversed(readings):
-        if reading.get("trade_date") == day.isoformat() and reading.get("version") == VERSION:
-            return reading
-    return None
+def _stored(connection: Any, capability: str, day: date) -> dict[str, Any] | None:
+    """The day's stored document of the current version."""
+    documents = tactic_trial_repository.read_capability(connection, capability, day, day)
+    return documents[-1] if documents and documents[-1].get("version") == VERSION else None
+
+
+def _newest(connection: Any, capability: str, last: date) -> dict[str, Any] | None:
+    """The newest stored document up to ``last``, if it is of the current version."""
+    document = tactic_trial_repository.read_newest(connection, capability, last)
+    return document if document is not None and document.get("version") == VERSION else None
 
 
 def _prior_sessions(connection: Any, day: date, count: int = 3) -> list[date]:
@@ -114,8 +126,7 @@ def _build_close_reading(
 
 def refresh_close(database: Any, trade_date: date, *, apply: bool = True) -> dict[str, Any]:
     with database.transaction() as connection:
-        existing = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, trade_date, trade_date)
-        stored_reading = _reading_version(existing, trade_date)
+        stored_reading = _stored(connection, CLOSE_CAPABILITY, trade_date)
         if stored_reading:
             return _research({"status": "already_stored", "trade_date": trade_date.isoformat(), "rows": len(stored_reading.get("rows", [])), "stored": 0})
         list_reading = tactic_trial_repository.read_limit_lists(connection, trade_date, trade_date)
@@ -146,7 +157,7 @@ def _build_auction_reading(
     for desk_row in desk_rows:
         previous_row = previous_by_symbol.get(desk_row["symbol"])
         row = build_auction_row(desk_row, desk_rows, previous_row)
-        row["reference_close"] = previous_row.get("close") if previous_row else None
+        row["reference_close"] = previous_row["reference_close"] if previous_row else None
         rows.append(row)
     evaluated = evaluate_conditions(rows, {"flags": [], "unknown": []}, "auction")
     evaluated["day"]["prev"] = (previous_close or {}).get("day")
@@ -156,20 +167,18 @@ def _build_auction_reading(
 
 
 def refresh_auction(database: Any, trade_date: date, *, apply: bool = True) -> dict[str, Any]:
+    """The auction reading of a session, from its stored 09:25 table; decided when that table was stored."""
     with database.transaction() as connection:
-        existing = tactic_trial_repository.read_capability(connection, AUCTION_CAPABILITY, trade_date, trade_date)
-        if _reading_version(existing, trade_date):
+        if _stored(connection, AUCTION_CAPABILITY, trade_date):
             return _research({"status": "already_stored", "trade_date": trade_date.isoformat(), "stored": 0})
-        desk = tactic_trial_repository.read_capability(connection, DESK_CAPABILITY, trade_date, trade_date)
-        if not desk:
+        table = tactic_trial_repository.read_auction_table(connection, trade_date)
+        if table is None:
             return _research({"status": "not_ready", "trade_date": trade_date.isoformat(), "stored": 0})
-        desk_rows = desk[-1].get("rows", [])
         previous = _prior_sessions(connection, trade_date, 1)
-        close_readings = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, previous[0], previous[-1]) if previous else []
-        previous_reading = close_readings[-1] if close_readings else None
-        previous_reading = previous_reading if previous_reading and previous_reading.get("complete") else None
+        previous_reading = _stored(connection, CLOSE_CAPABILITY, previous[0]) if previous else None
         reading = _build_auction_reading(
-            trade_date, desk_rows, previous_reading, desk[-1]["scheduled_at"], "auction_open_desk_daily",
+            trade_date, table["rows"], previous_reading if previous_reading and previous_reading["complete"] else None,
+            table["stored_at"], "auction_open_desk_daily",
         )
     stored = derived_daily_readings.store(database, AUCTION_CAPABILITY, [reading]) if apply else {"stored": 0, "unchanged": 0}
     return _research({"status": "completed", "trade_date": trade_date.isoformat(), "rows": len(reading["rows"]), **stored})
@@ -183,152 +192,197 @@ def _settled_complete(result: Mapping[str, Any]) -> bool:
     return True
 
 
+def _decimal(value: Any) -> Decimal | None:
+    return None if value is None else Decimal(str(value))
+
+
 def _settle_reading(reading: Mapping[str, Any], bars_by_symbol: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, Any]:
+    """Every row's outcomes under every entry and sell rule, from the bars given. Prices enter as Decimal."""
     pick_day = date.fromisoformat(reading["trade_date"])
     settled_rows = []
     complete = True
-    for row in reading.get("rows", []):
+    for row in reading["rows"]:
         bars = bars_by_symbol.get(row["symbol"], ())
         prior_bars = [bar for bar in bars if bar["trading_date"] < pick_day and bar.get("close") is not None]
         path = [bar for bar in bars if bar["trading_date"] >= pick_day]
-        adjusted = all(bar.get("adj_factor") is not None and float(bar["adj_factor"]) > 0 for bar in (*prior_bars, *path))
-        pick_factor = float(path[0]["adj_factor"]) if adjusted and path else 1.0
-        prior_closes = [float(bar["close"]) * float(bar["adj_factor"]) / pick_factor if adjusted else bar["close"] for bar in prior_bars]
-        outcome = evaluate_pick(row["symbol"], reading["slot"], path, row.get("reference_close"), prior_closes)
+        adjusted = all(bar.get("adj_factor") is not None and bar["adj_factor"] > 0 for bar in (*prior_bars, *path))
+        # A prior close is put on the pick day's price basis; evaluate_pick moves it to the path's basis.
+        pick_factor = _decimal(path[0]["adj_factor"]) if adjusted and path else Decimal(1)
+        prior_closes = [_decimal(bar["close"]) * _decimal(bar["adj_factor"]) / pick_factor if adjusted else _decimal(bar["close"])
+                        for bar in prior_bars]
+        outcome = evaluate_pick(row["symbol"], reading["slot"], path, _decimal(row.get("reference_close")), prior_closes)
         complete = complete and _settled_complete(outcome)
         settled_rows.append({"symbol": row["symbol"], "name": row.get("name"), "outcomes": outcome})
-    return _research({"trade_date": reading["trade_date"], "slot": reading["slot"], "version": VERSION,
-        "rows": settled_rows, "complete": complete})
+    return {"trade_date": reading["trade_date"], "slot": reading["slot"], "rows": settled_rows, "complete": complete}
 
 
-def _settled_day(reading: Mapping[str, Any], settled: Mapping[str, Any]) -> dict[str, Any]:
-    """A reading with the outcomes of its rows: the shape the pure summary functions take."""
-    return {**reading, "outcomes": {row["symbol"]: row["outcomes"] for row in settled["rows"]}}
+def day_outcomes(database: Any, reading: Mapping[str, Any], as_of: date) -> dict[str, Any]:
+    """A reading with every row's outcomes from the bars up to ``as_of``, and whether every sell rule has left it.
+
+    Nothing of it is stored: the outcomes of a pick day are the reading plus the bars, and can be had again.
+    """
+    pick_day = date.fromisoformat(reading["trade_date"])
+    bars_by_symbol: dict[str, list[Mapping[str, Any]]] = {}
+    for bar in _read(database, tactic_trial_repository.read_exit_bars, [(row["symbol"], pick_day) for row in reading["rows"]]):
+        if bar["trading_date"] <= as_of:
+            bars_by_symbol.setdefault(str(bar["symbol"]), []).append(bar)
+    settled = _settle_reading(reading, bars_by_symbol)
+    return {**reading, "outcomes": {row["symbol"]: row["outcomes"] for row in settled["rows"]}, "settled": settled["complete"]}
 
 
-def _derived_documents(reading: Mapping[str, Any], settled: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """The day digest and the day's pairs: what the evening summary folds instead of the rows."""
-    day = _settled_day(reading, settled)
-    return (_research({**day_digest(day), "version": VERSION, "complete": settled["complete"]}),
-            _research({**day_pairs(day), "version": VERSION}))
+def _digest_documents(day: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The day's digest and its pairs: what the evening summary folds instead of the rows."""
+    return (_research({**day_digest(day), "version": VERSION}), _research({**day_pairs(day), "version": VERSION}))
 
 
-def _store_settled(database: Any, slot: str, readings: Sequence[Mapping[str, Any]], settled: Sequence[Mapping[str, Any]]) -> dict[str, int]:
-    derived = [_derived_documents(reading, document) for reading, document in zip(readings, settled)]
-    stored = derived_daily_readings.store(database, SETTLED_CAPABILITY[slot], list(settled))
-    derived_daily_readings.store(database, DIGEST_CAPABILITY[slot], [digest for digest, _pairs in derived])
-    derived_daily_readings.store(database, PAIRS_CAPABILITY[slot], [pairs for _digest, pairs in derived])
-    return stored
+def _store_final(database: Any, slot: str, digest: Mapping[str, Any], pairs: Mapping[str, Any]) -> None:
+    """Close a pick day: its pairs first, its digest last. A stored digest is what says the day is final."""
+    derived_daily_readings.store(database, PAIRS_CAPABILITY[slot], [dict(pairs)])
+    derived_daily_readings.store(database, DIGEST_CAPABILITY[slot], [dict(digest)])
 
 
-def settle(database: Any, as_of: date, *, apply: bool = True) -> dict[str, Any]:
-    with database.transaction() as connection:
-        sessions = tactic_trial_repository.read_open_sessions(connection, as_of - timedelta(days=30), as_of)[-12:]
-        first = sessions[0] if sessions else as_of
-        pending: list[Mapping[str, Any]] = []
-        for slot in ("close", "auction"):
-            complete = {item["trade_date"] for item in tactic_trial_repository.read_capability(
-                connection, SETTLED_CAPABILITY[slot], first, as_of) if item.get("complete")}
-            pending += [reading for reading in tactic_trial_repository.read_capability(connection, READING_CAPABILITY[slot], first, as_of)
-                        if reading["trade_date"] not in complete]
-        symbol_days = [(row["symbol"], date.fromisoformat(reading["trade_date"])) for reading in pending for row in reading.get("rows", [])]
-        bars = tactic_trial_repository.read_exit_bars(connection, symbol_days)
-    bars_by_key: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
-    for bar in bars:
-        bars_by_key.setdefault((str(bar["symbol"]), bar["pick_day"]), []).append(bar)
-    written = []
-    documents = []
-    for reading in pending:
-        pick_day = date.fromisoformat(reading["trade_date"])
-        document = _settle_reading(reading, {row["symbol"]: bars_by_key.get((row["symbol"], pick_day), []) for row in reading.get("rows", [])})
-        documents.append(document)
-        if apply:
-            written.append(_store_settled(database, reading["slot"], [reading], [document]))
-    return _research({"status": "completed", "as_of": as_of.isoformat(),
-                      "days": [{"trade_date": item["trade_date"], "slot": item["slot"], "complete": item["complete"]} for item in documents],
-                      "stored": written})
+def _current(digest: Mapping[str, Any], registry: str) -> bool:
+    return digest.get("version") == VERSION and digest.get("registry") == registry
 
 
 def summarise(database: Any, as_of: date, *, apply: bool = True) -> dict[str, Any]:
-    """Fold the stored day digests chunk by chunk; only the latest settled day of each slot is read in full."""
-    history, pairs = History(), PairHistory()
+    """Settle what is still open, fold every pick day's digest, and store the evening's summary.
+
+    Older pick days are read as stored digests, chunk by chunk. The pick days of the last ``WINDOW_SESSIONS``
+    sessions without a final digest are settled now, one day at a time, from the stored bars; a day is closed
+    (its digest stored, once) when every sell rule has left it, or when it is about to leave the window. The day
+    sections of the summary describe, for each slot, the newest pick day that has outcomes.
+    """
+    registry = registry_fingerprint()
     sessions = _read(database, tactic_trial_repository.read_open_sessions, as_of - timedelta(days=1200), as_of)
-    pair_first = sessions[-PAIR_SESSIONS] if len(sessions) > PAIR_SESSIONS else sessions[0] if sessions else as_of
-    for offset in range(0, len(sessions), tactic_trial_repository.CHUNK_SESSIONS):
-        chunk = sessions[offset:offset + tactic_trial_repository.CHUNK_SESSIONS]
+    window, older = sessions[-WINDOW_SESSIONS:], sessions[:-WINDOW_SESSIONS]
+    pair_first = sessions[-PAIR_SESSIONS:][0]
+    history, pairs, stale = History(), PairHistory(), 0
+    for offset in range(0, len(older), tactic_trial_repository.CHUNK_SESSIONS):
+        chunk = older[offset:offset + tactic_trial_repository.CHUNK_SESSIONS]
         with database.transaction() as connection:
-            for slot in ("close", "auction"):
+            for slot in SLOTS:
                 for digest in tactic_trial_repository.read_capability(connection, DIGEST_CAPABILITY[slot], chunk[0], chunk[-1]):
-                    history.add(digest)
+                    if _current(digest, registry):
+                        history.add(digest)
+                    else:
+                        stale += 1
                 if chunk[-1] >= pair_first:
                     for item in tactic_trial_repository.read_capability(connection, PAIRS_CAPABILITY[slot], max(chunk[0], pair_first), chunk[-1]):
                         pairs.add(item)
-    latest = []
-    with database.transaction() as connection:
-        recent_first = sessions[-12] if len(sessions) >= 12 else sessions[0] if sessions else as_of
-        for slot in ("close", "auction"):
-            settled = tactic_trial_repository.read_capability(connection, SETTLED_CAPABILITY[slot], recent_first, as_of)
-            if settled:
-                day = date.fromisoformat(settled[-1]["trade_date"])
-                reading = tactic_trial_repository.read_capability(connection, READING_CAPABILITY[slot], day, day)[-1]
-                latest.append(_settled_day(reading, settled[-1]))
-        previous_rows = derived_daily_readings.newest(connection, SUMMARY_CAPABILITY, as_of - timedelta(days=15), as_of - timedelta(days=1))
-    summary = daily_summary(history, pairs, latest, previous_rows[-1] if previous_rows else None)
-    summary = _research({**summary, "trade_date": as_of.isoformat(), "version": VERSION, "pair_sessions": PAIR_SESSIONS})
+    folded: dict[tuple[str, str], tuple[Mapping[str, Any], Mapping[str, Any]]] = {}
+    latest: dict[str, dict[str, Any]] = {}
+    today_rows: dict[str, int] = {}
+    open_days = 0
+    for slot in SLOTS:
+        with database.transaction() as connection:
+            final = {item["trade_date"]: item for item in tactic_trial_repository.read_capability(
+                connection, DIGEST_CAPABILITY[slot], window[0], window[-1]) if _current(item, registry)}
+            final_pairs = {item["trade_date"]: item for item in tactic_trial_repository.read_capability(
+                connection, PAIRS_CAPABILITY[slot], window[0], window[-1])}
+            readings = [reading for reading in tactic_trial_repository.read_capability(
+                connection, READING_CAPABILITY[slot], window[0], window[-1]) if reading.get("version") == VERSION]
+        newest_resolved = None
+        for reading in readings:
+            day_key = reading["trade_date"]
+            if day_key == as_of.isoformat():
+                today_rows[slot] = len(reading["rows"])
+            if day_key in final and day_key in final_pairs:
+                digest, pair_document = final[day_key], final_pairs[day_key]
+            else:
+                day = day_outcomes(database, reading, as_of)
+                digest, pair_document = _digest_documents(day)
+                if day["settled"] or day_key == window[0].isoformat():
+                    if apply:
+                        _store_final(database, slot, digest, pair_document)
+                else:
+                    open_days += 1
+                if digest["resolved"]:
+                    latest[slot] = day
+            folded[day_key, slot] = (digest, pair_document)
+            if digest["resolved"]:
+                newest_resolved = reading
+        if newest_resolved is not None and latest.get(slot, {}).get("trade_date") != newest_resolved["trade_date"]:
+            latest[slot] = day_outcomes(database, newest_resolved, as_of)
+    for day_key, slot in sorted(folded):
+        digest, pair_document = folded[day_key, slot]
+        history.add(digest)
+        if date.fromisoformat(day_key) >= pair_first:
+            pairs.add(pair_document)
+    previous = _read(database, _newest, SUMMARY_CAPABILITY, as_of - timedelta(days=1))
+    summary = daily_summary(history, pairs, [latest[slot] for slot in SLOTS if slot in latest], previous, today_rows)
+    summary = _research({**summary, "trade_date": as_of.isoformat(), "version": VERSION, "registry": registry,
+                         "pair_sessions": PAIR_SESSIONS, "open_days": open_days, "stale_digest_days": stale})
     stored = derived_daily_readings.store(database, SUMMARY_CAPABILITY, [summary]) if apply else {"stored": 0, "unchanged": 0}
     return _research({"status": "completed", "trade_date": as_of.isoformat(), **stored,
-                      "summary": {"records": len(summary["records"]), "lines": len(summary["lines"]),
-                                  "bytes": len(json.dumps(summary, ensure_ascii=False, default=str))}})
+                      "summary": {"records": len(summary["records"]), "lines": len(summary["lines"]), "open_days": open_days,
+                                  "stale_digest_days": stale,
+                                  "bytes": len(json.dumps(summary, ensure_ascii=False))}})
 
 
 def evening(database: Any, trade_date: date) -> dict[str, Any]:
-    """One session's evening run: the day's two readings, what the bars now settle, the summary.
+    """One session's evening run: the readings, then the summary (which settles what is still open).
 
     Started by the peer's evening loop after the day's limit-up risk reading exists (decision 0021). The receipt of
-    that stage closes on ``completed`` only; ``blocked`` (the day's lists or risk reading are missing) is tried again.
+    that stage closes on ``completed`` only; ``blocked`` is tried again on the next tick. Two things block it:
+    the day's lists or risk reading are not stored, or the store holds no close reading at all in the window (the
+    history replay has not been applied yet: a first day built without its previous sessions would have every
+    condition that looks back unknown, and the replay never replaces a reading built live).
     """
+    with database.transaction() as connection:
+        sessions = tactic_trial_repository.read_open_sessions(connection, trade_date - timedelta(days=30), trade_date)[-WINDOW_SESSIONS:]
+        known = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, sessions[0], sessions[-1])
+    if not known:
+        return _research({"status": "blocked", "trade_date": trade_date.isoformat(),
+                          "reason": "no close reading in the last sessions: apply the history replay first"})
+    repaired = None
+    if len(sessions) > 1 and known[-1]["trade_date"] < sessions[-2].isoformat():
+        # The evening before was missed: its readings are built first, from the lists and the risk reading the
+        # loop repairs for that session (decision 0021); older sessions are not repaired here.
+        repaired = {"auction": refresh_auction(database, sessions[-2])["status"], "close": refresh_close(database, sessions[-2])["status"]}
     auction = refresh_auction(database, trade_date)
     close = refresh_close(database, trade_date)
     if close["status"] == "blocked":
-        return _research({"status": "blocked", "trade_date": trade_date.isoformat(),
+        return _research({"status": "blocked", "trade_date": trade_date.isoformat(), "repaired": repaired,
                           "reason": "the day's limit lists or its risk reading are not stored"})
-    settled = settle(database, trade_date)
     summary = summarise(database, trade_date)
     return _research({"status": "completed", "trade_date": trade_date.isoformat(), "close": close["status"],
-                      "auction": auction["status"], "settled": settled["days"], "summary": summary["summary"]})
+                      "auction": auction["status"], "repaired": repaired, "summary": summary["summary"]})
 
 
-def _newest(connection: Any, capability: str, day: date | None, end: date | None = None) -> dict[str, Any] | None:
-    """A day's stored reading of the current version; without a day, the newest of the last two weeks."""
-    end = end or day or datetime.now(CN_TZ).date()
-    stored = tactic_trial_repository.read_capability(connection, capability, day or end - timedelta(days=14), end)
-    valid = [reading for reading in stored if reading.get("version") == VERSION]
-    return valid[-1] if valid else None
+def read_summary(database: Any, day: date | None = None) -> dict[str, Any]:
+    """The newest summary up to a day (today when none is given): before the evening run that is the one before."""
+    reading = _read(database, _newest, SUMMARY_CAPABILITY, day or _today())
+    return _research({"version": VERSION, "reading": reading})
 
 
-def read_summary(connection: Any, day: date | None = None) -> dict[str, Any]:
-    return _research({"version": VERSION, "reading": _newest(connection, SUMMARY_CAPABILITY, day)})
+def read_board(database: Any, day: date | None = None) -> dict[str, Any]:
+    """A session's board: its auction picks by side, the close picks of the session before, each tactic's label.
 
-
-def read_board(connection: Any, day: date | None = None) -> dict[str, Any]:
-    """The 09:25 board: the auction picks by side, the close picks of the session before, each tactic's label.
-
+    Without a day it is the session after the newest close reading: in the evening that is tomorrow's board (the
+    close picks are there, the auction is not yet); when the calendar does not hold that session yet, today's.
     The labels are those of the newest summary before the board's day: what was known when the board was built.
     """
-    auction = _newest(connection, AUCTION_CAPABILITY, day)
-    board_day = date.fromisoformat(auction["trade_date"]) if auction else day or datetime.now(CN_TZ).date()
-    previous = _prior_sessions(connection, board_day, 1)
-    close = _newest(connection, CLOSE_CAPABILITY, previous[0]) if previous else None
-    summary = _newest(connection, SUMMARY_CAPABILITY, None, board_day - timedelta(days=1))
+    with database.transaction() as connection:
+        today = _today()
+        if day is None:
+            newest_close = _newest(connection, CLOSE_CAPABILITY, today)
+            following = [] if newest_close is None else tactic_trial_repository.read_sessions_after(
+                connection, date.fromisoformat(newest_close["trade_date"]), 1)
+            day = following[0] if following else today
+        auction = _stored(connection, AUCTION_CAPABILITY, day)
+        previous = _prior_sessions(connection, day, 1)
+        close = _stored(connection, CLOSE_CAPABILITY, previous[0]) if previous else None
+        summary = _newest(connection, SUMMARY_CAPABILITY, day - timedelta(days=1))
     records = summary["records"] if summary else {}
     return _research({
-        "version": VERSION, "trade_date": board_day.isoformat(),
-        "auction": None if auction is None else {"decided_at": auction["decided_at"], "source": auction.get("source"),
+        "version": VERSION, "trade_date": day.isoformat(),
+        "auction": None if auction is None else {"decided_at": auction["decided_at"], "source": auction["source"],
                                                  "rows": len(auction["rows"]), **day_board(auction)},
         "close": None if close is None else {"trade_date": close["trade_date"], "rows": len(close["rows"]), **day_board(close)},
         "labels_as_of": summary["trade_date"] if summary else None,
         "tactics": [{**tactic_card(tactic), "label": records.get(tactic.key, {}).get("label"), "q": records.get(tactic.key, {}).get("q")}
-                    for tactic in TACTICS if tactic_card(tactic)["combination"]],
+                    for tactic in TACTICS if tactic.combination],
     })
 
 
@@ -336,21 +390,22 @@ def tactic_by_key(key: str) -> Tactic | None:
     return next((tactic for tactic in TACTICS if tactic.key == key), None)
 
 
-def read_cases(connection: Any, tactic: Tactic, days: int = 10) -> dict[str, Any]:
-    """A tactic's pick days among the last ``days`` sessions, newest first; a day not settled yet has no outcomes."""
-    today = datetime.now(CN_TZ).date()
-    sessions = tactic_trial_repository.read_open_sessions(connection, today - timedelta(days=days * 2 + 14), today)[-days:]
-    if not sessions:
-        return _research({"version": VERSION, "tactic": tactic_card(tactic), "sessions": 0, "days": []})
-    settled = {item["trade_date"]: item for item in tactic_trial_repository.read_capability(
-        connection, SETTLED_CAPABILITY[tactic.slot], sessions[0], sessions[-1])}
+def read_cases(database: Any, tactic: Tactic, days: int = 10) -> dict[str, Any]:
+    """A tactic's pick days among the last ``days`` sessions, newest first, with outcomes as the bars give them now.
+
+    One session at a time, and the bars are read only for a day the tactic picked something on.
+    """
+    today = _today()
+    sessions = _read(database, tactic_trial_repository.read_open_sessions, today - timedelta(days=days * 2 + 14), today)[-days:]
     result = []
-    for reading in tactic_trial_repository.read_capability(connection, READING_CAPABILITY[tactic.slot], sessions[0], sessions[-1]):
-        outcomes = settled.get(reading["trade_date"])
-        item = tactic_day({**reading, "outcomes": {row["symbol"]: row["outcomes"] for row in outcomes["rows"]} if outcomes else {}}, tactic)
-        if item["picks"]:
-            result.append({**item, "settled": bool(outcomes and outcomes.get("complete"))})
-    return _research({"version": VERSION, "tactic": tactic_card(tactic), "sessions": len(sessions), "days": result[::-1]})
+    for session in reversed(sessions):
+        reading = _read(database, _stored, READING_CAPABILITY[tactic.slot], session)
+        if reading is None or not tactic_day({**reading, "outcomes": {}}, tactic)["picks"]:
+            continue
+        item = tactic_day(day_outcomes(database, reading, today), tactic)
+        # Settled for this view: every pick has the tactic's own outcome (the day's other sell rules may still be open).
+        result.append({**item, "settled": all(pick["primary"] is not None for pick in item["picks"])})
+    return _research({"version": VERSION, "tactic": tactic_card(tactic), "sessions": len(sessions), "days": result})
 
 
 DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
@@ -367,13 +422,17 @@ class TacticAuctionDependencies:
 
 
 async def auction_reading(deps: TacticAuctionDependencies, trade_date: date) -> str:
-    """Wait for the day's stored 09:25 table, then store the auction reading.
+    """Wait for the day's stored 09:25 table, then store the auction reading; the status says how the morning ended.
 
-    The stored table is the only interface to the auction capture. A busy database is waited out, not an exit.
+    The stored table is the only interface to the auction capture. A saturated executor or a timed-out call is
+    waited out; any other database error ends the task, and the task supervisor starts it again.
     """
+    session, status = None, "not_ready"
     while deps.now().astimezone(CN_TZ).time() <= AUCTION_UNTIL:
         try:
-            if not await deps.session_open(trade_date):
+            if session is None:
+                session = await deps.session_open(trade_date)
+            if not session:
                 return "not_a_session"
             status = (await deps.run_database(refresh_auction, deps.database, trade_date, timeout_seconds=10))["status"]
         except DATABASE_UNAVAILABLE:
@@ -381,7 +440,7 @@ async def auction_reading(deps: TacticAuctionDependencies, trade_date: date) -> 
         if status not in ("not_ready", "database_busy"):
             return status
         await deps.sleep(5)
-    return "no_table"
+    return "no_table" if status == "not_ready" else status
 
 
 async def run_tactic_auction_loop(deps: TacticAuctionDependencies, *, log: Callable[[str], None] = print) -> None:
@@ -410,7 +469,7 @@ def _report_view(report: Mapping[str, Mapping[str, int]]) -> dict[str, dict[str,
             for year, value in report.items()}
 
 
-def _report_add(report: dict[str, dict[str, int]], reading: Mapping[str, Any], settled: Mapping[str, Any] | None) -> None:
+def _report_add(report: dict[str, dict[str, int]], reading: Mapping[str, Any], outcomes: Mapping[str, Mapping[str, Any]]) -> None:
     year = str(reading["trade_date"])[:4]
     value = report.setdefault(year, {"days": 0, "rows": 0, "skipped_days": 0,
                                      "not_at_limit": 0, "history_raw": 0, "returns": 0, "raw_returns": 0})
@@ -418,13 +477,12 @@ def _report_add(report: dict[str, dict[str, int]], reading: Mapping[str, Any], s
     value["rows"] += len(reading.get("rows", []))
     value["not_at_limit"] += reading.get("coverage", {}).get("not_at_limit", 0)
     value["history_raw"] += sum(row.get("history_basis") == "unadjusted_missing_adj_factor" for row in reading.get("rows", []))
-    if settled:
-        for row in settled.get("rows", []):
-            for entries in row.get("outcomes", {}).get("entries", {}).values():
-                for outcome in entries.values():
-                    if outcome.get("status") == "settled":
-                        value["returns"] += 1
-                        value["raw_returns"] += outcome.get("price_basis") == "unadjusted_missing_adj_factor"
+    for row_outcomes in outcomes.values():
+        for entries in row_outcomes["entries"].values():
+            for outcome in entries.values():
+                if outcome.get("status") == "settled":
+                    value["returns"] += 1
+                    value["raw_returns"] += outcome.get("price_basis") == "unadjusted_missing_adj_factor"
 
 
 def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = False) -> dict[str, Any]:
@@ -442,11 +500,18 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
         by_day = {reading["trade_date"]: reading for reading in prior_readings}
         recent = [(day, by_day.get(day.isoformat())) for day in prior_sessions]
     all_sessions = ([day for day, _reading in recent] + sessions)
+    today = _today()
+    # A pick day older than the evening run's window is closed as it stands; a newer one only when it is settled,
+    # and otherwise left to the evening run.
+    window_first = _read(database, tactic_trial_repository.read_open_sessions, today - timedelta(days=30), today)[-WINDOW_SESSIONS:][0]
     refused = None
     for chunk_index, chunk in enumerate(chunks):
         first, last = chunk[0], chunk[-1]
         documents: list[Mapping[str, Any]] = []
-        settled_documents: list[Mapping[str, Any]] = []
+        # A reading built live is evidence of what was known then: the replay uses it and never replaces it.
+        live = {reading["trade_date"]: reading
+                for reading in _read(database, tactic_trial_repository.read_capability, READING_CAPABILITY[slot], first, last)
+                if reading.get("version") == VERSION and not reading.get("replayed")}
         if slot == "close":
             lists = _read(database, tactic_trial_repository.read_limit_lists, first, last)
             risk_rows = _read(database, tactic_trial_repository.read_capability, RISK_CAPABILITY, first, last)
@@ -471,14 +536,16 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
                     recent.append((day, None))
                     recent = recent[-3:]
                     continue
-                windows: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
-                for row in _read(database, tactic_trial_repository.read_history_windows,
-                                 [(symbol, day) for symbol in symbols_by_day[day]]):
-                    windows.setdefault((str(row["symbol"]), row["pick_day"]), []).append(row)
-                reading = _build_close_reading(
-                    day, item["lists"], risk.get(day.isoformat(), {}), bars_by_day.get(day, {}), windows,
-                    turnover, previous, replayed=True,
-                )
+                reading = live.get(day.isoformat())
+                if reading is None:
+                    windows: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
+                    for row in _read(database, tactic_trial_repository.read_history_windows,
+                                     [(symbol, day) for symbol in symbols_by_day[day]]):
+                        windows.setdefault((str(row["symbol"]), row["pick_day"]), []).append(row)
+                    reading = _build_close_reading(
+                        day, item["lists"], risk.get(day.isoformat(), {}), bars_by_day.get(day, {}), windows,
+                        turnover, previous, replayed=True,
+                    )
                 recent.append((day, reading))
                 recent = recent[-3:]
                 documents.append(reading)
@@ -497,6 +564,9 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
             for row in bar_rows:
                 bars_by_day.setdefault(str(row["trading_date"]), {})[str(row["symbol"])] = row
             for day in chunk:
+                if day.isoformat() in live:
+                    documents.append(live[day.isoformat()])
+                    continue
                 auction = by_day.get(day.isoformat(), {"rows": []})
                 prior_session = all_sessions[all_sessions.index(day) - 1] if all_sessions.index(day) else None
                 previous_close = close_by_day.get(prior_session.isoformat()) if prior_session else None
@@ -527,16 +597,12 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
                 )
                 reading["replayed"] = True
                 documents.append(reading)
-        symbol_days = [(row["symbol"], date.fromisoformat(reading["trade_date"])) for reading in documents for row in reading.get("rows", [])]
-        exit_bars = _read(database, tactic_trial_repository.read_exit_bars, symbol_days)
-        bars_by_key: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
-        for bar in exit_bars:
-            bars_by_key.setdefault((str(bar["symbol"]), bar["pick_day"]), []).append(bar)
+        finals = []
         for reading in documents:
-            pick_day = date.fromisoformat(reading["trade_date"])
-            settled = {**_settle_reading(reading, {row["symbol"]: bars_by_key.get((row["symbol"], pick_day), []) for row in reading.get("rows", [])}), "replayed": True}
-            settled_documents.append(settled)
-            _report_add(report, reading, settled)
+            day = day_outcomes(database, reading, today)
+            _report_add(report, reading, day["outcomes"])
+            if day["settled"] or date.fromisoformat(reading["trade_date"]) < window_first:
+                finals.append(_digest_documents(day))
         for year, count in skipped.items():
             report.setdefault(year, {"days": 0, "rows": 0, "skipped_days": 0, "not_at_limit": 0, "history_raw": 0, "returns": 0, "raw_returns": 0})["skipped_days"] = count
         refused = next((year for year, value in _report_view(report).items()
@@ -544,27 +610,53 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
         if apply and refused is not None:
             return _research({"status": "refused", "reason": "limit_membership_disagreement", "year": refused,
                               "stored_chunks": chunk_index, "years": _report_view(report)})
-        if apply and documents:
-            derived_daily_readings.store(database, READING_CAPABILITY[slot], documents)
-            _store_settled(database, slot, documents, settled_documents)
+        if apply:
+            derived_daily_readings.store(database, READING_CAPABILITY[slot], [reading for reading in documents if reading["trade_date"] not in live])
+            for digest, pair_document in finals:
+                _store_final(database, slot, digest, pair_document)
     return _research({"status": "completed", "slot": slot, "start": start.isoformat(), "end": end.isoformat(),
                       "years": _report_view(report), "days": sum(value["days"] for value in report.values()),
                       "rows": sum(value["rows"] for value in report.values()), "replayed": True})
 
 
+def rebuild_digests(database: Any, slot: str, start: date, end: date, *, apply: bool = False) -> dict[str, Any]:
+    """Compute the digests of the stored readings of a range again, from the bars, and store those that are final.
+
+    For after a change to the tactic registry: the readings stay as they are.
+    """
+    today = _today()
+    window_first = _read(database, tactic_trial_repository.read_open_sessions, today - timedelta(days=30), today)[-WINDOW_SESSIONS:][0]
+    days = stored = 0
+    for session in _read(database, tactic_trial_repository.read_open_sessions, start, end):
+        reading = _read(database, _stored, READING_CAPABILITY[slot], session)
+        if reading is None:
+            continue
+        day = day_outcomes(database, reading, today)
+        days += 1
+        if apply and (day["settled"] or session < window_first):
+            _store_final(database, slot, *_digest_documents(day))
+            stored += 1
+    return _research({"status": "completed", "slot": slot, "start": start.isoformat(), "end": end.isoformat(),
+                      "days": days, "stored": stored, "registry": registry_fingerprint()})
+
+
 def main() -> None:  # pragma: no cover
     parser = argparse.ArgumentParser()
-    parser.add_argument("--slot", choices=("close", "auction"))
+    parser.add_argument("--slot", choices=SLOTS)
     parser.add_argument("--start", type=date.fromisoformat)
     parser.add_argument("--end", type=date.fromisoformat)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--summarise", type=date.fromisoformat)
+    parser.add_argument("--digests", action="store_true", help="rebuild the digests of the stored readings instead of replaying")
     args = parser.parse_args()
     from .database import Database
     database = Database(); database.open()
-    result = summarise(database, args.summarise, apply=args.apply) if args.summarise else replay(database, args.slot, args.start, args.end, apply=args.apply)
+    if args.summarise:
+        result = summarise(database, args.summarise, apply=args.apply)
+    else:
+        result = (rebuild_digests if args.digests else replay)(database, args.slot, args.start, args.end, apply=args.apply)
     # ru_maxrss is in kilobytes on Linux, where this runs: the run's peak memory beside its result.
-    print(json.dumps({**result, "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024}, ensure_ascii=False, default=str))
+    print(json.dumps({**result, "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
@@ -572,6 +664,6 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "TacticAuctionDependencies", "auction_reading", "evening", "read_board", "read_cases", "read_summary",
-    "refresh_auction", "refresh_close", "replay", "run_tactic_auction_loop", "settle", "summarise", "tactic_by_key",
+    "TacticAuctionDependencies", "auction_reading", "day_outcomes", "evening", "read_board", "read_cases", "read_summary",
+    "rebuild_digests", "refresh_auction", "refresh_close", "replay", "run_tactic_auction_loop", "summarise", "tactic_by_key",
 ]

@@ -8,7 +8,7 @@ from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
 from .datasources.http import ashare_symbol
-from .derived_daily_readings import newest, session_close
+from .derived_daily_readings import latest, newest, session_close
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
 CHUNK_SESSIONS = 60
@@ -102,6 +102,20 @@ def read_capability(connection: Any, capability: str, start: date, end: date) ->
     return newest(connection, capability, start, end)
 
 
+def read_newest(connection: Any, capability: str, last: date) -> dict[str, Any] | None:
+    """The newest stored reading of the newest session up to ``last``."""
+    found = latest(connection, capability, last)
+    return None if found is None else found[1]
+
+
+def read_auction_table(connection: Any, day: date) -> dict[str, Any] | None:
+    """The day's stored 09:25 table with the time it was stored: the table itself carries no time."""
+    found = latest(connection, "auction_open_desk_daily", day)
+    if found is None or found[1]["trade_date"] != day.isoformat():
+        return None
+    return {"stored_at": found[0].astimezone(CN_TZ).isoformat(), "rows": found[1]["rows"]}
+
+
 def read_auction_lists(connection: Any, start: date, end: date) -> list[dict[str, Any]]:
     rows = connection.execute(
         """SELECT effective_at,symbol,payload FROM quant.raw_market_observations
@@ -135,18 +149,17 @@ def read_open_sessions(connection: Any, start: date, end: date) -> list[date]:
     return [row["calendar_date"] for row in rows]
 
 
-def read_next_sessions(connection: Any, day: date, count: int) -> list[date]:
-    today = datetime.now(CN_TZ).date()
+def read_sessions_after(connection: Any, day: date, count: int) -> list[date]:
+    """The next sessions after a day, as far as the calendar is loaded: unlike the range read, the future counts."""
     rows = connection.execute(
         """SELECT calendar_date FROM quant.market_trade_calendar
-            WHERE exchange='SSE' AND is_open AND calendar_date>%s AND calendar_date<=%s
-            ORDER BY calendar_date LIMIT %s""", (day, today, count),
+            WHERE exchange='SSE' AND is_open AND calendar_date>%s ORDER BY calendar_date LIMIT %s""", (day, count),
     ).fetchall()
     return [row["calendar_date"] for row in rows]
 
 
 __all__ = [
-    "CHUNK_SESSIONS", "read_auction_lists", "read_capability",
+    "CHUNK_SESSIONS", "read_auction_lists", "read_auction_table", "read_capability",
     "read_day_bars", "read_exit_bars", "read_history_windows", "read_limit_lists", "read_market_turnover",
-    "read_next_sessions", "read_open_sessions",
+    "read_newest", "read_open_sessions", "read_sessions_after",
 ]

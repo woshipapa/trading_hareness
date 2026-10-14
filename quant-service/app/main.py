@@ -4220,7 +4220,8 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "post_close_public_archive": settings.flag("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED"),
             "storage_tiering_mover": settings.flag("STORAGE_TIERING_MOVER_ENABLED"),
             "peer_close_research": settings.flag("PEER_CLOSE_RESEARCH_ENABLED"),
-            "tactic_auction": settings.flag("TACTIC_AUCTION_ENABLED"),
+            # Where the evening stage runs (see peer_close_research_loop): its reading is the stage's input.
+            "tactic_auction": settings.flag("TACTIC_AUCTION_ENABLED") and longhu_vendor_configured(),
         },
         loops={
             "intraday_monitor": lambda: intraday_monitor_loop(interval_seconds),

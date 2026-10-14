@@ -47,6 +47,16 @@ def newest(connection: Any, capability: str, first: date, last: date) -> list[di
     return [_reading(row) for row in rows]
 
 
+def latest(connection: Any, capability: str, last: date) -> tuple[datetime, dict[str, Any]] | None:
+    """The newest reading of the newest session up to ``last``, with the time it was stored: one row, however long the history."""
+    row = connection.execute(
+        """SELECT available_at, normalized FROM quant.raw_market_observations
+            WHERE provider_key=%s AND capability=%s AND symbol IS NULL AND effective_at <= %s
+            ORDER BY effective_at DESC, available_at DESC LIMIT 1""",
+        (PROVIDER_KEY, capability, session_close(last))).fetchone()
+    return None if row is None else (dict(row)["available_at"], _reading(row))
+
+
 def _content(reading: dict[str, Any]) -> str:
     return json.dumps({key: value for key, value in reading.items() if key not in STORAGE_KEYS},
                       sort_keys=True, ensure_ascii=False, default=str)
@@ -66,4 +76,4 @@ def store(database: Any, capability: str, readings: list[dict[str, Any]]) -> dic
     return {"stored": written, "unchanged": len(readings) - len(rows)}
 
 
-__all__ = ["CN_TZ", "PROVIDER_KEY", "newest", "session_close", "store"]
+__all__ = ["CN_TZ", "PROVIDER_KEY", "latest", "newest", "session_close", "store"]

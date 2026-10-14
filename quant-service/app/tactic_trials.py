@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from array import array
 from collections import deque
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from hashlib import sha256
 from math import erfc, sqrt
 from statistics import mean, stdev
 from typing import Any, Mapping, Sequence
@@ -36,6 +38,11 @@ class Tactic:
     primary: str = ""
     expects: int = 1
     registered_on: date = REGISTERED_ON
+
+    @property
+    def combination(self) -> bool:
+        """A registered combination, as opposed to the single-condition tactic every stock condition gets."""
+        return not self.key.startswith("only.")
 
 
 def _combo(
@@ -246,15 +253,16 @@ def _date(value: Any) -> date:
     return value if isinstance(value, date) else date.fromisoformat(str(value))
 
 
-def _json(value: Any) -> Any:
+def json_safe(value: Any) -> Any:
+    """The value as plain JSON types: what a stored document must be (the store's adapter takes no Decimal)."""
     if isinstance(value, Decimal):
         return float(value)
     if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, Mapping):
-        return {str(key): _json(item) for key, item in value.items()}
+        return {str(key): json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_json(item) for item in value]
+        return [json_safe(item) for item in value]
     return value
 
 
@@ -271,9 +279,9 @@ def _cached_days(days: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic]) -
 
 def _record_outcomes(tactic: Tactic) -> tuple[str, ...]:
     """The outcomes a tactic's records are kept for: every one for a combination, three for a single condition."""
-    if tactic.key.startswith("only."):
-        return tuple(dict.fromkeys((tactic.primary, f"{tactic.entry}:{tactic.exit}", f"{tactic.entry}:close")))
-    return _outcome_keys()
+    if tactic.combination:
+        return _outcome_keys()
+    return tuple(dict.fromkeys((tactic.primary, f"{tactic.entry}:{tactic.exit}", f"{tactic.entry}:close")))
 
 
 class _Series:
@@ -375,6 +383,20 @@ def _seal_counts(day: Mapping[str, Any]) -> dict[str, list[int]]:
     return counts
 
 
+def registry_fingerprint(tactics: Sequence[Tactic] = TACTICS) -> str:
+    """What a stored digest was computed with: the tactics' definitions, the outcomes kept for each, the sell rules.
+
+    A condition's own rule is code and is not in it: changing a threshold needs a new reading version.
+    """
+    definition = [(tactic.key, tactic.slot, tactic.all_of, tactic.none_of, tactic.at_least, tactic.day_conditions,
+                   tactic.cell, tactic.entry, tactic.exit, tactic.primary, _record_outcomes(tactic)) for tactic in tactics]
+    return sha256(json.dumps([definition, [exit_.key for exit_ in EXITS]], sort_keys=True).encode()).hexdigest()[:12]
+
+
+def _resolved(outcome: Mapping[str, Any]) -> bool:
+    return any(item.get("status") == "settled" for exits in outcome.get("entries", {}).values() for item in exits.values())
+
+
 def day_digest(day: Mapping[str, Any], tactics: Sequence[Tactic] = TACTICS) -> dict[str, Any]:
     """What the records, the switch table, the sell points and the sealing rates need from one settled day.
 
@@ -389,14 +411,15 @@ def day_digest(day: Mapping[str, Any], tactics: Sequence[Tactic] = TACTICS) -> d
         result = day_result(tactic, rows, day.get("day", {}), outcomes, _record_outcomes(tactic))
         results[tactic.key] = {"picks": result["counts"]["picks"], "outcomes": {
             key: [item["pick_mean"], item["difference"]] for key, item in result["outcomes"].items()}}
-    digest = {"trade_date": _date(day["trade_date"]), "slot": slot, "rows": len(rows), "tactics": results,
-              "sell": _sell_scope_sums(day), "seal": _seal_counts(day)}
+    digest = {"trade_date": _date(day["trade_date"]), "slot": slot, "registry": registry_fingerprint(tactics),
+              "rows": len(rows), "resolved": sum(_resolved(outcomes.get(row["symbol"], {})) for row in rows),
+              "tactics": results, "sell": _sell_scope_sums(day), "seal": _seal_counts(day)}
     if slot == "close":
         digest["switch"] = {
             "daily": _mean([_outcome_value(outcomes.get(row["symbol"], {}), "held:close")[0] for row in rows]),
             "flags": list(day.get("day", {}).get("flags", ())), "unknown": list(day.get("day", {}).get("unknown", ())),
         }
-    return _json(digest)
+    return json_safe(digest)
 
 
 class History:
@@ -417,12 +440,12 @@ class History:
         slot, day = digest["slot"], _date(digest["trade_date"])
         self.rows[slot] += digest["rows"]
         for tactic in self.tactics:
-            result = digest["tactics"].get(tactic.key)
-            if result is None:
+            if tactic.slot != slot:
                 continue
+            result = digest["tactics"][tactic.key]
             forward = day >= tactic.registered_on
-            for outcome, (pick_mean, difference) in result["outcomes"].items():
-                self._series[tactic.key, outcome, "forward" if forward else "replay"].add(result["picks"], pick_mean, difference)
+            for outcome in _record_outcomes(tactic):
+                self._series[tactic.key, outcome, "forward" if forward else "replay"].add(result["picks"], *result["outcomes"][outcome])
             if forward:
                 self._recent[tactic.key].append(result)
         _add_sell(self.sell[slot], digest["sell"])
@@ -465,7 +488,7 @@ class History:
             primary = records[tactic.key]["outcomes"][tactic.primary]["forward"]
             records[tactic.key]["label"] = _label(primary, tactic.expects)
             records[tactic.key]["q"] = q_values[tactic.key]
-        return _json(records)
+        return json_safe(records)
 
     def switch_records(self) -> dict[str, Any]:
         result = {}
@@ -479,7 +502,7 @@ class History:
                 false_variance = sum((value - mean(false_values)) ** 2 for value in false_values) / (len(false_values) - 1)
                 denominator = sqrt(true_variance / len(true_values) + false_variance / len(false_values))
                 t_value = None if denominator == 0 else difference / denominator
-            result[key] = _json({
+            result[key] = json_safe({
                 "true_days": len(true_values), "false_days": len(false_values),
                 "true_mean": _mean(true_values), "false_mean": _mean(false_values),
                 "difference": difference, "t": t_value,
@@ -488,41 +511,25 @@ class History:
 
     def exit_tables(self, slot: str) -> dict[str, Any]:
         result = {}
-        for tactic in self.tactics[:20]:
-            if tactic.slot != slot:
+        for tactic in self.tactics:
+            if tactic.slot != slot or not tactic.combination:
                 continue
             exits = {}
             for exit_ in EXITS:
                 values = [value for period in ("replay", "forward")
                           for value in self._series[tactic.key, f"{tactic.entry}:{exit_.key}", period].pick_means]
-                exits[exit_.key] = _json({"key": exit_.key, "mean": _mean(values), "days": len(values)})
+                exits[exit_.key] = json_safe({"key": exit_.key, "mean": _mean(values), "days": len(values)})
             result[tactic.key] = _exit_choices(tactic, exits)
         return result
 
     def seal_rates(self, slot: str) -> dict[str, Any]:
-        return {bucket: {"day_rate": None, "cumulative_rate": sealed / count if count else None, "count": count}
-                for bucket, (sealed, count) in self.seal[slot].items()}
+        return {bucket: {"cumulative_rate": sealed / count if count else None, "count": count}
+                for bucket, (sealed, count) in sorted(self.seal[slot].items())}
 
     def sell_scope(self, slot: str) -> dict[str, Any]:
         sums = self.sell[slot] or _sell_scope_sums({"slot": slot, "rows": []})
-        return _sell_means(sums)
-
-
-def history_of(days: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic] = TACTICS) -> History:
-    history = History(tactics)
-    for day in days:
-        history.add(day_digest(day, tactics))
-    return history
-
-
-def build_records(days: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic] = TACTICS) -> dict[str, Any]:
-    """Build replay, forward and recent records from settled pick days."""
-    return history_of(days, tactics).records()
-
-
-def build_switch_records(days: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Compare the close-slot held/close outcome on True and False day conditions."""
-    return history_of(days).switch_records()
+        # Buckets in one order whatever day came first (the stored digests come back with their keys reordered).
+        return _sell_means({name: group if name == "all" else dict(sorted(group.items())) for name, group in sums.items()})
 
 
 def _exit_choices(tactic: Tactic, exits: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
@@ -534,41 +541,15 @@ def _exit_choices(tactic: Tactic, exits: Mapping[str, Mapping[str, Any]]) -> dic
     }
 
 
-def _day_exit_tables(cached: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic], slot: str) -> dict[str, Any]:
-    """The exit table of the latest day alone."""
-    result = {}
-    for tactic in tactics[:20]:
-        if tactic.slot != slot:
-            continue
-        relevant = [item["results"][tactic.key] for item in cached if tactic.key in item["results"]]
-        exits = {}
-        for exit_ in EXITS:
-            daily = [item["outcomes"][f"{tactic.entry}:{exit_.key}"]["pick_mean"] for item in relevant]
-            daily = [value for value in daily if value is not None]
-            exits[exit_.key] = _json({"key": exit_.key, "mean": _mean(daily), "days": len(daily)})
-        result[tactic.key] = _exit_choices(tactic, exits)
-    return result
-
-
-def _sell_points(history: History, latest: Sequence[Mapping[str, Any]], latest_cache: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    result = {}
-    for slot in ("close", "auction"):
-        day = next((item for item in latest if item["slot"] == slot), None)
-        result[slot] = {
-            "day": _sell_means(_sell_scope_sums(day if day is not None else {"slot": slot, "rows": []})),
-            "cumulative": history.sell_scope(slot),
-            "exit_tables": {
-                "day": _day_exit_tables([item for item in latest_cache if item["source"]["slot"] == slot], history.tactics, slot),
-                "cumulative": history.exit_tables(slot),
-            },
-        }
-    return _json(result)
-
-
-def build_sell_points(days: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic] = TACTICS) -> dict[str, Any]:
-    """Aggregate exit returns and room for the latest day and all supplied days."""
-    latest = _latest_days(days)
-    return _sell_points(history_of(days, tactics), latest, _cached_days(latest, tactics))
+def _sell_points(history: History, latest: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Exit returns and room for the latest pick day of each slot and for the whole history."""
+    day = History(history.tactics)
+    for item in latest:
+        day.add(day_digest(item, history.tactics))
+    return json_safe({slot: {
+        "day": day.sell_scope(slot), "cumulative": history.sell_scope(slot),
+        "exit_tables": {"day": day.exit_tables(slot), "cumulative": history.exit_tables(slot)},
+    } for slot in ("close", "auction")})
 
 
 def _pair_condition_keys(slot: str) -> tuple[str, ...]:
@@ -606,15 +587,15 @@ def day_pairs(day: Mapping[str, Any]) -> dict[str, Any]:
         comparison = _mean(bucket["comparison"])
         if comparison is not None:
             state["differences"].extend(value - comparison for value in bucket["pick"] if value is not None)
-    return _json({"trade_date": _date(day["trade_date"]), "slot": slot, "pairs": {
+    return json_safe({"trade_date": _date(day["trade_date"]), "slot": slot, "pairs": {
         "|".join(pair): [state["picks"], _mean(state["pick_values"]), _mean(state["differences"])]
         for pair, state in states.items()}})
 
 
-def _pair_condition_name(key: str) -> str:
-    """A condition's name in a pair; one read from the session before (``prev.``) says so."""
+def _condition_name(key: str) -> str:
+    """A condition's name; one read from the session before (``prev.``) says so."""
     names = {condition.key: condition.name for condition in CONDITIONS}
-    return f"昨日{names.get(key[5:], key[5:])}" if key.startswith("prev.") else names.get(key, key)
+    return f"昨日{names[key[5:]]}" if key.startswith("prev.") else names[key]
 
 
 class PairHistory:
@@ -643,7 +624,7 @@ class PairHistory:
                 if len(differences) >= 3:
                     deviation = stdev(differences)
                     t_value = None if deviation == 0 else mean(differences) / (deviation / sqrt(len(differences)))
-                pairs.append({"conditions": key.split("|"), "names": [_pair_condition_name(item) for item in key.split("|")], **_json({
+                pairs.append({"conditions": key.split("|"), "names": [_condition_name(item) for item in key.split("|")], **json_safe({
                     "days_with_picks": state["days"], "picks": state["picks"],
                     "mean_daily_picks_mean": _mean(list(state["pick_means"])),
                     "mean_daily_difference": _mean(differences), "t": t_value,
@@ -651,7 +632,7 @@ class PairHistory:
                 })})
             keys = len(_pair_condition_keys(slot))
             eligible = [pair for pair in pairs if pair["days_with_picks"] >= 20]
-            ranked = sorted((pair for pair in eligible if pair["t"] is not None), key=lambda pair: pair["t"])
+            ranked = sorted((pair for pair in eligible if pair["t"] is not None), key=lambda pair: (pair["t"], pair["conditions"]))
             result[slot] = {
                 "mined": True, "pairs_examined": keys * (keys - 1) // 2, "pairs_reaching_minimum": len(eligible),
                 "highest": list(reversed(ranked[-15:])), "lowest": ranked[:15],
@@ -659,27 +640,13 @@ class PairHistory:
         return result
 
 
-def build_pairs(days: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Mine condition pairs as descriptive evidence for each slot."""
-    history = PairHistory()
-    for day in days:
-        history.add(day_pairs(day))
-    return history.result()
-
-
-def _latest_days(days: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    latest = {}
-    for day in days:
-        latest[day["slot"]] = day
-    return list(latest.values())
-
-
-def _day_item(history: History, latest: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _day_item(history: History, latest: Sequence[Mapping[str, Any]], today_rows: Mapping[str, int]) -> dict[str, Any]:
+    """The day section: for each slot the newest pick day that has outcomes, beside today's own sample size."""
     sizes = {
         slot: {
-            "days": len([day for day in latest if day["slot"] == slot]),
+            "pick_day": next((_date(day["trade_date"]) for day in latest if day["slot"] == slot), None),
             "rows": sum(len(day["rows"]) for day in latest if day["slot"] == slot),
-            "cumulative_rows": history.rows[slot],
+            "cumulative_rows": history.rows[slot], "today_rows": today_rows.get(slot),
         }
         for slot in ("close", "auction")
     }
@@ -731,29 +698,27 @@ def _tactic_item(latest: Sequence[Mapping[str, Any]], tactic: Tactic, cached: Se
     }
 
 
-BOARD_FIELDS = ("symbol", "name", "sector", "boards", "gap", "opens_at_limit", "amount", "auction_amount_rank",
-                "risk_rank", "first_seal_time", "seal_money")
+BOARD_FIELDS = ("symbol", "name", "sector", "boards", "gap", "auction_amount_rank", "risk_rank", "first_seal_time")
 
 
 def day_board(day: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """A reading's stocks by side, each with the registered combinations of that side that picked it."""
-    names = {condition.key: condition.name for condition in CONDITIONS}
     board: dict[str, list[dict[str, Any]]] = {"focus": [], "hold": [], "avoid": []}
     for row in day["rows"]:
-        picked = [tactic for tactic in _COMBINATIONS
-                  if tactic.slot == day["slot"] and evaluate_tactic(tactic, row, day.get("day", {})) is True]
+        picked = [tactic for tactic in TACTICS if tactic.combination
+                  and tactic.slot == day["slot"] and evaluate_tactic(tactic, row, day.get("day", {})) is True]
         for side, items in board.items():
             keys = [tactic.key for tactic in picked if tactic.side == side]
             if keys:
                 items.append({**{field: row.get(field) for field in BOARD_FIELDS}, "tactics": keys,
-                              "conditions": [names.get(key, key) for key in row.get("flags", ())]})
-    return _json(board)
+                              "conditions": [_condition_name(key) for key in row.get("flags", ())]})
+    return json_safe(board)
 
 
 def tactic_day(day: Mapping[str, Any], tactic: Tactic) -> dict[str, Any]:
     """One day of one tactic: its picks with their primary outcome, their mean and the difference to the rest."""
     result = day_result(tactic, day["rows"], day.get("day", {}), day.get("outcomes", {}), (tactic.primary,))
-    return _json({"trade_date": _date(day["trade_date"]), "picks": _tactic_picks(day, tactic), "counts": result["counts"],
+    return json_safe({"trade_date": _date(day["trade_date"]), "picks": _tactic_picks(day, tactic), "counts": result["counts"],
                   **{key: result["primary"][key] for key in ("pick_mean", "comparison_mean", "difference")}})
 
 
@@ -761,7 +726,7 @@ def tactic_card(tactic: Tactic) -> dict[str, Any]:
     return {"key": tactic.key, "name": tactic.name, "slot": tactic.slot, "side": tactic.side, "source": tactic.source,
             "entry": tactic.entry, "exit": tactic.exit, "primary": tactic.primary,
             "primary_name": _outcome_name(tactic.primary), "expects": tactic.expects,
-            "registered_on": tactic.registered_on.isoformat(), "combination": tactic in _COMBINATIONS}
+            "registered_on": tactic.registered_on.isoformat(), "combination": tactic.combination}
 
 
 def _condition_day_items(latest: Sequence[Mapping[str, Any]], cached: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -797,12 +762,11 @@ def _summary_records(records: Mapping[str, Any]) -> dict[str, Any]:
 
 def _cases(latest: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     result = {"seal_again": [], "big_loss": []}
-    names = {condition.key: condition.name for condition in CONDITIONS}
     for day in latest:
         for row in day["rows"]:
             outcome = day.get("outcomes", {}).get(row["symbol"], {})
             case = {"symbol": row["symbol"], "name": row.get("name"), "boards": row.get("boards"), "slot": day["slot"],
-                    "flags": list(row.get("flags", ())), "conditions": [names.get(key, key) for key in row.get("flags", ())][:5]}
+                    "flags": list(row.get("flags", ())), "conditions": [_condition_name(key) for key in row.get("flags", ())][:5]}
             if outcome.get("seal") is True and len(result["seal_again"]) < 10:
                 result["seal_again"].append(case)
             if outcome.get("big_loss") is True and len(result["big_loss"]) < 10:
@@ -849,7 +813,8 @@ def summary_line_day(item: Mapping[str, Any]) -> list[str]:
     lines = ["一、当日"]
     for slot in ("close", "auction"):
         sample = item["sample_sizes"][slot]
-        lines.append(f"{_SLOT_NAMES[slot]}：{_fmt_count(sample['rows'])}行（累计{_fmt_count(sample['cumulative_rows'])}行）")
+        lines.append(f"{_SLOT_NAMES[slot]}：今日样本 {_fmt_count(sample['today_rows'])} 行；下面是选股日 {sample['pick_day'] or '无数据'} 的"
+                     f" {_fmt_count(sample['rows'])} 行在其后的表现（累计 {_fmt_count(sample['cumulative_rows'])} 行）")
         rates = item["sealing_again"].get(slot, {})
         for bucket in sorted(rates, key=lambda value: (str(value) != "1", str(value))):
             value = rates[bucket]
@@ -893,7 +858,7 @@ def summary_line_conditions(items: Sequence[Mapping[str, Any]]) -> list[str]:
 
 def summary_line_records(records: Mapping[str, Any], changes: Sequence[Mapping[str, Any]]) -> list[str]:
     lines = ["五、战绩"]
-    combinations = {tactic.key for tactic in TACTICS[:20]}
+    combinations = {tactic.key for tactic in TACTICS if tactic.combination}
     for key, value in records.items():
         if key not in combinations:
             continue
@@ -940,7 +905,7 @@ def summary_line_sell_points(points: Mapping[str, Any]) -> list[str]:
             worst = min(choices) if choices else None
             render = lambda choice: "无数据" if choice is None else f"{_ENTRY_NAMES[choice[1]]}·{next(exit_.name for exit_ in EXITS if exit_.key == choice[2])} {_fmt_pct(choice[0])}"
             lines.append(f"{_SLOT_NAMES[slot]} {_bucket_name(bucket)}：最佳 {render(best)}；最差 {render(worst)}")
-        tactic_names = {tactic.key: tactic.name for tactic in TACTICS[:20]}
+        tactic_names = {tactic.key: tactic.name for tactic in TACTICS if tactic.combination}
         for key, table in points[slot]["exit_tables"]["cumulative"].items():
             render = lambda item: "无数据" if item is None else f"{next(exit_.name for exit_ in EXITS if exit_.key == item['key'])} {_fmt_pct(item['mean'])}"
             lines.append(f"{tactic_names[key]}：本战法 {render(table['own'])}；最佳 {render(table['best'])}；最差 {render(table['worst'])}")
@@ -960,51 +925,41 @@ def summary_line_pairs(pairs: Mapping[str, Any]) -> list[str]:
 
 
 def daily_summary(history: History, pairs: PairHistory, latest: Sequence[Mapping[str, Any]],
-                  previous_summary: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """The bounded JSON summary of an evening: the folded history, and the latest settled day of each slot in full."""
+                  previous_summary: Mapping[str, Any] | None = None, today_rows: Mapping[str, int] | None = None) -> dict[str, Any]:
+    """The bounded JSON summary of an evening.
+
+    ``history`` and ``pairs`` are the folded digests. ``latest`` holds, for each slot, the newest pick day that has
+    outcomes, in full: on the evening of T that is the day before, whose picks traded today. ``today_rows`` is the
+    size of today's own samples, which have no outcome yet.
+    """
     tactics = history.tactics
     cached = _cached_days(latest, tactics)
     records = history.records()
-    switches = history.switch_records()
     previous_records = {} if previous_summary is None else previous_summary.get("records", {})
     changes = [] if previous_summary is None else [
         {"key": tactic.key, "previous": previous_records.get(tactic.key, {}).get("label"), "current": records[tactic.key]["label"]}
         for tactic in tactics if previous_records.get(tactic.key, {}).get("label") != records[tactic.key]["label"]
     ]
-    tactic_items = [_tactic_item(latest, tactic, cached) for tactic in tactics[:20]]
-    day_item = _day_item(history, latest)
+    tactic_items = [_tactic_item(latest, tactic, cached) for tactic in tactics if tactic.combination]
+    day_item = _day_item(history, latest, today_rows or {})
     cases = _cases(latest)
     condition_items = _condition_day_items(latest, cached)
-    sell_points = _sell_points(history, latest, cached)
+    sell_points = _sell_points(history, latest)
     mined = pairs.result()
     lines = [
         *summary_line_day(day_item), *summary_line_tactics(tactic_items), *summary_line_cases(cases),
         *summary_line_conditions(condition_items), *summary_line_records(records, changes),
         *summary_line_sell_points(sell_points), *summary_line_pairs(mined),
     ]
-    return _json({
-        "trade_date": max((_date(day["trade_date"]) for day in latest), default=None),
+    return json_safe({
         "day": day_item, "tactics": tactic_items, "cases": cases, "conditions": condition_items,
-        "records": _summary_records(records), "switch_records": switches, "label_changes": changes, "sell_points": sell_points, "pairs": mined,
-        "lines": lines,
+        "records": _summary_records(records), "switch_records": history.switch_records(), "label_changes": changes,
+        "sell_points": sell_points, "pairs": mined, "lines": lines,
     })
 
 
-def build_daily_summary(
-    days: Sequence[Mapping[str, Any]], previous_summary: Mapping[str, Any] | None = None,
-    tactics: Sequence[Tactic] = TACTICS,
-) -> dict[str, Any]:
-    """The summary from full settled days, oldest first (the reference the folded path is tested against)."""
-    pairs = PairHistory()
-    for day in days:
-        pairs.add(day_pairs(day))
-    return daily_summary(history_of(days, tactics), pairs, _latest_days(days), previous_summary)
-
-
 __all__ = [
-    "History", "PairHistory", "REGISTERED_ON", "STATE_OUTCOMES", "TACTICS", "Tactic", "build_daily_summary",
-    "build_pairs", "build_records", "build_sell_points", "build_switch_records", "daily_summary", "day_digest",
-    "day_board", "day_pairs", "day_result", "evaluate_tactic", "history_of", "tactic_card", "tactic_day",
-    "summary_line_cases", "summary_line_conditions", "summary_line_day", "summary_line_pairs",
-    "summary_line_records", "summary_line_sell_points", "summary_line_tactics",
+    "History", "PairHistory", "REGISTERED_ON", "STATE_OUTCOMES", "TACTICS", "Tactic", "daily_summary", "day_board",
+    "day_digest", "day_pairs", "day_result", "evaluate_tactic", "json_safe", "registry_fingerprint", "tactic_card",
+    "tactic_day",
 ]

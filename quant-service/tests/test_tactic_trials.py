@@ -5,10 +5,29 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.research_trials import bh_q_values
+from pathlib import Path
+
 from app.tactic_trials import (
-    TACTICS, History, PairHistory, Tactic, build_daily_summary, build_pairs, build_records, build_sell_points,
-    build_switch_records, daily_summary, day_digest, day_pairs, day_result, evaluate_tactic,
+    TACTICS, History, PairHistory, Tactic, daily_summary, day_digest, day_pairs, day_result, evaluate_tactic,
 )
+from tactic_trial_days import fingerprint, record_outcomes, rounded, settled_days
+
+REFERENCE = Path(__file__).parent / "fixtures" / "tactic_fold_reference_b04be9b9.json"
+
+
+def fold(days, tactics=TACTICS):
+    """What the evening job does: each day's digest and pairs through JSON, folded oldest first."""
+    history, pairs = History(tactics), PairHistory()
+    for day in days:
+        history.add(json.loads(json.dumps(day_digest(day, tactics))))
+        pairs.add(json.loads(json.dumps(day_pairs(day))))
+    return history, pairs
+
+
+def summary(days, previous=None):
+    history, pairs = fold(days)
+    latest = {day["slot"]: day for day in days}   # the newest day of each slot: the days are oldest first
+    return daily_summary(history, pairs, list(latest.values()), previous, {slot: len(day["rows"]) for slot, day in latest.items()})
 
 
 class TacticTrialTests(unittest.TestCase):
@@ -111,7 +130,7 @@ class TacticTrialTests(unittest.TestCase):
         tactic = Tactic("trial", "试验", "close", "hold", "", all_of=("pick",), cell=("board_bucket",), entry="held", exit="close", primary="held:close", registered_on=date(2026, 10, 13))
         days = [self._day((date(2026, 10, 10) + timedelta(days=index)).isoformat()) for index in range(2)]
         days.extend(self._day((date(2026, 10, 13) + timedelta(days=index)).isoformat()) for index in range(21))
-        records = build_records(days, (tactic,))
+        records = fold(days, (tactic,))[0].records()
         item = records["trial"]
         self.assertEqual(item["outcomes"]["held:close"]["replay"]["in_sample"], True)
         self.assertEqual(item["outcomes"]["held:close"]["replay"]["days_with_picks"], 2)
@@ -123,7 +142,7 @@ class TacticTrialTests(unittest.TestCase):
             value = Decimal("0.10") + Decimal(index) / Decimal("1000")
             day["outcomes"]["P"]["entries"]["held"]["close"]["raw_return"] = value
             day["outcomes"]["P"]["entries"]["held"]["close"]["net_return"] = value
-        records = build_records(days, (tactic,))
+        records = fold(days, (tactic,))[0].records()
         forward = records["trial"]["outcomes"]["held:close"]["forward"]
         self.assertEqual(records["trial"]["label"], "supports")
         expected_q = bh_q_values({"trial": math.erfc(abs(forward["t"]) / math.sqrt(2))})["trial"]
@@ -142,58 +161,73 @@ class TacticTrialTests(unittest.TestCase):
                 day["outcomes"]["P"]["entries"]["held"]["close"]["raw_return"] = value
                 day["outcomes"]["P"]["entries"]["held"]["close"]["net_return"] = value
             days.append(day)
-        switches = build_switch_records(days)
+        switches = fold(days)[0].switch_records()
         self.assertEqual(switches["env_ladder_ok"]["true_days"], 10)
         self.assertEqual(switches["env_ladder_ok"]["false_days"], 10)
         self.assertIsNotNone(switches["env_ladder_ok"]["t"])
-        self.assertIsNone(build_switch_records(days[:5])["env_ladder_ok"]["t"])
+        self.assertIsNone(fold(days[:5])[0].switch_records()["env_ladder_ok"]["t"])
 
         pair_days = []
         for index in range(20):
             day = self._day((date(2026, 2, 1) + timedelta(days=index)).isoformat())
             day["rows"][0]["flags"] = ["theme_big", "theme_7plus"]
             pair_days.append(day)
-        pairs = build_pairs(pair_days)["close"]
+        pairs = fold(pair_days)[1].result()["close"]
         self.assertGreaterEqual(pairs["pairs_reaching_minimum"], 1)
         self.assertGreater(pairs["pairs_examined"], pairs["pairs_reaching_minimum"])
         self.assertTrue(pairs["mined"])
 
-    def test_summary_lines_label_changes_sell_points_and_json(self):
-        days = [self._day("2026-10-13"), self._day("2026-10-13", slot="auction")]
-        summary = build_daily_summary(days)
-        self.assertEqual(summary["lines"][0:8], [
-            "一、当日", "收盘：2行（累计2行）", "收盘 二板：2只，再封板率 +50.00%；累计 +50.00%",
-            "收盘日条件：无数据", "竞价：2行（累计2行）", "竞价 二板：2只，再封板率 +50.00%；累计 +50.00%",
-            "竞价日条件：无数据", "二、战法",
-        ])
-        self.assertEqual(summary["lines"][7:9], [
-            "二、战法",
-            "未选中：龙头持有、二三板接力、远端放量清除、缩量加速、梯队环境接力、最高板断板后、弱板两项、梯队竞速胜者、卡位持有、助攻不接力、低位补涨、一字后首次打开、反包风险、卡位高开、梯队胜者温和高开、龙头温和高开、老师竞价入场、强题材竞价前五、弱板高开、弱板低开修复",
-        ])
-        self.assertEqual(summary["lines"][67:70], [
-            "六、卖点", "收盘：", "已持有·收盘卖：当日 +5.00%，累计 +5.00%，首日高点 +10.00%",
-        ])
-        self.assertEqual(build_daily_summary(days, {"records": {"leader_hold": {"label": "against"}}})["label_changes"][0]["key"], "leader_hold")
-        self.assertIn("cumulative", summary["sell_points"]["close"])
-        json.dumps(summary)
+    def test_summary_sections_pick_day_label_changes_and_json(self):
+        days = settled_days(3)
+        result = summary(days)
+        lines = result["lines"]
+        self.assertEqual([line for line in lines if line[:2] in {"一、", "二、", "三、", "四、", "五、", "六、", "七、"}],
+                         ["一、当日", "二、战法", "三、案例", "四、当日条件", "五、战绩", "六、卖点", "七、两两组合"])
+        self.assertEqual(lines[1], "收盘：今日样本 12 行；下面是选股日 2026-08-22 的 12 行在其后的表现（累计 36 行）")
+        self.assertEqual(result["day"]["sample_sizes"]["auction"],
+                         {"pick_day": "2026-08-22", "rows": 12, "cumulative_rows": 36, "today_rows": 12})
+        self.assertFalse([line for line in lines if "prev." in line or "only." in line], "no raw key reaches the text")
+        changed = summary(days, {"records": {"leader_hold": {"label": "against"}}})["label_changes"]
+        self.assertEqual([item for item in changed if item["key"] == "leader_hold"],
+                         [{"key": "leader_hold", "previous": "against", "current": "collecting"}])
+        self.assertEqual(set(result["sell_points"]["close"]), {"day", "cumulative", "exit_tables"})
+        self.assertEqual(list(result["sell_points"]["auction"]["cumulative"]["gap_bucket"]), ["0-5", "5+", "<0"], "buckets in one order")
+        json.dumps(result)
 
-    def test_the_summary_folded_from_stored_digests_equals_the_one_from_the_full_days(self):
-        """What the evening job does (digests read back from JSON, one by one) against the reference on full days."""
-        days = []
-        for index in range(30):
-            day = self._day((date(2026, 9, 20) + timedelta(days=index)).isoformat(), day_flag="env_ladder_ok" if index % 3 else None)
-            day["rows"][0]["flags"] = ["theme_big", "theme_7plus", "pick"]
-            value = Decimal("0.03") - Decimal(index) / Decimal("700")
-            day["outcomes"]["P"]["entries"]["held"]["close"].update(raw_return=value, net_return=value)
-            days.append(day)
-            days.append(self._day(day["trade_date"], slot="auction"))
-        history, pairs = History(), PairHistory()
-        for day in days:
-            history.add(json.loads(json.dumps(day_digest(day))))
-            pairs.add(json.loads(json.dumps(day_pairs(day))))
-        folded = daily_summary(history, pairs, days[-2:], {"records": {}})
-        self.assertEqual(json.loads(json.dumps(folded)), json.loads(json.dumps(build_daily_summary(days, {"records": {}}))))
-        self.assertLess(len(json.dumps(day_digest(days[0]))), 60_000, "a day digest stays small")
+    def test_the_fold_gives_what_the_computation_over_the_full_history_gave(self):
+        """The reference was computed by the code before the fold (commit b04be9b9), on the same days."""
+        reference = json.loads(REFERENCE.read_text(encoding="utf-8"))
+        days = settled_days()
+        self.assertEqual(len(days), reference["days"])
+        history, pairs = fold(days)
+        records = history.records()
+        self.assertEqual(rounded({tactic.key: {"label": records[tactic.key]["label"], "q": records[tactic.key]["q"],
+                                               **records[tactic.key]["outcomes"][tactic.primary]} for tactic in TACTICS}, 12),
+                         reference["primary"])
+        for tactic in TACTICS:
+            self.assertEqual(set(records[tactic.key]["outcomes"]), set(record_outcomes(tactic) or records[tactic.key]["outcomes"]))
+        self.assertEqual(fingerprint({key: value["outcomes"] for key, value in records.items()}), reference["records_sha256"])
+        self.assertEqual(rounded(history.switch_records(), 12), reference["switch_records"])
+        latest = {day["slot"]: day for day in days}
+        sell = daily_summary(history, pairs, list(latest.values()))["sell_points"]
+        self.assertEqual(rounded({slot: sell[slot]["cumulative"]["all"] for slot in sell}, 12), reference["sell_cumulative_all"])
+        self.assertEqual(fingerprint(sell), reference["sell_points_sha256"])
+        mined = pairs.result()
+        for slot in ("close", "auction"):
+            for side in ("highest", "lowest"):
+                for pair in mined[slot][side]:
+                    self.assertEqual([name.startswith("昨日") for name in pair.pop("names")],
+                                     [key.startswith("prev.") for key in pair["conditions"]],
+                                     "a condition read from the session before is named as such")
+        self.assertEqual(rounded(mined, 12), reference["pairs"])
+        self.assertEqual(reference["picking_combinations"], 20, "every registered combination picks on these days")
+
+    def test_a_digest_of_another_registry_is_not_silently_folded(self):
+        tactic = Tactic("trial", "试验", "close", "hold", "", all_of=("pick",), cell=("board_bucket",), entry="held", exit="close", primary="held:close")
+        digest = day_digest(self._day("2026-10-13"), (tactic,))
+        self.assertLess(len(json.dumps(digest)), 60_000, "a day digest stays small")
+        with self.assertRaises(KeyError):
+            History().add(digest)
 
 if __name__ == "__main__":
     unittest.main()

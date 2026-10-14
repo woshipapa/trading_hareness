@@ -3,9 +3,9 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from app.tactic_trial_repository import (
-    read_auction_lists, read_day_bars, read_exit_bars,
-    read_history_windows, read_limit_lists, read_market_turnover, read_next_sessions,
-    read_open_sessions,
+    read_auction_lists, read_auction_table, read_day_bars, read_exit_bars,
+    read_history_windows, read_limit_lists, read_market_turnover, read_newest,
+    read_open_sessions, read_sessions_after,
 )
 
 
@@ -15,6 +15,9 @@ class Result:
 
     def fetchall(self):
         return self.rows
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
 
 
 class Connection:
@@ -39,13 +42,32 @@ class TacticTrialRepositoryTests(unittest.TestCase):
         read_exit_bars(connection, [("000001.SZ", end)])
         read_auction_lists(connection, start, end)
         read_open_sessions(connection, start, end)
-        read_next_sessions(connection, end, 12)
+        read_sessions_after(connection, end, 1)
         self.assertLessEqual(len(connection.calls), 10)
         for sql, _params in connection.calls:
             if "raw_market_observations" in sql or "canonical_bars_daily" in sql:
                 self.assertRegex(sql, r"(?i)(between|effective_at\s*>=|trading_date\s+between|trading_date>%|trading_date<=|pick_day-)")
         calendar = [params for sql, params in connection.calls if "market_trade_calendar" in sql]
         self.assertTrue(any(len(params) >= 3 for params in calendar))
+
+    def test_the_single_document_reads_ask_for_one_row(self):
+        stored_at = datetime(2026, 10, 14, 1, 25, 3, tzinfo=ZoneInfo("UTC"))
+
+        class One(Connection):
+            def execute(self, sql, params=()):
+                self.calls.append((sql, params))
+                return Result([{"available_at": stored_at, "normalized": {
+                    "trade_date": "2026-10-14", "version": "auction-open-desk-v1", "rows": [{"symbol": "000001.SZ"}],
+                    "provider_key": "local_derived", "capability": "auction_open_desk_daily"}}])
+
+        connection = One()
+        self.assertEqual(read_newest(connection, "tactic_trials_summary_daily", date(2026, 10, 14))["trade_date"], "2026-10-14")
+        table = read_auction_table(connection, date(2026, 10, 14))
+        self.assertEqual(table, {"stored_at": "2026-10-14T09:25:03+08:00", "rows": [{"symbol": "000001.SZ"}]},
+                         "the table's time is when it was stored: the table itself carries none")
+        self.assertIsNone(read_auction_table(connection, date(2026, 10, 15)), "the newest table of an earlier day is not today's")
+        for sql, _params in connection.calls:
+            self.assertRegex(sql, r"(?is)effective_at <= %s.*order by effective_at desc, available_at desc limit 1")
 
     def test_auction_rows_keep_order_and_amount_position(self):
         connection = Connection()
