@@ -43,7 +43,7 @@
 
 ## 待办清单
 
-open 35, ready 17, doing 3, waiting-user 1, done 25, dropped 1
+open 34, ready 17, doing 3, waiting-user 1, done 25, dropped 2
 
 在做的、可以开工的、等用户处理的:
 
