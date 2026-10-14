@@ -1,12 +1,12 @@
 # W015 edge47 上的 feishu-relay 和 itougu 迁到新 owner 主机
 
-- state: proposed
+- state: building
 - holder: Claude Code 会话 d39e7e11，2026-10-14
 - goal: feishu-relay（adapter、bridge、xhs、n8n）和 itougu（内参、业绩报告）搬到 116.62.30.225 上跑；配置里的令牌、cookie、会话状态原样带过去；edge47 上的这些服务停掉，只留一套在写
-- plan: docs/OWNER_HOST_SWITCH.md
+- plan: docs/work/plans/edge-relay-move.md
 - branch: main
-- head: 9e32ca21
-- next: 预备只做不启动服务的部分（镜像包、venv、状态快照到新主机的暂存目录），写步骤文档；切换在 2026-10-15 收盘后（15:10 起），不早于此。对方的约定见 Log 22:2x
+- head: 154fd970
+- next: 传输跑完（镜像、库第一遍）→ 写 compose 覆盖和新写入者 ID → 用户确认切换 → 按步骤文档切换并核对；今夜 07:40（XHS 第一个定时）之前完成验证
 - updated: 2026-10-14
 
 ## Requirements
@@ -16,7 +16,7 @@
 
 ## Plan
 
-还没有单独的步骤文档；等 Waiting on the user 的三项有答复后写。`docs/OWNER_HOST_SWITCH.md` 只是主机侧的参照（路径、用户、定时器）。
+`docs/work/plans/edge-relay-move.md`：先决条件表、切换步骤、核对、回退。依据 Codex 的只读审计（线程 `01a13b03`）和下面 Log 的核实。没有单独的审批；切换那一步由用户确认后才执行。
 
 ## Steps
 
@@ -45,9 +45,13 @@
 - 2026-10-14 22:5x 方案定了：新主机上已装好 `docker.io` 29.1.3（和 edge 同版本，系统级 `docker.service` 被禁用着、`/var/lib/docker` 在）；在它上面起系统级 Docker，与量化用的 rootless Docker 并存，edge 的 compose（`network_mode: host`）就能原样跑，所有 `127.0.0.1` 地址不用改（rootless 里 host 网络是 rootlesskit 的命名空间，容器到宿主 127.0.0.1 不通，已用临时容器实测：到宿主私网 IP 的 22 通、到 127.0.0.1 上的 15682 拒绝；加入量化的 compose 网络后能解析 `quant-research`）。路径、用户、systemd 单元都照 edge 的原样复制。PostgreSQL 用 apt 装 16（只带来 perl 的安全更新，没有 Docker、内核、libc、openssl）。库角色：`relay_n8n`（`n8n_relay` 的属主）、`quant_edge`、`quant_edge_export`；扩展 `uuid-ossp`、`pgcrypto`。
 - 2026-10-14 22:5x 发现：工作站的 `config/secrets/.env.edge`（sha256 前 8 位 3cfbd837）和 edge 上 `/root/.secrets/edge/.env.edge`（110e13be）不一致，所以不能用工作站的衍生文件当来源；搬运以 edge 上实际在用的那份为准（主机间管道，不落盘）。edge 上 `.env` 是指向它的软链接。
 - 2026-10-14 22:5x 这一步（装 PostgreSQL、启动系统级 Docker）被自动模式拦截，没有执行，也没有换别的方式绕过。已写成 `state/edge-move-A1.sh`（本机、被 git 忽略）等用户决定。
+- 2026-10-14 23:3x 决定与执行：用户 22:3x「现在是闭盘时间，可以开始迁移了，n8n 执行历史也一起迁移过去」（库整库带，含执行历史）；A1（装 PostgreSQL、起系统级 Docker）由用户跑 `state/edge-move-A1.sh` 完成。edge 的出口带宽约 0.3 MB/s 且有重传，直连新主机也一样，所以公共镜像（n8n、runners）改从 DaoCloud 镜像站按 digest 拉（docker.n8n.io 会重定向到被墙的 Docker Hub），只从 edge 传自制的两个；数据库先全量再补差量。新主机上加了一把临时的传输钥匙（在 edge 上生成，私钥不出 edge，只能从 edge 的 IP 登录，只能跑 `tar-x`、`docker-load`、`psql <库名>` 三条白名单命令），传完要从 authorized_keys 里删除并删 `~/bin/edge-ingest.sh`。
+- 2026-10-14 23:4x Codex 审计（`mcp__codex-teleai__codex`，只读，线程 `01a13b03-49b2-7bc3-ab83-d5232e42a271`）。24 条，我对着代码核实后的取舍：采纳并写进步骤文档的有写入者围栏（`feishu-relay/adapter/ledger.mjs:304-312` 只比较、不升代，所以新 ID 加手工升代）、归档与投递 worker 不受围栏约束（旧 adapter 必须先停）、WAL 文件要停服后复制、XHS 与 itougu 没有跨主机围栏、n8n 数据卷与加密密钥、五个工作流和热更新覆盖层回落到镜像内旧代码、15678 与量化 compose 的 `n8n` profile 冲突、监督进程三条隧道（18791 与 stock-reports 18081 不改）、发布工具和隔离测试需扩、failover 脚本表清单落后、`Persistent=true` 的补跑、PG 的先决条件。已过时的：第 1、2 条（A1 已完成）。第 3 条（密钥来源矛盾）如实保留为切换后的对账项。第 23 条（5680）：那是 runners 的健康端口，不是 5679，不预留。
+- 2026-10-14 23:4x 反向依赖：留在 edge 上的服务（stock-reports、paper-*、codex-model-router）的配置和单元里没有出现被搬走的端口，也没有到这些端口的连接；18081 的 nginx 无来源限制，所以 n8n 搬走后从新主机调 `https://47.114.113.152:18081` 不会被来源限制挡住（P9 仍要实测）。
 
 ## Waiting on the user
-- [ ] 2026-10-14 22:5x 在新主机上装 PostgreSQL 16 并启动系统级 Docker（`bash state/edge-move-A1.sh`，或给我这类命令的权限）。为什么等：自动模式拦截了生产主机上装包和起守护进程。之后：镜像、文件、角色先预备，再在夜里切换。
+- [ ] 2026-10-14 23:4x 确认切换：停 edge 上的 adapter、bridge、xhs、n8n、itougu，改工作站三条隧道，在新主机起栈（步骤文档“切换”一节）。为什么等：这一步会让飞书中继中断十几分钟并改变线上流量去向。之后：按步骤文档执行并核对，旧栈保持停止但完整，两个完整交易日后再清理。
+- [ ] 2026-10-14 22:5x 在新主机上装 PostgreSQL 16 并启动系统级 Docker（`bash state/edge-move-A1.sh`，或给我这类命令的权限）。为什么等：自动模式拦截了生产主机上装包和起守护进程。 → 用户 22:3x 自己跑了 `state/edge-move-A1.sh`（2026-10-14）
 - [x] 2026-10-14 17:5x 新主机 stockpeer 要 root：装 `python3-venv`（或我整套拷 edge 的 venv 就不用）、Postgres（或走容器）、tailscale 入网、nginx 站点。为什么等：`sudo` 要密码，我没有。 → 用户 22:2x 告知已开免密 sudo（对方 `/etc/sudoers.d/90-stockpeer`，2026-10-14）
 - [ ] 2026-10-14 17:5x 数据库方案：n8n_relay 库 2.4 GB 搬法。选项：只搬业务表（不含 `execution_data` 1.5 GB 的历史执行）进新主机上的 Postgres 容器（镜像从 edge `docker save` 过去）。为什么等：丢不丢执行历史、要不要保留 baidu 归档队列 878 MB 是用户的取舍。
 - [ ] 2026-10-14 17:5x 同机共用的风险是否接受，以及切换时刻：owner 与飞书中继同机后，owner 主机故障会同时带走中继；切换会有几分钟两边都不消费。为什么等：需要用户定。之后：写决策记录、改 `OWNER_MARKERS` 与 edge 脚本的主机默认值。
