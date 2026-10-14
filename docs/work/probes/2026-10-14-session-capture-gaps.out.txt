@@ -1,0 +1,23 @@
+now (database): 2026-10-14 11:16:06.075587
+  eastmoney_hot_rank     hot_rank_popularity                      market_wide=False n=   900 09:15:27 .. 11:06:05
+  cls_telegraph          news_flash                               market_wide=True  n=   576 00:01:53 .. 11:13:54
+  eastmoney_flash        news_flash                               market_wide=True  n=   521 00:01:53 .. 11:08:25
+  jin10_flash            news_flash                               market_wide=True  n=   479 00:00:00 .. 11:14:41
+  ths_flash              news_flash                               market_wide=True  n=   325 00:04:03 .. 11:14:41
+  eastmoney_hot_rank     hot_rank_surge                           market_wide=False n=   247 09:15:27 .. 11:06:05
+  longhuvip              opening_auction_pulse                    market_wide=True  n=   121 09:15:00 .. 09:21:33
+  tdx_public             auction_curve_daily                      market_wide=False n=    95 09:26:00 .. 09:26:00
+  longhuvip              auction_bid_daily                        market_wide=False n=    93 09:30:00 .. 09:30:00
+  fuyao_ths              a_share_hot_stock_list                   market_wide=False n=    90 09:15:21 .. 11:06:03
+  fuyao_ths              a_share_skyrocket_list                   market_wide=False n=    90 09:15:21 .. 11:06:05
+  quant_scan             watch_scan_tape                          market_wide=False n=    57 09:15:00 .. 11:15:54
+  fuyao_ths              auction_pool_snapshot                    market_wide=True  n=    42 09:15:05 .. 09:21:45
+  quant_scan             storage_tiering_run                      market_wide=False n=    23 00:09:48 .. 11:06:08
+  local_derived          all_a_snapshot_source_agreement          market_wide=True  n=    17 09:15:52 .. 11:15:52
+  local_derived          market_radar                             market_wide=True  n=    17 09:15:50 .. 11:15:49
+  tdx_public             a_share_minute_cross_section_shadow      market_wide=True  n=    17 09:15:52 .. 11:15:52
+  fuyao_ths              a_share_minute_cross_section             market_wide=True  n=    17 09:15:50 .. 11:15:49
+  eastmoney_ztb          board_change_snapshot                    market_wide=True  n=     4 10:44:07 .. 11:06:05
+  derived_market_sentiment market_sentiment_snapshot                market_wide=True  n=     3 10:45:36 .. 11:11:07
+  fuyao_ths a_share_minute_cross_section: 17 minutes; stamped seconds [50]; runs [('09:15', '09:20'), ('10:45', '10:45'), ('11:06', '11:15')]
+  tdx_public a_share_minute_cross_section_shadow: 17 minutes; stamped seconds [0, 52]; runs [('09:15', '09:20'), ('10:46', '10:46'), ('11:06', '11:15')]
