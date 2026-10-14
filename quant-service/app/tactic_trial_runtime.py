@@ -290,7 +290,7 @@ def summarise(database: Any, as_of: date, *, apply: bool = True) -> dict[str, An
                         connection, PAIRS_CAPABILITY[slot], max(chunk[0], pair_first), chunk[-1])}
             for day in sorted(day for day, late_slot in late if late_slot == slot and chunk[0] <= day <= chunk[-1]):
                 reading = _read(database, _stored, READING_CAPABILITY[slot], day)
-                if reading.get("version") != VERSION:
+                if reading is None:   # a reading of another version: only a replay can replace it
                     missing += 1
                     continue
                 digest, pair_document = _digest_documents(day_outcomes(database, reading, as_of))
@@ -445,7 +445,7 @@ def read_cases(database: Any, tactic: Tactic, days: int = 10) -> dict[str, Any]:
         readings = tactic_trial_repository.read_capability(connection, READING_CAPABILITY[tactic.slot], sessions[0], sessions[-1]) if sessions else []
     result = []
     for reading in reversed(readings):
-        if not tactic_day({**reading, "outcomes": {}}, tactic)["picks"]:
+        if reading.get("version") != VERSION or not tactic_day({**reading, "outcomes": {}}, tactic)["picks"]:
             continue
         item = tactic_day(day_outcomes(database, reading, today), tactic)
         # Settled for this view: every pick has the tactic's own outcome (the day's other sell rules may still be open).
