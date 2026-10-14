@@ -68,9 +68,10 @@ grep -qx 'trading_hareness/scripts/shared-peer/activate-peer-release.sh' <<<"$li
 grep -qx 'trading_hareness/scripts/shared-peer/release-lock.sh' <<<"$listing" \
   || { echo "refusing: $target_sha predates the guard lock; release a newer commit" >&2; exit 5; }
 
-owner_host="${OWNER_PEER_HOST:-stockpeer@118.178.133.37}"
-owner_port="${OWNER_PEER_PORT:-22}"
-owner_key="${OWNER_PEER_SSH_KEY:-$HOME/.ssh/stockpeer_ed25519}"
+. "$tool_root/scripts/shared-peer/owner-host.sh"
+owner_host="$OWNER_PEER_HOST"
+owner_port="$OWNER_PEER_PORT"
+owner_key="$OWNER_PEER_SSH_KEY"
 
 # --- schema gate ----------------------------------------------------------------
 # Code must never run ahead of its schema. schema-gate.sh holds the rules; the

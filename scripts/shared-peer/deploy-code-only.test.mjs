@@ -31,6 +31,7 @@ mkdirSync(join(repo, 'scripts/shared-peer'), { recursive: true });
 copyFileSync(script, join(repo, 'scripts/shared-peer/deploy-code-only.sh'));
 copyFileSync(join(dirname(script), 'classify-owner-paths.sh'), join(repo, 'scripts/shared-peer/classify-owner-paths.sh'));
 copyFileSync(join(dirname(script), 'schema-gate.sh'), join(repo, 'scripts/shared-peer/schema-gate.sh'));
+copyFileSync(join(dirname(script), 'owner-host.sh'), join(repo, 'scripts/shared-peer/owner-host.sh'));
 mkdirSync(join(repo, 'quant-service/scripts'), { recursive: true });
 copyFileSync(join(dirname(script), '../../quant-service/scripts/migration_lineage.py'), join(repo, 'quant-service/scripts/migration_lineage.py'));
 // The catalog says which host runs each script; the classifier reads it from the commits.

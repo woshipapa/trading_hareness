@@ -57,6 +57,8 @@ RULES: list[tuple[str, str, str, str]] = [
     ("shared-peer/deploy-*.sh", "release", "quant-research", "workstation"),
     ("shared-peer/classify-owner-paths.sh", "release", "quant-research", "workstation"),
     ("shared-peer/schema-gate.sh", "release", "quant-research", "workstation"),
+    ("shared-peer/owner-host.sh", "release", "quant-research", "workstation"),
+    ("shared-peer/owner-host-switch.sh", "release", "quant-research", "workstation"),
     ("shared-peer/package-peer-release.sh", "release", "quant-research", "workstation"),
     ("edge/deploy-quant-console-edge.sh", "release", "quant-research (dashboard)", "workstation"),
     ("deploy-local-research-release.sh", "release", "quant-research", "workstation"),

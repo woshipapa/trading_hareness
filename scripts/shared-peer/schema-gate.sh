@@ -17,9 +17,10 @@ set -euo pipefail
 target_sha="${1:-}"
 [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "usage: schema-gate.sh <target-sha> (full SHA)" >&2; exit 2; }
 tool_root="$(cd "$(dirname "$0")/../.." && pwd)"
-owner_host="${OWNER_PEER_HOST:-stockpeer@118.178.133.37}"
-owner_port="${OWNER_PEER_PORT:-22}"
-owner_key="${OWNER_PEER_SSH_KEY:-$HOME/.ssh/stockpeer_ed25519}"
+. "$tool_root/scripts/shared-peer/owner-host.sh"
+owner_host="$OWNER_PEER_HOST"
+owner_port="$OWNER_PEER_PORT"
+owner_key="$OWNER_PEER_SSH_KEY"
 lineage_tool="$tool_root/quant-service/scripts/migration_lineage.py"
 migrations_root="$(mktemp -d "${TMPDIR:-/tmp}/release-migrations.XXXXXX")"
 trap 'rm -rf "$migrations_root"' EXIT

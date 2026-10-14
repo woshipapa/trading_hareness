@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -24,8 +25,17 @@ ROOT = Path(__file__).resolve().parents[1]
 CLASSIFY = ROOT / "scripts" / "shared-peer" / "classify-owner-paths.sh"
 WINDOW = ROOT / "scripts" / "release_window.py"
 LINEAGE = ROOT / "quant-service" / "scripts" / "migration_lineage.py"
-OWNER = (os.environ.get("OWNER_PEER_HOST", "stockpeer@118.178.133.37"), os.environ.get("OWNER_PEER_PORT", "22"),
-         os.environ.get("OWNER_PEER_SSH_KEY", str(Path.home() / ".ssh" / "stockpeer_ed25519")))
+
+
+def owner_defaults() -> dict[str, str]:
+    """The owner host as scripts/shared-peer/owner-host.sh names it: one place for every tool."""
+    text = (ROOT / "scripts" / "shared-peer" / "owner-host.sh").read_text(encoding="utf-8")
+    found = dict(re.findall(r'^: "\$\{(OWNER_PEER_[A-Z_]+):=([^}]*)\}"$', text, re.M))
+    return {name: value.replace("$HOME", str(Path.home())) for name, value in found.items()}
+
+
+_OWNER = owner_defaults()
+OWNER = tuple(os.environ.get(name, _OWNER[name]) for name in ("OWNER_PEER_HOST", "OWNER_PEER_PORT", "OWNER_PEER_SSH_KEY"))
 EDGE = (os.environ.get("RELAY_EDGE_HOST", "root@47.114.113.152"), "22",
         os.environ.get("RELAY_EDGE_SSH_KEY", str(Path.home() / ".ssh" / "feishu_relay_edge_ed25519")))
 EDGE_PARTS = {
