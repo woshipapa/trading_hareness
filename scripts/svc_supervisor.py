@@ -109,10 +109,10 @@ TASKS = [
     # Semantic Scholar 唯一出口：key、限流与冷却都在 edge 的 s2_gateway（127.0.0.1:18791）。
     # Mac 侧调用经此转发；是否使用由 paper_kb/.s2_via_edge 标记文件决定。
     dict(name="s2-gateway-tunnel", kind="daemon",
-         args=["ssh","-i",os.path.join(HOME,".ssh/feishu_relay_edge_ed25519"),
+         args=["ssh","-i",os.path.join(HOME,".ssh/stockpeer_ed25519"),
                "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
                "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
-               "-N","-L","127.0.0.1:18791:127.0.0.1:18791","root@47.114.113.152"],
+               "-N","-L","127.0.0.1:18791:127.0.0.1:18791","stockpeer@116.62.30.225"],
          cwd=HOME, out=os.path.join(N8N,"logs/s2-gateway-tunnel.log"),
          err=os.path.join(N8N,"logs/s2-gateway-tunnel.log"), env={}),
     # 小红书 edge API 的 loopback forward。采集器一直运行在 edge，本地只
@@ -322,6 +322,14 @@ TASKS = [
          err=os.path.join(PKLOG, "eval-recommendations.log"),
          env={"PATH": PATH_ENV}, catch_up_hours=36),
 ]
+
+# The paper services' outputs (arXiv feed, source snapshots) and the Semantic Scholar gateway run on the owner host
+# since 2026-10-15 (W015); Paper-KB's rsync pulls read these two variables.
+_PAPER_EDGE_ENV = {"ARXIV_EDGE_HOST": "stockpeer@116.62.30.225",
+                   "ARXIV_EDGE_KEY": os.path.join(HOME, ".ssh/stockpeer_ed25519")}
+for _task in TASKS:
+    if _task["name"].startswith("paperkb."):
+        _task.setdefault("env", {}).update(_PAPER_EDGE_ENV)
 
 _shutdown = threading.Event()
 _procs = {}  # name -> Popen (daemons)
