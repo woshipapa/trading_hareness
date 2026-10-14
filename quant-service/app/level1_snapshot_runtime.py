@@ -1,8 +1,13 @@
-"""Cadence-only capture of the complete Fuyao A-share Level-1 cross-section.
+"""Cadence-only capture of the complete A-share Level-1 cross-section.
 
 The collector stores provider rows as raw evidence.  Ranking, width and
 strategy eligibility remain downstream research projections; this loop never
 creates a trading decision.
+
+The snapshot says which provider served it.  A minute the main source (Fuyao)
+failed and another source filled is stored and reported under that source, and
+its health is two facts: the main source's failure, with its error, and the
+filling source's success.
 """
 
 from __future__ import annotations
@@ -15,7 +20,17 @@ from datetime import datetime, timezone
 from typing import Any
 
 from . import minute_cross_section
+from .datasources.catalog import health_capability
 from .intraday_schedule import seconds_until_slot
+
+#: The main source and the capability its per-symbol rows and its health are recorded under.
+MAIN_PROVIDER = minute_cross_section.PROVIDER_KEY
+SNAPSHOT_CAPABILITY = minute_cross_section.LEGACY_CAPABILITY
+
+
+def snapshot_health_capability(provider: str) -> str:
+    """The health capability of ``provider``'s all-A snapshot, from the catalog's aliases."""
+    return health_capability(provider, "quote.all_a_snapshot", fallback=SNAPSHOT_CAPABILITY)
 
 
 async def capture_level1_snapshot(
@@ -61,11 +76,12 @@ async def capture_level1_snapshot(
             "snapshot_metadata": dict(metadata),
             "research_only": True,
         })
+    provider = minute_cross_section.snapshot_provider(metadata)
     stored = 0
     timings: dict[str, float] = {}
     if payloads and storage in ("per_symbol", "both"):
         started = asyncio.get_running_loop().time()
-        stored = await persist("fuyao_ths", "a_share_prices_snapshot", payloads)
+        stored = await persist(provider, SNAPSHOT_CAPABILITY, payloads)
         timings["per_symbol_seconds"] = round(asyncio.get_running_loop().time() - started, 3)
     document: dict[str, Any] | None = None
     document_error: str | None = None
@@ -86,14 +102,18 @@ async def capture_level1_snapshot(
         "status": "completed" if payloads else "empty",
         "received": len(payloads),
         "stored": stored,
-        "provider": "fuyao_ths",
-        "capability": "a_share_prices_snapshot",
+        "provider": provider,
+        "capability": SNAPSHOT_CAPABILITY,
         "upstream_timestamp_ms": metadata.get("upstream_timestamp_ms"),
         "freshness_status": metadata.get("status") or metadata.get("freshness_status") or "unknown",
         "cross_sectional": bool(metadata.get("cross_sectional", False)),
         "storage": storage, "timings": timings,
         "document": document, "document_error": document_error,
     }
+    if metadata.get("fallback_for"):
+        result["fallback_for"] = metadata["fallback_for"]
+        result["fallback_reason"] = metadata.get("fallback_reason")
+        result["decision_eligible"] = metadata.get("decision_eligible") is True
     if on_persisted is not None and payloads:
         try:
             result["derived"] = await on_persisted(observed_at, payloads)
@@ -160,20 +180,31 @@ def level1_capture(deps: Level1CaptureDependencies) -> Callable[[], Awaitable[di
             return
         error = str(result.get("error") or f"all-A snapshot status={status}")
 
+        received = int(result.get("received") or 0)
+        provider = str(result.get("provider") or MAIN_PROVIDER)
+        fallback_for = str(result.get("fallback_for") or "")
+
         def write() -> None:
             with deps.database.transaction() as connection:
-                if status == "completed" and int(result.get("received") or 0) > 0:
-                    deps.record_success(connection, "fuyao_ths", "a_share_prices_snapshot",
-                                        int(result.get("received") or 0), None)
+                if fallback_for:
+                    # The main source failed this minute whatever the filler returned.
+                    deps.record_failure(
+                        connection, fallback_for, snapshot_health_capability(fallback_for),
+                        str(result.get("fallback_reason") or f"all-A snapshot served by {provider}"), None)
+                if status == "completed" and received > 0:
+                    deps.record_success(connection, provider, snapshot_health_capability(provider), received, None)
                 else:
-                    deps.record_failure(connection, "fuyao_ths", "a_share_prices_snapshot", error, None)
+                    deps.record_failure(connection, provider, snapshot_health_capability(provider), error, None)
 
         await deps.run_database(write, timeout_seconds=10)
 
     async def persist_document(observed_at: datetime, rows: list[dict[str, Any]],
                                metadata: Mapping[str, Any]) -> dict[str, Any]:
-        return await deps.run_database(minute_cross_section.persist_document, deps.database, observed_at, rows,
-                                       metadata, timeout_seconds=60)
+        return await deps.run_database(
+            lambda: minute_cross_section.persist_document(
+                deps.database, observed_at, rows, metadata,
+                provider=minute_cross_section.snapshot_provider(metadata)),
+            timeout_seconds=60)
 
     async def capture() -> dict[str, Any]:
         try:
@@ -194,6 +225,6 @@ async def run_level1_capture_service(deps: Level1CaptureDependencies) -> None:
 
 
 __all__ = [
-    "Level1CaptureDependencies", "capture_level1_snapshot", "level1_capture", "run_level1_capture_service",
-    "run_level1_snapshot_loop",
+    "Level1CaptureDependencies", "MAIN_PROVIDER", "SNAPSHOT_CAPABILITY", "capture_level1_snapshot", "level1_capture",
+    "run_level1_capture_service", "run_level1_snapshot_loop", "snapshot_health_capability",
 ]

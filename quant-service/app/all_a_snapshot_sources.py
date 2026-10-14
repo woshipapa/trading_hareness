@@ -1,19 +1,63 @@
-"""Pure projections and agreement measurements for all-A snapshot sources."""
+"""Projections, agreement measurements and the fallback chain for all-A snapshot sources.
+
+The main source is Fuyao/THS. The TDX snapshot fills a minute the main source fails, labelled with
+its own source: nothing here relabels a TDX row as Fuyao, and whether a filled minute is decision
+eligible is what the catalog binding says when the minute is read.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
+import asyncio
+import time
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from statistics import median
 from typing import Any, Iterable, Mapping
 
 from .datasources.catalog import BINDINGS
+from .datasources.contracts import CapabilityEvidence
+from .error_detail import safe_error_detail
+from .fuyao_provider import FUYAO_PROVIDER_KEY, FuyaoProviderError
+from .intraday_cross_section import SharedAsyncSnapshot
+from .public_provider_rate_limits import PublicProviderRateLimited, acquire_public_provider_slot
 
 
+TDX_PROVIDER_KEY = "tdx_public"
+TDX_SNAPSHOT_SOURCE = "tdx_public_all_a_snapshot"
+_SNAPSHOT_CAPABILITY = "quote.all_a_snapshot"
 _TDX_BINDING = next(item for item in BINDINGS
-                    if item.source == "tdx_public" and item.capability == "quote.all_a_snapshot")
+                    if item.source == TDX_PROVIDER_KEY and item.capability == _SNAPSHOT_CAPABILITY)
 _TDX_VOLUME_FACTOR = _TDX_BINDING.spec.unit_factors["volume"]
 TDX_SNAPSHOT_MIN_COMPLETE_SHARE = 0.95
 TDX_SNAPSHOT_ROSTER_FLOOR = 5000
+#: How long a caller waits for one TDX all-A read (the shadow capture and the fallback chain).
+#: For the chain it is the bound on the whole fallback leg: the read and the roster read after it.
+TDX_READ_TIMEOUT_SECONDS = 20.0
+#: Two readers of the TDX snapshot within this many seconds share one read.
+TDX_SHARED_READ_TTL_SECONDS = 5.0
+#: How long the chain remembers that a fill failed and answers with that failure instead of a new
+#: TDX read.  It is the time the service reuses a successful snapshot (the 30 s of its shared
+#: all-A cache), so an unusable TDX snapshot costs the public host what a usable one does: one
+#: all-A read (about 70 pages) in 30 s, not one for every caller.  A recovery is seen at most
+#: 30 s late, which is inside the minute the fill is for.
+TDX_FAILED_FILL_MEMORY_SECONDS = 30.0
+FAILED_FILL_REMEMBERED_PREFIX = "tdx_fill_failed_recently:"
+FALLBACK_REASON_MAX_CHARS = 300
+
+
+class AllASnapshotFallbackError(FuyaoProviderError):
+    """The main source failed and the TDX snapshot did not fill the minute.
+
+    It is a ``FuyaoProviderError`` raised from the Fuyao one, so every caller that handles a
+    failed main read handles this exactly as it did before the chain existed.
+    """
+
+    def __init__(self, fuyao_error: FuyaoProviderError, fallback_reason: str) -> None:
+        self.fallback_reason = safe_error_detail(fallback_reason, FALLBACK_REASON_MAX_CHARS)
+        super().__init__(
+            safe_error_detail(f"{fuyao_error}; {TDX_PROVIDER_KEY} fallback: {self.fallback_reason}", 600),
+            code=fuyao_error.code, request_id=fuyao_error.request_id,
+        )
 
 
 def tdx_snapshot_completeness(priced_rows: int, warnings: Iterable[str],
@@ -52,7 +96,7 @@ def project_tdx_snapshot_rows(rows: Iterable[Mapping[str, Any]], observed_at: da
             "pct_change": row["pct_change"],
             "turnover": turnover,
             "volume": volume,
-            "price_source": "tdx_public_all_a_snapshot",
+            "price_source": TDX_SNAPSHOT_SOURCE,
             "price_observed_at": observed,
             "raw": {
                 "thscode": row["symbol"],
@@ -69,6 +113,272 @@ def project_tdx_snapshot_rows(rows: Iterable[Mapping[str, Any]], observed_at: da
             },
         })
     return projected
+
+
+def tdx_snapshot_decision_eligible() -> bool:
+    """What the catalog binding of the TDX all-A snapshot says now; no binding is not eligible."""
+    return any(item.decision_eligible for item in BINDINGS
+               if item.source == TDX_PROVIDER_KEY and item.capability == _SNAPSHOT_CAPABILITY)
+
+
+def tdx_snapshot_metadata(*, completeness: Mapping[str, Any], fallback_reason: str, available_at: datetime,
+                          warnings: Iterable[str] = ()) -> dict[str, Any]:
+    """The metadata of a TDX-filled minute, in the shape ``fuyao_provider.all_a_snapshot_rows`` returns.
+
+    The server sends no snapshot timestamp, so the freshness is ``unknown`` and the time the read
+    returned is kept as ``available_at`` instead of being passed off as an upstream time.
+    """
+    return {
+        "status": "unknown", "freshness_reason": "no_upstream_timestamp", "age_seconds": None,
+        "max_age_seconds": None, "available_at": available_at.isoformat(),
+        "source": TDX_SNAPSHOT_SOURCE, "provider_key": TDX_PROVIDER_KEY,
+        "decision_eligible": tdx_snapshot_decision_eligible(),
+        "fallback_for": FUYAO_PROVIDER_KEY,
+        "fallback_reason": safe_error_detail(fallback_reason, FALLBACK_REASON_MAX_CHARS),
+        "scope": "all_a_cross_section", "cross_sectional": True,
+        "semantics": "all_a_price_volume_turnover_snapshot_no_main_flow", "upstream_timestamp_ms": None,
+        "total": completeness["priced_rows"] + completeness["no_trade_rows"],
+        "matched_rows": completeness["priced_rows"],
+        "completeness": dict(completeness), "warnings": list(warnings),
+    }
+
+
+def snapshot_decision_eligible(status: Any) -> bool:
+    """Whether a row of the snapshot with this status may be acted on.
+
+    The one rule, for every consumer.  The answer is the snapshot's own ``decision_eligible``:
+    the shared cache puts its ``status`` and age over the supplier's, so a minute the fallback
+    filled reads ``fresh`` and its freshness says nothing about its source.  A status that
+    carries the flag must carry exactly ``True``.
+
+    A status without the flag comes from a caller that predates it (both sources of the chain
+    always set it) and is eligible only when it names no other source: ``provider_key`` absent
+    or the main source's, and no ``fallback_for``.  So a status that was rebuilt and kept
+    ``provider_key: tdx_public`` but lost the flag is not eligible.  No status at all (``None``)
+    names nothing and reads as before; anything else that is not a mapping is not eligible.
+    """
+    if status is None:
+        return True
+    if not isinstance(status, Mapping):
+        return False
+    if "decision_eligible" in status:
+        return status["decision_eligible"] is True
+    return (status.get("provider_key") in (None, FUYAO_PROVIDER_KEY)
+            and status.get("fallback_for") is None)
+
+
+def scan_snapshot_decision_eligible(scan_status: Any) -> bool:
+    """``snapshot_decision_eligible`` for the all-A status a watch scan keeps.
+
+    The scan materializes the status under its evidence contract, whose ``decision_eligible``
+    says that the snapshot's price is no decision quote (``False`` for the main source too) and
+    replaces the snapshot's own flag.  What the snapshot said about its source is kept as
+    ``flow_decision_eligible`` on a filled minute; the contract's ``provider_key`` and the
+    snapshot's ``fallback_for`` stay.  The rule is applied to those.
+    """
+    if not isinstance(scan_status, Mapping):
+        return snapshot_decision_eligible(scan_status)
+    own = {key: scan_status[key] for key in ("provider_key", "fallback_for") if key in scan_status}
+    if "flow_decision_eligible" in scan_status:
+        own["decision_eligible"] = scan_status["flow_decision_eligible"]
+    return snapshot_decision_eligible(own)
+
+
+def fallback_provenance(status: Any) -> dict[str, Any]:
+    """What a consumer reports beside its result when another source filled the minute.
+
+    Nothing for a minute the main source served, so its results are what they were.
+    """
+    if not isinstance(status, Mapping) or not status.get("fallback_for"):
+        return {}
+    return {"snapshot_source": status.get("source"), "snapshot_provider": status.get("provider_key"),
+            "fallback_for": status["fallback_for"]}
+
+
+def main_source_reference(
+    remembered: tuple[datetime, list[dict[str, Any]]] | None,
+) -> tuple[datetime, list[dict[str, Any]]] | None:
+    """The remembered minute when the main source served it, otherwise nothing.
+
+    The level1 capture remembers whatever it stored, a TDX-filled minute included. The shadow
+    comparison must not measure TDX against itself, so a minute whose rows do not say
+    ``fuyao_ths`` is no reference.
+    """
+    if remembered is None:
+        return None
+    rows = remembered[1]
+    if not rows or (rows[0].get("snapshot_metadata") or {}).get("provider_key") != FUYAO_PROVIDER_KEY:
+        return None
+    return remembered
+
+
+def shared_tdx_snapshot(
+    fetch: Callable[[], Awaitable[CapabilityEvidence | list[dict[str, Any]]]], *,
+    clock: Callable[[], float],
+    acquire_slot: Callable[..., Awaitable[None]] = acquire_public_provider_slot,
+) -> SharedAsyncSnapshot[CapabilityEvidence | list[dict[str, Any]]]:
+    """The one reader of the TDX all-A snapshot, for the shadow capture and the fallback chain.
+
+    Every ``tdx_protocol`` call opens its own connection and the access rule is one connection a
+    host, so the two callers must never read side by side: a read in flight is joined, and a
+    result is shared for ``TDX_SHARED_READ_TTL_SECONDS``. The read takes its ``tdx_public`` slot
+    without waiting; a refused slot reaches each caller as ``PublicProviderRateLimited``. A caller
+    keeps its own task around ``get()`` and consumes that task's late exception.
+    """
+    async def read_once() -> CapabilityEvidence | list[dict[str, Any]]:
+        await acquire_slot(TDX_PROVIDER_KEY, max_wait_seconds=0)
+        return await fetch()
+
+    return SharedAsyncSnapshot(read_once, ttl_seconds=TDX_SHARED_READ_TTL_SECONDS, clock=clock)
+
+
+def _consume_late_exception(task: asyncio.Future[Any]) -> None:
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except BaseException:
+        pass
+
+
+class FailedFillMemory:
+    """The last failed fill, kept for ``TDX_FAILED_FILL_MEMORY_SECONDS``.
+
+    With the main source down and the TDX snapshot unusable (every minute of the call auction,
+    09:15-09:25, when no row is priced), each caller of the chain would start a full TDX all-A
+    read for a result already known to be rejected.  While a failure is remembered the chain
+    raises it again without touching TDX; the main source is still tried every time.
+    """
+
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic,
+                 seconds: float = TDX_FAILED_FILL_MEMORY_SECONDS) -> None:
+        self._clock = clock
+        self._seconds = seconds
+        self._failed: tuple[float, str] | None = None
+
+    def recent(self) -> str | None:
+        """The remembered failure's reason, or nothing once its time has passed."""
+        failed = self._failed
+        if failed is None:
+            return None
+        if self._clock() - failed[0] >= self._seconds:
+            self._failed = None
+            return None
+        return failed[1]
+
+    def remember(self, reason: str) -> None:
+        self._failed = (self._clock(), reason)
+
+    def forget(self) -> None:
+        self._failed = None
+
+
+class _FillFailed(Exception):
+    """The TDX snapshot did not fill the minute; ``remember`` is false when no read was made."""
+
+    def __init__(self, reason: str, *, remember: bool = True) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.remember = remember
+
+
+async def read(
+    fuyao: Callable[[], Awaitable[tuple[list[dict[str, Any]], dict[str, Any]]]],
+    tdx: Callable[[], Awaitable[CapabilityEvidence | list[dict[str, Any]]]],
+    roster_total: Callable[[], Awaitable[int | None]],
+    failed_fills: FailedFillMemory | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The all-A snapshot: Fuyao first; when Fuyao fails as a provider, one TDX read fills the minute.
+
+    Only a ``FuyaoProviderError`` starts the fallback; anything else propagates. A TDX error, a
+    refused slot, a fallback leg that outlives ``TDX_READ_TIMEOUT_SECONDS``, a snapshot that is
+    not complete against ``roster_total`` (the main source's stored upstream total; unknown is
+    incomplete) and a snapshot that cannot be projected all raise ``AllASnapshotFallbackError``
+    from the Fuyao error: an untrusted fill is a missing minute.
+
+    A caller waits at most ``TDX_READ_TIMEOUT_SECONDS`` (20 s) longer than the Fuyao failure
+    itself took: the bound covers the TDX read and the roster read together, and the roster read
+    gets what the TDX read left of it (a roster not read in time is unknown, so incomplete).
+    The minute capture (60 s slots) and the board drill (once a minute) await the chain with no
+    bound of their own.
+
+    With ``failed_fills`` a failed fill is remembered for ``TDX_FAILED_FILL_MEMORY_SECONDS``
+    and raised again, its reason behind ``FAILED_FILL_REMEMBERED_PREFIX``, without a new TDX
+    read.  A refused slot is not remembered: no read was made, and the slot is its own limiter.
+    A fill forgets the failure.
+
+    The caller's wait is bounded, the read is not cut: its task keeps awaiting ``tdx`` (in the
+    service a shared reader, so a later caller joins the same read) and its late outcome is
+    consumed here. The one read thread ends on its own. ``tdx_protocol.call_sync`` gives every
+    socket operation 5 s (the connect and each ``recv``; no deadline spans a whole exchange) and
+    starts no further host once 15 s have passed since the call began. A host costs at most 20 s
+    when it answers nothing: a connect and a silent handshake of 5 s each, for ``login_one`` and
+    again for ``legacy_3``; 5 s when the connect itself fails. A read that finds no usable host
+    therefore ends within 15 + 20 = 35 s. Only a server that keeps sending inside every 5 s
+    window lasts longer: a snapshot is about 70 pages, and a connection is cut at 120.
+    """
+    try:
+        return await fuyao()
+    except FuyaoProviderError as fuyao_error:
+        remembered = failed_fills.recent() if failed_fills is not None else None
+        if remembered is not None:
+            raise AllASnapshotFallbackError(
+                fuyao_error, f"{FAILED_FILL_REMEMBERED_PREFIX}{remembered}") from fuyao_error
+        try:
+            filled = await _fill(tdx, roster_total, str(fuyao_error) or type(fuyao_error).__name__)
+        except _FillFailed as failure:
+            if failed_fills is not None and failure.remember:
+                failed_fills.remember(failure.reason)
+            raise AllASnapshotFallbackError(fuyao_error, failure.reason) from fuyao_error
+        if failed_fills is not None:
+            failed_fills.forget()
+        return filled
+
+
+async def _fill(
+    tdx: Callable[[], Awaitable[CapabilityEvidence | list[dict[str, Any]]]],
+    roster_total: Callable[[], Awaitable[int | None]],
+    fallback_reason: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """One TDX read as a snapshot of the main source's shape, or ``_FillFailed``."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + TDX_READ_TIMEOUT_SECONDS
+    task = asyncio.ensure_future(tdx())
+    task.add_done_callback(_consume_late_exception)
+    # ``asyncio.wait`` leaves the task alone on a timeout, as ``wait_for(shield(task))`` does,
+    # and has no shield for Python 3.14 to report the read's late failure through.
+    done, _ = await asyncio.wait({task}, timeout=TDX_READ_TIMEOUT_SECONDS)
+    if not done:
+        raise _FillFailed(f"tdx_read_timeout:{TDX_READ_TIMEOUT_SECONDS:g}s")
+    try:
+        result = task.result()
+    except PublicProviderRateLimited as error:
+        raise _FillFailed(str(error), remember=False) from error
+    except Exception as error:  # noqa: BLE001 - any failed fill leaves the Fuyao failure standing
+        raise _FillFailed(f"tdx_read_failed:{type(error).__name__}: {error}") from error
+    if isinstance(result, CapabilityEvidence):
+        rows, warnings, available_at = result.rows, result.warnings, result.available_at_max
+    else:
+        rows, warnings, available_at = result, (), None
+    available_at = available_at or datetime.now(timezone.utc)
+    try:
+        # The roster read has what the TDX read left of the one bound.
+        total = await asyncio.wait_for(roster_total(), timeout=max(0.0, deadline - loop.time()))
+    except Exception:  # noqa: BLE001 - without its roster the gate fails closed
+        total = None
+    try:
+        completeness = tdx_snapshot_completeness(len(rows), warnings, total)
+        if completeness["complete"]:
+            return project_tdx_snapshot_rows(rows, available_at), tdx_snapshot_metadata(
+                completeness=completeness, fallback_reason=fallback_reason,
+                available_at=available_at, warnings=warnings,
+            )
+    except Exception as error:  # noqa: BLE001 - a snapshot that cannot be projected is no fill
+        raise _FillFailed(f"tdx_projection_failed:{type(error).__name__}: {error}") from error
+    raise _FillFailed(
+        "tdx_snapshot_incomplete:priced_rows={priced_rows},no_trade_rows={no_trade_rows},"
+        "roster_total={roster_total},share={share:.3f}".format(**completeness))
+
 
 def _share(values: Iterable[bool]) -> float | None:
     values = list(values)
@@ -123,6 +433,11 @@ def compare(fuyao_rows: Iterable[Mapping[str, Any]], tdx_rows: Iterable[Mapping[
 
 
 __all__ = [
-    "TDX_SNAPSHOT_MIN_COMPLETE_SHARE", "TDX_SNAPSHOT_ROSTER_FLOOR", "compare",
-    "project_tdx_snapshot_rows", "tdx_snapshot_completeness",
+    "AllASnapshotFallbackError", "FAILED_FILL_REMEMBERED_PREFIX", "FALLBACK_REASON_MAX_CHARS", "FailedFillMemory",
+    "TDX_FAILED_FILL_MEMORY_SECONDS", "TDX_PROVIDER_KEY", "TDX_READ_TIMEOUT_SECONDS",
+    "TDX_SHARED_READ_TTL_SECONDS", "TDX_SNAPSHOT_MIN_COMPLETE_SHARE", "TDX_SNAPSHOT_ROSTER_FLOOR",
+    "TDX_SNAPSHOT_SOURCE", "compare", "fallback_provenance", "main_source_reference", "project_tdx_snapshot_rows",
+    "read", "scan_snapshot_decision_eligible", "shared_tdx_snapshot", "snapshot_decision_eligible",
+    "tdx_snapshot_completeness",
+    "tdx_snapshot_decision_eligible", "tdx_snapshot_metadata",
 ]

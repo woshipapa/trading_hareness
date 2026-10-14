@@ -40,7 +40,7 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 
 | 能力 | 解析顺序（状态） | 说明 |
 |---|---|---|
-| `quote.all_a_snapshot` | fuyao_ths(LV) → akshare(Tencent spot, declared fallback) | Fuyao 是主源；盘中默认只落一行 `a_share_minute_cross_section` 分钟文档，不再同时逐只写 `a_share_prices_snapshot`；AKShare 腾讯全 A 仅在 Fuyao 请求失败/熔断时补充研究覆盖，日期为会话推断且不提升决策资格；东财 clist 在 owner 出口被断连（unsupported） |
+| `quote.all_a_snapshot` | fuyao_ths(LV) → tdx_public(declared，仅补位) ；盘后快照路径另有 akshare(Tencent spot, declared fallback) | Fuyao 是主源；盘中默认只落一行 `a_share_minute_cross_section` 分钟文档，不再同时逐只写 `a_share_prices_snapshot`。盘中共享快照（level1 采集、观察池扫描、板块下钻、涨停锚点共用）在 Fuyao 以 `FuyaoProviderError` 失败时由通达信 0x054b 快照补这一分钟，带自己的来源标记，是否可进决策只看该绑定的 `decision_eligible`（现为 False），见第 3.1 节“全 A 快照补位链”。`MarketSnapshotActions`（盘后/按需快照）不走这条链：它仍在 Fuyao 请求失败/熔断时用 AKShare 腾讯全 A 补充研究覆盖，日期为会话推断且不提升决策资格；东财 clist 在 owner 出口被断连（unsupported） |
 | `quote.watch_snapshot` | longhuvip(LV) → tencent_free(LV) → sina_free(LV) | 仅 longhu/腾讯带交易所时间戳可进决策 |
 | `quote.order_book` | longhuvip 十档(LV) → tencent 五档(LV) | |
 | `quote.valuation` | fuyao 估值(D) → tushare daily_basic(LV) | 盘后全 A 5553 只/15.7 秒 |
@@ -112,7 +112,7 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 | `microstructure.top_board` | `tdx_public` | 90 | `declared` | 0x053f 排名榜 | 永不替代涨停池；覆盖率核对前不进决策 |
 | `microstructure.unusual` | `tdx_public` | 90 | `declared` | 0x0563 异动事件 | 覆盖率核对前不进决策；`limits.anomaly_tape` 可在核对后作第二来源 |
 | `microstructure.volume_profile` | `tdx_public` | 90 | `declared` | 0x051a 分价成交量（价格 /100，量为手，含 buy_lots、sell_lots） | 只收个股；覆盖率核对前不进决策 |
-| `quote.all_a_snapshot` | `tdx_public` | 80 | `declared` | 0x054b 全 A L1 排序列表：price、pct_change、volume、turnover；每页 80 只 | volume 是手，canonical 股 ×100；price≤0 的行已滤掉；coverage 为 None（证券列表接入前分母未知）；ST 要用证券列表，不能用 0x054b 的名称；盘中 shadow loop 另存独立分钟流 |
+| `quote.all_a_snapshot` | `tdx_public` | 80 | `declared` | 0x054b 全 A L1 排序列表：price、pct_change、volume、turnover；每页 80 只 | volume 是手，canonical 股 ×100；price≤0 的行已滤掉；coverage 为 None（证券列表接入前分母未知）；ST 要用证券列表，不能用 0x054b 的名称；盘中 shadow loop 另存独立分钟流；主源失败的分钟由它补位（见本节“全 A 快照补位链”） |
 | `quote.index_overview` | `tdx_public` | 80 | `declared` | 0x051d 指数概况：OHLC（点数）、amount（元）、volume_raw、up_count、down_count | 涨跌家数是指数成分口径，与 0x054b 排序的宽度口径不同；volume_raw 单位未测 |
 | `quote.order_book` | `tdx_public` | 80 | `declared` | 0x053e 五档：bid1..5、ask1..5（元），bid_vol、ask_vol（手）；批 80 | 只收主板、创业板、科创板、北交所个股，价格固定 /100；指数、板块、ETF、基金、可转债在联网前以 ValueError 拒绝；旧北交所代码按 920xxx 请求，行带 `source_symbol`；盘中延迟与新鲜度未测 |
 | `quote.valuation` | `tdx_public` | 80 | `declared` | `tdxstat.cfg` 的已确认列；canonical 只映射 `pe_ttm`（第 9 列） | 20261009 快照；行日期不是采集日期 |
@@ -125,6 +125,16 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 | `sector.membership` | `tdx_mac` | 70 | `declared` | MAC 板块成分，`known_at` = 采集时刻（UTC） | board_type 取自 `sector.board_catalog` 的同一行；未知类型在联网前报错 |
 | `sector.membership` | `tdx_public` | 80 | `declared` | `block_gn.dat` → `tdxzs3` 类型 4（概念）、`block_fg.dat` → 类型 5（风格、事件）的成分 | 不含 `block_zs`（指数成分表）和 `spblock`；只留 A 股权益并计数被拒的成员；不声称行业或地域；快照，`known_at` = 采集时刻 |
 | `ticks.session` | `tdx_public` | 20 | `declared` | 历史分笔，带主动买卖方向 | 旧绑定；2000 笔/请求；方向与腾讯逐分钟 100 % 一致 |
+
+**全 A 快照补位链（W008，`quant-service/app/all_a_snapshot_sources.py`）。** 主源仍是 Fuyao；通达信只补主源失败的那一分钟，不是第二主源，本节不改任何绑定的状态或资格。
+
+- **链。** 盘中共享快照先读 Fuyao；只有 `FuyaoProviderError` 才触发一次通达信读取，其他异常照常抛出。通达信出错、限流槽被拒、补位这一段（通达信读取加名册读取，合计一个上限）超过 20 秒、快照不完整、或快照无法投影时，抛出挂在 Fuyao 错误上的 `AllASnapshotFallbackError`（它本身是 `FuyaoProviderError`）：这一分钟按缺失处理，和没有补位链时一样。shadow loop 与补位链共用一个通达信读取器（同一时刻至多一次读取，5 秒内的两个调用方共用一个结果），`tdx_public` 的每分钟限流槽由这个读取器取。补位失败会被记住 30 秒（`FailedFillMemory`，与成功快照的共享缓存同长）：这段时间内 Fuyao 仍每次都试，但不再发起新的通达信读取，直接抛出同一个失败（原因前加 `tdx_fill_failed_recently:`）；限流槽被拒不记，补位成功即清除。09:15–09:25 这样主源挂、通达信必然不完整的时段因此是每 30 秒至多一次全 A 读取，而不是每个调用方一次。
+- **来源规则。** 快照自己说明来源，消费方用快照说的，而不是假定 Fuyao。元数据带 `provider_key` 和 `decision_eligible`：Fuyao 是 `fuyao_ths` / `True`（行为不变）；补位是 `tdx_public` / 读取时 `catalog.py` 里该绑定的 `decision_eligible`，另带 `fallback_for=fuyao_ths`、`fallback_reason` 和完整性。行的 `price_source` 是 `tdx_public_all_a_snapshot`，没有任何一处把通达信的行改标成 Fuyao。共享缓存会用自己的 `status`（`fresh`/`cached`）和年龄盖掉供应方的，所以资格只读 `decision_eligible`，从不由 `status` 推断。判断只有一处：`snapshot_decision_eligible`。带这个键的状态必须恰好是 `True`；不带键的状态只有在没有指向别的来源时才算有资格，即 `provider_key` 缺失或为 `fuyao_ths`，且没有 `fallback_for`。所以被重建后留着 `provider_key: tdx_public`、却丢了这个键的状态不算有资格。扫描里存下的状态被证据契约盖过键，用 `scan_snapshot_decision_eligible`（同一条规则，读 `flow_decision_eligible`）。
+- **完整性门。** `roster = max(有价行 + no_trade_rows, R, 5000)`，`R` 已知且 `有价行 / roster >= 0.95` 才算完整。`R` 是最新一份主源分钟文档元数据里的上游 `total`（`minute_cross_section.latest_main_total`，只读 `fuyao_ths` 的文档，每个交易日每个进程读一次）；读不到时按不完整处理。09:15–09:25 通达信快照没有有价行，所以这段时间不能补位。阈值是 2026-10-13 一个交易日得出的初值。
+- **补位分钟可以喂什么。** 可以：分钟文档（存在 `provider_key=tdx_public` 下，元数据带 `fallback_for`）、市场雷达点、盘中温度、provider health、指标健康里的补位分钟数。不可以（绑定未获资格期间）：信号路径。派生的量比、换手标为 `tdx_public_derived`，它的 `rule_usable_flow` 由该绑定的 `decision_eligible` 算出；`annotate_flow_snapshot_provenance` 还要求快照自己的 `decision_eligible`，`live_policy` 因此按拒绝过期 Fuyao 资金流的同一条理由拒绝入场，其中没有针对通达信的分支；纸面执行不在这样的快照上下任何单（买入或止损），板块下钻照常计算候选但不交给纸面执行；小杰龙头资金（`xiaojie_leader_flow`）在这样的扫描上整轮跳过（`skipped`，原因里带 provider），不记候选、不发研究提醒、不记启动雷达，和补位链之前 Fuyao 读取失败时一样。无论资格如何，快照价格都不是决策报价：`fuyao_ths_all_a_snapshot` 和 `tdx_public_all_a_snapshot` 都不在交易所时间戳报价标签里。
+- **各处怎么记来源。** 观察池扫描的 `source_status`：主源块 `fuyao` 写成 `unavailable`（带 Fuyao 的错误和 `served_by`），行数记在 `tdx_public` 块下，带 `fallback_for` 和 `flow_decision_eligible`；扫描的 provider health 记一条 `fuyao_ths` 失败和一条 `tdx_public` 成功（能力 `realtime_quote`）。level1 采集记 `fuyao_ths`/`a_share_prices_snapshot` 失败（带 Fuyao 的错误）和 `tdx_public`/`all_a_snapshot` 成功。分钟文档的读取（`latest`、`latest_async`、`first_between`、`day_documents`）按能力读补位链的全部 provider（`minute_cross_section.DOCUMENT_PROVIDERS`：`fuyao_ths`、`tdx_public`；写入时遇到不在其中的 provider 直接报错；同一时刻若有两个 provider 的文档，取单份的读取先取主源的）；shadow 流用自己的能力 `a_share_minute_cross_section_shadow`，这些读取从不读到它。情绪读数（`derived_market_sentiment`，含收盘记录 `market_sentiment_close`）的 `sources.tape` 是快照自己的来源，补位分钟另带 `tape_fallback_for`。涨停锚点存在 `tdx_public_derived` 来源下，`raw.source` 为 `tdx_public_all_a_plus_stk_limit`。指标健康 `market.minute_documents` 多一项 `fallback_minutes`：0 为 `ok`，大于 0 为 `warn` 并给出分钟数。已有的行不动，没有迁移。
+- **盘中一致性规则**（目录 `SESSION_AGREEMENT_RULES`，初值来自 2026-10-13）。一分钟被**判定**：两份快照都完整、两个数据时间在同一个连续竞价时段、且相差不超过 15 秒。被判定的一分钟**一致**：公共股票中至少 95% 的价格相差在 0.5% 以内。一个交易日**通过**：至少 30 个被判定的分钟，其中至少 95% 一致。量和成交额只记录、不参与判定。`python -m app.tdx_shadow_snapshot_runtime --trade-date <日>` 打印一个交易日的汇总。
+- **获得资格的路。** 不在本链里发生，是之后的运营动作：`tdx-promote.py` 的盘中检查、五个通过的交易日汇总、运营者同意（第 7.1 节）。绑定被标为 eligible 后，补位分钟的资金流即可进规则，不需要再改代码，因为快照的 `decision_eligible` 和标签的 `rule_usable_flow` 都从这一个绑定读出。
 
 看现值（上表是基线快照，状态、优先级、说明以现值为准）：
 
@@ -197,7 +207,7 @@ live 阈值或订单路径。
 | `intraday_signal_rules` 开盘跳空观察 | `price_source == 'tencent_batched_watch_quote'` | 目录标签属性 `exchange_timestamped`（腾讯、Longhu） | **变**：Longhu 报价也可触发，模型 v6→v7 |
 | 同上 量能标签 | `!= 'fuyao_ths_derived'` | 目录标签属性 `rule_usable_flow` | 不变（Longhu 标签暂不可用，见下） |
 | 同上 入场键名 | `fuyao_minute_breadth_v1` 等 | `minute_breadth_v1`、`no_public_main_flow` | 仅改名（随 v7） |
-| `intraday_scan_preparation` | 记 `fuyao_ths` 健康 | 记目录中 `quote.all_a_snapshot` 的主来源 | 不变 |
+| `intraday_scan_preparation` | 记 `fuyao_ths` 健康 | 记目录中 `quote.all_a_snapshot` 的主来源；补位分钟记主来源失败和实际供数来源成功（来源取自行的标签，W008） | 主源快照不变 |
 | 扫描链路 | `tushare_minutes` 依赖 | `realtime_minutes`（实现仍由组合根注入） | 不变；信号证据键 `tushare_rt_min`→`realtime_minute` |
 | `post_close_strategy_service` | 直读 `tushare_raw_records` daily_basic、`source='longhuvip_main_net'` | 读 canonical `daily_fundamentals`（按目录优先级）；资金流来源由目录给出 | 不变（owner 库 9-16/9-17 逐行比对一致） |
 | `watchlist_countertrend_rebound` | 复权因子优先两个 Tushare 源；`taxonomy_key='ths_industry'` | 目录来源顺序（当前 `longhu_qfq_derived` 优先，Tushare 仅作已落库 checkpoint）；策略登记的口径 | 研究价 fail-closed；先按 provider 优先级选 Longhu，再在同源内按 `available_at` 选最新 |
@@ -283,7 +293,8 @@ Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
 
 盘中 shadow loop 与 `all_a_level1_snapshot` 同属 `intraday_edge` runtime profile，只在 owner 的 quant-research 服务运行；研究 profile 的 `quant-research-scheduler`、standalone 的 research profile 和其他 profile 都不会启动它。它有独立的一 worker、零队列数据库执行边界，避免 shadow 写入占住 level1 的共享执行器；TDX 读超时后任务仍占用自己的读槽位，下一分钟在任务结束前只报告 `busy`。
 按扶摇分钟文档的实测大小，shadow 文档每天约增加 90 MB，和扶摇文档一样留在 hot 表，并计入 hot-storage budget；当可选高频采集不被 storage admission 允许时，shadow loop 自行暂停。保留策略等 phase B 决定后再跟进，不在本阶段新增 tiering 或归档。
-`public_provider_rate_limits` 中声明的 `tdx_public` 每分钟上限只约束 shadow loop 自己的调用；datasource research 读取和 collectors 仍直接调用 `tdx_protocol.call()`，不经过这个 limiter。因而 shadow snapshot 可以同时与另一条 TDX 读取在各自连接上运行。
+`public_provider_rate_limits` 中声明的 `tdx_public` 每分钟上限（60 次）由通达信全 A 快照的共享读取器取用：shadow loop 和补位链（第 3.1 节）都经它读，同一时刻至多一次全 A 读取，5 秒内的两个调用方共用一个结果，槽被拒时两者各自得到 `PublicProviderRateLimited`（shadow 报 `rate_limited`，补位链按这一分钟缺失处理）。datasource research 读取和 collectors 仍直接调用 `tdx_protocol.call()`，不经过这个 limiter。因而全 A 快照可以同时与另一条 TDX 读取在各自连接上运行。
+两条采集循环都按整点秒位启动（level1 在每分钟第 50 秒，shadow 在第 52 秒）。level1 采集把快照存在快照自己说的 provider 下：主源失败、通达信补位的一分钟存为 `tdx_public`/`a_share_minute_cross_section`，并记一条 `fuyao_ths` 失败和一条 `tdx_public` 成功；补位分钟数在指标健康 `market.minute_documents` 的 `fallback_minutes` 里。补位链等通达信读取至多 20 秒，读取线程自己结束：找不到可用主机时最长约 35 秒。
 
 | 任务（租约键 `background_loop:<label>`） | 归属 profile | 内容 |
 |---|---|---|
@@ -404,7 +415,10 @@ python scripts/tdx-promote.py apply scripts/data/tdx_promote_<能力>_<来源>_<
   - `owner_egress`：探测在 owner 容器里跑，并且有行；
   - `agreement`：`BindingSpec.agreement` 声明的每个容差都成立。两侧的行按声明的 key 连接，逐个公共行比较，公共行占本绑定行数的比例不得低于 `min_coverage`（默认 0.95）。对声明 `reference_span` 的协议（目前两个 `bars.minute` 绑定），只比较参照回答的首尾 key 范围；参照范围外的绑定行不降低 coverage，且两侧在较早探测完成时刻仍未闭合的分钟不参与对账。证据中的 `reference_span` 记录范围首尾和两侧范围内行数。**没有声明参照的绑定按拓展能力处理，这道门通过**（证据里写 extension capability: no reference is declared, nothing to compare）：它没有第二个源可对，升级只看 owner 出口能否读到数据（2026-10-11 起；此前 `c06fbad8` 把它拦在 UNSUPPORTED）。声明了参照的绑定：`tdx_mac` 的 `bars.minute`（close、volume）、`limits.prices`（up_limit、down_limit）、`quote.watch_snapshot`（price、volume、amount），参照都是腾讯；`tdx_public` 的 `bars.minute`（腾讯分钟线）、`bars.daily`（参照 `tdx_mac`，只比 close 与 amount；这是跨协议而不跨厂商，旧协议日线成交量是整手）、`bars.index_daily`（腾讯指数收盘）；容差是留给第一次盘中检查去调的起始值（`catalog.py` 的注释）；
   - `intraday`：每次探测的开始和结束都在上交所（XSHG）交易时段内，含午休和节假日，用运行脚本的 Mac 上的 `exchange_calendars` 判定，证据里写日历名和版本。
-- `apply` 取同一个绑定的证据文件，**每个文件**都过了这一步要的门才改：`UNSUPPORTED` → `DECLARED` 要 `owner_egress` 和 `agreement`；`DECLARED` → `LIVE_VERIFIED` 另要 `intraday`。它只把 `catalog.py` 里该绑定的状态记号改一格，从不碰 `decision_eligible`；不提交，只打印 `git commit -F - -- quant-service/app/datasources/catalog.py` 命令，提交信息引用各证据文件和它们的 sha256。顺序是先提交证据，再单独提交状态改动。
+- `apply` 取同一个绑定的证据文件，**每个文件**都过了这一步要的门才改：`UNSUPPORTED` → `DECLARED` 要 `owner_egress` 和 `agreement`；`DECLARED` → `LIVE_VERIFIED` 另要 `intraday`。它只把 `catalog.py` 里该绑定的状态记号改一格，不带 `--decision-eligible` 时从不碰 `decision_eligible`（见下）；不提交，只打印 `git commit -F - -- quant-service/app/datasources/catalog.py` 命令，提交信息引用各证据文件和它们的 sha256。顺序是先提交证据，再单独提交状态改动。
+- 容差条目可带 `min_share`（缺省 1.0，即每个公共行都要在容差内）：公共行中在容差内的比例不得低于它，证据里写出实际比例。`tdx_public` 的 `quote.all_a_snapshot` 对 Fuyao 快照声明了 `price`（`rel_tol` 0.005，`min_share` 0.95）、`volume` 与 `turnover`（`rel_tol` 0.01，`min_share` 0.85）；两次读取是相隔数秒的直接适配器调用，中间没有缓存。
+- 目录里有盘中一致性规则的绑定（`SESSION_AGREEMENT_RULES`，目前只有 `tdx_public` 的 `quote.all_a_snapshot`）走 `DECLARED` → `LIVE_VERIFIED` 时，`apply` 要求 `--session-summary <文件>` 至少 `min_sessions`（5）次。每个文件是 `python -m app.tdx_shadow_snapshot_runtime --trade-date <日>` 为一个交易日打印的 JSON；交易日必须互不相同，每份都说该日通过，且都按目录现在的规则判定，否则退出非零、目录不变。打印的提交信息列出这些文件和它们的哈希。
+- `--decision-eligible <决策记录>` 只在 `DECLARED` → `LIVE_VERIFIED` 这一步有效：同时把该绑定的 `decision_eligible` 置为 `True`，并在打印的提交信息里引用决策记录。不带这个参数时 `apply` 从不碰 `decision_eligible`。目录自己的规则（eligible 的绑定必须是 `live_verified`）仍是最后一道检查。对全 A 快照绑定，这一个改动同时让补位分钟的派生资金流可进规则（第 3.1 节“全 A 快照补位链”），所以它是运营决定，不随代码发布发生。
 - `apply` 要求 `catalog.py` 里该绑定恰有一处字面的 `_bind("<来源>", "<能力>", …)` 调用，否则退出。`derived_tdx_limits` 的三个池已改成三处字面的 `_bind(...)`（`e41e4dba`），`apply` 能改它们的状态；它们没有声明参照，按拓展能力过比对门，但只在当日有行情快照时才读得出数据。
 
 **owner 出口的路由探测与主机池**

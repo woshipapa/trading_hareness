@@ -47,6 +47,14 @@ EVIDENCE_CONTRACTS: Final[dict[str, EvidenceContract]] = {
         scope="all_a_cross_section", cross_sectional=True, decision_eligible=False,
         semantics="all_a_price_volume_turnover_snapshot_no_main_flow",
     ),
+    # The minute the main source failed and the TDX snapshot filled.  Like the main snapshot its
+    # price is no decision quote; whether its source may back a flow is the catalog binding's
+    # ``decision_eligible``, which the snapshot carries itself and the scan reports beside this.
+    "tdx_public_all_a_snapshot": EvidenceContract(
+        key="tdx_public_all_a_snapshot", provider_key="tdx_public", capability="all_a_snapshot",
+        scope="all_a_cross_section", cross_sectional=True, decision_eligible=False,
+        semantics="all_a_price_volume_turnover_snapshot_no_main_flow",
+    ),
     "tencent_watch_quote": EvidenceContract(
         key="tencent_watch_quote", provider_key="tencent_free", capability="order_book_quote",
         scope="explicit_watchlist_only", cross_sectional=False, decision_eligible=True,
@@ -71,12 +79,44 @@ EVIDENCE_CONTRACTS: Final[dict[str, EvidenceContract]] = {
         scope="all_a_cross_section", cross_sectional=True, decision_eligible=False,
         semantics="volume_ratio_and_turnover_rate_derived_from_licensed_snapshot_volume_and_local_float_shares",
     ),
+    "tdx_public_derived_watch_flow": EvidenceContract(
+        key="tdx_public_derived_watch_flow", provider_key="tdx_public", capability="all_a_snapshot",
+        scope="all_a_cross_section", cross_sectional=True, decision_eligible=False,
+        semantics="volume_ratio_and_turnover_rate_derived_from_fallback_snapshot_volume_and_local_float_shares",
+    ),
     "eastmoney_watch_flow": EvidenceContract(
         key="eastmoney_watch_flow", provider_key="eastmoney_free", capability="watchlist_flow_quote",
         scope="explicit_watchlist_only", cross_sectional=False, decision_eligible=False,
         semantics="watchlist_public_flow_proxy_not_exchange_order_flow",
     ),
 }
+
+
+#: The contracts of the all-A snapshot and of the flow derived from it, by the provider that
+#: served the snapshot.  A status that names no provider (no snapshot) is the main source's.
+_MAIN_ALL_A_PROVIDER: Final = "fuyao_ths"
+_ALL_A_CONTRACTS: Final[dict[str, tuple[str, str]]] = {
+    _MAIN_ALL_A_PROVIDER: ("fuyao_all_a_snapshot", "fuyao_ths_derived_watch_flow"),
+    "tdx_public": ("tdx_public_all_a_snapshot", "tdx_public_derived_watch_flow"),
+}
+
+
+def all_a_snapshot_provider(status: dict[str, Any] | None) -> str:
+    """The provider a snapshot status says served it; the main source when it names none."""
+    return str((status or {}).get("provider_key") or _MAIN_ALL_A_PROVIDER)
+
+
+def all_a_snapshot_contract_keys(status: dict[str, Any] | None) -> tuple[str, str]:
+    """(snapshot contract, derived-flow contract) for the provider that served ``status``.
+
+    A provider with no contract of its own raises: an unreviewed stream is never materialized
+    under the main source's name.
+    """
+    provider = all_a_snapshot_provider(status)
+    try:
+        return _ALL_A_CONTRACTS[provider]
+    except KeyError as error:
+        raise ValueError(f"no all-A snapshot evidence contract for provider: {provider}") from error
 
 
 def evidence_contract(key: str) -> EvidenceContract:
@@ -110,6 +150,7 @@ def evidence_contract_catalog() -> list[dict[str, Any]]:
 
 
 __all__ = [
-    "EVIDENCE_CONTRACTS", "EvidenceContract", "evidence_contract", "evidence_contract_catalog",
+    "EVIDENCE_CONTRACTS", "EvidenceContract", "all_a_snapshot_contract_keys", "all_a_snapshot_provider",
+    "evidence_contract", "evidence_contract_catalog",
     "materialize_evidence_status",
 ]

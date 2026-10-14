@@ -62,6 +62,29 @@ SESSION_MINUTES = 240
 DERIVED_FLOW_FIELDS = ("volume_ratio", "turnover_rate")
 #: Below this the elapsed-minute denominator is dominated by opening noise.
 MIN_ELAPSED_MINUTES = 3
+#: The label of a derived field names the source its volume came from.  Whether a label may
+#: feed a rule is the catalog's to say, not this module's.
+DERIVED_LABEL_BY_VOLUME_SOURCE = {
+    "fuyao_ths_all_a_snapshot": "fuyao_ths_derived",
+    "longhuvip_watch_quote": "longhuvip_volume_derived",
+    "tdx_public_all_a_snapshot": "tdx_public_derived",
+}
+#: A volume whose source this module does not know: a label no catalog entry makes rule-usable.
+UNKNOWN_VOLUME_DERIVED_LABEL = "unknown_volume_derived"
+#: Every label this module gives a derived field.
+DERIVED_FLOW_LABELS = frozenset({*DERIVED_LABEL_BY_VOLUME_SOURCE.values(), UNKNOWN_VOLUME_DERIVED_LABEL})
+
+
+def derived_flow_label(volume_source: Any) -> str:
+    """The derived-field label for a quote's volume source.
+
+    A quote whose volume names no source carries the main all-A snapshot's volume, as before
+    snapshots named their source.  A source that is named and not known here is not passed off
+    as the main one.
+    """
+    if not volume_source:
+        return "fuyao_ths_derived"
+    return DERIVED_LABEL_BY_VOLUME_SOURCE.get(str(volume_source), UNKNOWN_VOLUME_DERIVED_LABEL)
 
 
 def _minutes_between(start: _time, end: _time) -> int:
@@ -137,7 +160,7 @@ def apply_derived_watch_flow_metrics(
         metrics = derived.get(symbol) or {}
         native = {field for field, source in (quote.get("flow_metric_sources") or {}).items()
                   if source == "longhuvip_watch_quote" and quote.get(field) is not None}
-        derived_source = "longhuvip_volume_derived" if quote.get("volume_source") == "longhuvip_watch_quote" else "fuyao_ths_derived"
+        derived_source = derived_flow_label(quote.get("volume_source"))
         labels = {
             field: "longhuvip_watch_quote" if field in native else derived_source if field in metrics
             else "eastmoney_watch_flow" if quote.get(field) is not None
@@ -188,7 +211,7 @@ def derived_flow_divergence(
 
 
 __all__ = [
-    "DERIVED_FLOW_FIELDS", "MIN_ELAPSED_MINUTES", "SESSION_MINUTES",
-    "apply_derived_watch_flow_metrics", "derive_watch_flow_metrics",
+    "DERIVED_FLOW_FIELDS", "DERIVED_FLOW_LABELS", "DERIVED_LABEL_BY_VOLUME_SOURCE", "MIN_ELAPSED_MINUTES", "SESSION_MINUTES",
+    "UNKNOWN_VOLUME_DERIVED_LABEL", "apply_derived_watch_flow_metrics", "derive_watch_flow_metrics", "derived_flow_label",
     "derived_flow_divergence", "session_elapsed_minutes",
 ]

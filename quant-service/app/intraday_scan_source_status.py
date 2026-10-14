@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from .platform.evidence_contracts import all_a_snapshot_provider, materialize_evidence_status
+
+#: The scan status block and the quote label of the main all-A source.
+_MAIN_ALL_A_PROVIDER = "fuyao_ths"
+_MAIN_ALL_A_LABEL = "fuyao_ths_all_a_snapshot"
+
 
 def build_scan_source_status(
     *,
@@ -50,9 +56,16 @@ def build_scan_source_status(
         if (quotes.get(symbol) or {}).get("price_source") == "longhuvip_watch_quote"
         and ((quotes.get(symbol) or {}).get("price_freshness") or {}).get("status") == "fresh"
     )
+    # The snapshot names the provider that served it and the label its rows carry; a status
+    # that names neither (no snapshot) is the main source's.
+    all_a_provider = all_a_snapshot_provider(all_a_snapshot_status)
+    all_a_label = (
+        _MAIN_ALL_A_LABEL if all_a_provider == _MAIN_ALL_A_PROVIDER
+        else str(all_a_snapshot_status.get("source") or "")
+    )
     all_a_watch_symbols = {
         symbol for symbol in selected_symbols
-        if (quotes.get(symbol) or {}).get("price_source") == "fuyao_ths_all_a_snapshot"
+        if (quotes.get(symbol) or {}).get("price_source") == all_a_label
     }
     direct_watch_count = len(direct_watch_symbols)
     fresh_direct_watch_count = sum(
@@ -63,13 +76,35 @@ def build_scan_source_status(
         "completed" if fresh_direct_watch_count == len(selected_symbols)
         else "partial" if direct_watch_count or all_a_rows else "unavailable"
     )
+    all_a_block = {
+        "status": "completed" if all_a_rows else "unavailable", "rows": len(all_a_rows),
+        "matched": sum(symbol in quotes for symbol in selected_symbols),
+        "all_a_snapshot": all_a_snapshot_status,
+        "all_a_only_watch_quote_symbols": len(all_a_watch_symbols),
+    }
+    if all_a_provider == _MAIN_ALL_A_PROVIDER:
+        all_a_blocks = {"fuyao": all_a_block}
+    else:
+        # Another source filled the minute: the main source's block says it failed, exactly as
+        # on a scan with no snapshot, and the rows are reported under the provider that served
+        # them, with whether their flow was decision eligible.
+        all_a_blocks = {
+            "fuyao": {
+                "status": "unavailable", "rows": 0, "matched": 0,
+                "all_a_snapshot": materialize_evidence_status("fuyao_all_a_snapshot", {
+                    "status": "unavailable", "error": str(all_a_snapshot_status.get("fallback_reason") or ""),
+                    "served_by": all_a_provider,
+                }),
+                "all_a_only_watch_quote_symbols": 0,
+            },
+            all_a_provider: {
+                **all_a_block,
+                "fallback_for": all_a_snapshot_status.get("fallback_for"),
+                "flow_decision_eligible": all_a_snapshot_status.get("flow_decision_eligible") is True,
+            },
+        }
     return {
-        "fuyao": {
-            "status": "completed" if all_a_rows else "unavailable", "rows": len(all_a_rows),
-            "matched": sum(symbol in quotes for symbol in selected_symbols),
-            "all_a_snapshot": all_a_snapshot_status,
-            "all_a_only_watch_quote_symbols": len(all_a_watch_symbols),
-        },
+        **all_a_blocks,
         "tencent_watch": {
             "status": direct_status,
             "fresh_watch_quote_rows": len(fresh_watch_rows),

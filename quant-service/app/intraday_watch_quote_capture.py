@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
-from .platform.evidence_contracts import materialize_evidence_status
+from .intraday_derived_flow_metrics import DERIVED_FLOW_LABELS
+from .platform.evidence_contracts import all_a_snapshot_contract_keys, materialize_evidence_status
 from .intraday_price_priority import fresh_price_rows
 
 
@@ -159,6 +160,7 @@ class WatchQuoteCaptureDependencies:
 async def _apply_derived_flow_metrics(
     quotes: dict[str, dict[str, Any]], reference_task: "asyncio.Task[dict[str, dict[str, Any]]]",
     observed_at: datetime, dependencies: WatchQuoteCaptureDependencies,
+    contract: str = "fuyao_ths_derived_watch_flow",
 ) -> dict[str, Any]:
     """Overlay the licensed derived metrics over the public Eastmoney values.
 
@@ -167,12 +169,15 @@ async def _apply_derived_flow_metrics(
     ``main_net_inflow``, which no licensed route supplies - keeps whatever the
     public endpoint returned.  A reference read that fails or exceeds the scan
     budget degrades to exactly today's Eastmoney-only behaviour.
+
+    ``contract`` is the derived-flow contract of the provider that served the all-A snapshot,
+    so the status of a minute the fallback filled is not materialized as the main source's.
     """
     try:
         reference = await asyncio.wait_for(asyncio.shield(reference_task), timeout=2.0)
     except (asyncio.TimeoutError, *dependencies.watch_flow_reference_errors) as error:
         return materialize_evidence_status(
-            "fuyao_ths_derived_watch_flow",
+            contract,
             {"status": "unavailable", "error": dependencies.safe_error(str(error), 300)},
         )
     # The derivation needs cumulative volume, carried by the all-A snapshot.
@@ -184,11 +189,11 @@ async def _apply_derived_flow_metrics(
     sources = dependencies.apply_derived_flow_metrics(quotes, derived)
     divergence = dependencies.derived_flow_divergence(quotes, derived)
     field_counts = {
-        field: sum(1 for labels in sources.values() if labels.get(field) in {"fuyao_ths_derived", "longhuvip_volume_derived"})
+        field: sum(1 for labels in sources.values() if labels.get(field) in DERIVED_FLOW_LABELS)
         for field in ("volume_ratio", "turnover_rate")
     }
     return materialize_evidence_status(
-        "fuyao_ths_derived_watch_flow",
+        contract,
         {"status": "fresh" if derived else "unavailable", "age_seconds": 0.0,
          "source": "source_labeled_volume_with_local_float_shares",
          "reference_symbols": len(reference), "derived_symbols": len(derived),
@@ -270,7 +275,20 @@ async def capture_watch_quotes(
     except timeout_or_all_a_errors as error:
         detail = dependencies.safe_error(str(error), 300)
         all_a_rows, all_a_snapshot_status = [], {"status": "unavailable", "error": detail}
-    all_a_snapshot_status = materialize_evidence_status("fuyao_all_a_snapshot", all_a_snapshot_status)
+    # The evidence contract's ``decision_eligible`` says the snapshot's price is no decision
+    # quote, and overwrites the key.  What the snapshot itself said about its source is kept
+    # apart for the flow annotation; a status without the key (no snapshot) stays without it.
+    all_a_flow_eligibility = (
+        {"decision_eligible": all_a_snapshot_status["decision_eligible"]}
+        if "decision_eligible" in all_a_snapshot_status else {}
+    )
+    # The contract is the one of the provider the snapshot names: a minute the fallback filled
+    # is not materialized as the main source's.
+    all_a_contract, derived_flow_contract = all_a_snapshot_contract_keys(all_a_snapshot_status)
+    all_a_snapshot_status = materialize_evidence_status(all_a_contract, all_a_snapshot_status)
+    if "fallback_for" in all_a_snapshot_status:
+        # The scan's stored status says whether a filled minute's flow was eligible.
+        all_a_snapshot_status["flow_decision_eligible"] = all_a_flow_eligibility.get("decision_eligible") is True
     quotes = {item["symbol"]: item for row in all_a_rows if (item := dependencies.quote_from_all_a(row)) is not None}
     eastmoney_watch_flow_rows: list[dict[str, Any]] = []
     eastmoney_watch_flow_status = materialize_evidence_status(
@@ -290,7 +308,10 @@ async def capture_watch_quotes(
         )
     if all_a_rows and all_a_snapshot_status.get("cross_sectional", True):
         dependencies.annotate_percentiles(quotes)
-    dependencies.annotate_flow_provenance(quotes, all_a_snapshot_status)
+    dependencies.annotate_flow_provenance(quotes, {
+        **{key: value for key, value in all_a_snapshot_status.items() if key != "decision_eligible"},
+        **all_a_flow_eligibility,
+    })
     if eastmoney_watch_flow_rows:
         dependencies.merge_eastmoney_flows(quotes, eastmoney_watch_flow_rows)
         eastmoney_quotes = {
@@ -363,7 +384,7 @@ async def capture_watch_quotes(
     # outright these merges are what put the watch basket into ``quotes`` at
     # all, and without them the volume fallback would have nothing to attach to.
     derived_flow_status = await _apply_derived_flow_metrics(
-        quotes, reference_task, observed_at, dependencies,
+        quotes, reference_task, observed_at, dependencies, derived_flow_contract,
     )
     for quote in quotes.values():
         quote["price_freshness"] = dependencies.quote_freshness(

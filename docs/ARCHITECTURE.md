@@ -90,6 +90,20 @@ The live Level-1 collector stores one `a_share_minute_cross_section` document pe
 minute by default; per-symbol `a_share_prices_snapshot` rows are an explicit
 compatibility mode and remain historical evidence.
 
+The all-A snapshot behind that collector, the watch scan, the board drill and
+the limit-up anchors is one shared read through a fallback chain
+(`quant-service/app/all_a_snapshot_sources.py`). Fuyao/THS is the main source.
+When it fails as a provider, one TDX snapshot read fills that minute, provided
+it is complete against the main source's stored roster (at least 95% of it
+priced; an unknown roster is incomplete); otherwise the minute is missing, as
+before. A filled minute is never relabelled: its metadata says
+`provider_key: tdx_public` and `fallback_for: fuyao_ths`, its rows say
+`tdx_public_all_a_snapshot`, and it is stored, reported and recorded in
+provider health under that provider, beside the main source's failure. Readers
+of minute documents select by capability across the chain's providers; the TDX shadow
+stream, taken every minute beside the main source to measure agreement, has a
+capability of its own. Details: `docs/DATA_SOURCE_LAYER.md` section 3.1.
+
 `quant-service/app/main.py` is the composition root.  It owns application
 lifespan, dependency assembly and router registration.  New behaviour belongs
 in a focused module, then is injected from `main.py`; production modules must
@@ -164,6 +178,26 @@ modules. The detailed compatibility rules are in
 
 - Missing/stale provider data, incomplete sector membership and insufficient
   statistical samples fail closed.
+- A snapshot says where it came from and whether its source is decision
+  eligible, and every consumer uses what the snapshot says. Eligibility is the
+  snapshot's `decision_eligible`, which for a TDX-filled minute is the
+  `decision_eligible` of the `tdx_public quote.all_a_snapshot` catalog binding
+  when the minute is read (false today). It is never inferred from freshness:
+  the shared cache reports its own status over the supplier's. While the
+  binding is not eligible, a filled minute feeds the minute document, the
+  radar, the intraday temperature and health, and not the signal path: its
+  derived flow carries a label no rule accepts, the flow snapshot behind an
+  entry is not eligible, and paper execution plans no order on it. A snapshot
+  price, of either source, is never a decision quote.
+- The binding becomes eligible only by an operator act: the
+  `declared -> live_verified` step of `scripts/tdx-promote.py apply`, given
+  `--decision-eligible <decision record>`. That step demands five passing
+  in-session agreement summaries with or without the flag (a minute is judged
+  when both snapshots are complete and their data times are at most 15 s
+  apart in one continuous segment, and agrees when at least 95% of the common
+  symbols are within 0.5% in price). No code change follows that act: the
+  snapshot's flag and the derived-flow label's `rule_usable_flow` are both
+  read from the binding.
 - The daily control plane applies to listed equities only.  Index benchmark
   rows are valid market context but do not carry equity `adj_factor` or
   `stk_limit` controls.

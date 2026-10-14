@@ -227,6 +227,8 @@ async def all_a_snapshot_rows(*, now: datetime | None = None) -> tuple[list[dict
     freshness = snapshot_timestamp_status(timestamp, now=now)
     return rows, {
         **freshness, "source": "fuyao_ths_all_a_snapshot",
+        # The snapshot says where it came from; consumers read this instead of assuming Fuyao.
+        "provider_key": FUYAO_PROVIDER_KEY, "decision_eligible": True,
         "scope": "all_a_cross_section", "cross_sectional": True,
         "semantics": "all_a_price_volume_turnover_snapshot_no_main_flow", "upstream_timestamp_ms": timestamp,
         "total": total, "matched_rows": len(rows),

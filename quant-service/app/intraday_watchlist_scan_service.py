@@ -10,6 +10,7 @@ import re
 from typing import Any
 import uuid
 
+from .all_a_snapshot_sources import fallback_provenance, scan_snapshot_decision_eligible
 from .intraday_features import strongest_group_peer_context
 from .platform.strategy_data_needs import strategy_taxonomies
 
@@ -158,6 +159,31 @@ def build_peer_contexts(
     return contexts
 
 
+#: Why the leader-flow pass does not run on a snapshot whose source is not decision eligible.
+LEADER_FLOW_SNAPSHOT_NOT_ELIGIBLE_REASON = "the all-A snapshot's source is not decision eligible"
+
+
+async def _leader_flow(
+    scan_id: Any, observed_at: Any, quote_capture: Any, dependencies: "IntradayWatchlistScanDependencies",
+) -> dict[str, Any]:
+    """Run the leader-flow strategy on this scan's cross-section, when its source may be acted on.
+
+    The pass records strategy candidates and delivers research alerts, so a snapshot whose
+    source is not decision eligible is to it what a failed read is: the pass is skipped, and no
+    candidate, alert, pending reminder or launch-radar row comes from that scan.  The reason
+    names the provider that served the snapshot.
+    """
+    status = quote_capture.all_a_snapshot_status
+    if quote_capture.all_a_rows and not scan_snapshot_decision_eligible(status):
+        provider = (status.get("provider_key") if isinstance(status, dict) else None) or "unknown"
+        return {"status": "skipped",
+                "reason": f"{LEADER_FLOW_SNAPSHOT_NOT_ELIGIBLE_REASON}: {provider}",
+                **fallback_provenance(status)}
+    return await dependencies.xiaojie_leader_flow(
+        scan_id=scan_id, observed_at=observed_at, all_a_rows=quote_capture.all_a_rows,
+    )
+
+
 async def _market_wide_research(
     scan_id: Any, observed_at: Any, *, quote_timestamp_slo_seconds: float,
     dependencies: "IntradayWatchlistScanDependencies",
@@ -172,9 +198,7 @@ async def _market_wide_research(
     xiaojie: dict[str, Any] = {"status": "disabled"}
     if dependencies.xiaojie_leader_flow is not None:
         try:
-            xiaojie = await dependencies.xiaojie_leader_flow(
-                scan_id=scan_id, observed_at=observed_at, all_a_rows=quote_capture.all_a_rows,
-            )
+            xiaojie = await _leader_flow(scan_id, observed_at, quote_capture, dependencies)
         except Exception as error:  # noqa: BLE001 - never fail the scan over research
             xiaojie = {"status": "degraded", "reason": str(error)[:240]}
     return {
@@ -376,9 +400,7 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     xiaojie_observation: dict[str, Any] = {"status": "disabled"}
     if dependencies.xiaojie_leader_flow is not None:
         try:
-            xiaojie_observation = await dependencies.xiaojie_leader_flow(
-                scan_id=scan_id, observed_at=observed_at, all_a_rows=quote_capture.all_a_rows,
-            )
+            xiaojie_observation = await _leader_flow(scan_id, observed_at, quote_capture, dependencies)
         except Exception as error:  # noqa: BLE001 - never fail the primary scan
             xiaojie_observation = {"status": "degraded", "reason": str(error)[:240]}
         source_status["xiaojie_leader_flow"] = xiaojie_observation

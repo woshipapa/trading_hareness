@@ -62,6 +62,31 @@ class PublicProviderRateLimitTests(unittest.TestCase):
         self.assertGreater(fuyao_provider.FUYAO_SLOT_MAX_WAIT_SECONDS, 2.0,
                            "long enough for the all-A snapshot's second page")
 
+    def test_the_shared_tdx_reader_takes_its_slot_without_waiting(self):
+        from app.all_a_snapshot_sources import shared_tdx_snapshot
+        from app.public_provider_rate_limits import public_provider_rate_limiter
+
+        reads = []
+
+        async def fetch():
+            reads.append("read")
+            raise RuntimeError("tdx down")
+
+        async def run():
+            shared = shared_tdx_snapshot(fetch, clock=asyncio.get_running_loop().time)
+            with self.assertRaisesRegex(RuntimeError, "tdx down"):
+                await shared.get()
+            # A failed read is not cached; its retry inside the slot's spacing is refused, not queued.
+            with self.assertRaises(PublicProviderRateLimited) as refused:
+                await shared.get()
+            self.assertEqual(refused.exception.provider_key, "tdx_public")
+
+        public_provider_rate_limiter.reset()
+        self.addCleanup(public_provider_rate_limiter.reset)
+        with patch.dict(os.environ, {"PUBLIC_RATE_LIMIT_TDX_PUBLIC_PER_MINUTE": "60"}, clear=False):
+            asyncio.run(run())
+        self.assertEqual(reads, ["read"])
+
     def test_rate_limit_can_be_configured_without_secrets(self):
         with patch.dict(os.environ, {"PUBLIC_RATE_LIMIT_SINA_FREE_PER_MINUTE": "17"}, clear=False):
             self.assertEqual(configured_rate_limit("sina_free"), 17)

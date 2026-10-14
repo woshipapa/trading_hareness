@@ -15,6 +15,9 @@ SOURCES = (
     ("tencent_free", "tencent_free", health_capability("tencent_free", "quote.watch_snapshot"), "腾讯报价", "watchlist", 90),
     ("sina_free", "sina_free", health_capability("sina_free", "quote.watch_snapshot"), "新浪补缺报价", "fallback", 90),
     ("fuyao_ths", "fuyao_ths", health_capability("fuyao_ths", "quote.all_a_snapshot"), "Fuyao 全 A 快照", "all_a", 120),
+    # Serves only a minute the main snapshot failed: no observation of it is "not_tested", not an outage.
+    ("tdx_public", "tdx_public", health_capability("tdx_public", "quote.all_a_snapshot"), "通达信全 A 快照（补位）",
+     "all_a_fallback", 120),
     ("longhuvip_minute", "longhuvip", health_capability("longhuvip", "bars.minute"), "Longhu 分钟", "priority_subset", 90),
     ("tencent_minute", "tencent_free", health_capability("tencent_free", "bars.minute"), "腾讯分钟", "priority_subset", 90),
     ("eastmoney_free", "eastmoney_free", "watchlist_flow_quote", "东财个股资金", "watchlist", 90),
@@ -71,10 +74,13 @@ def source_observation(key: str, sources: dict[str, Any], watches: int | None) -
         received = first_count(data, "sina_watch_quote_rows")
         requested = first_count(data, "missing_direct_watch_quote_symbols")
         status = "completed" if received else "not_tested"
-    elif key == "fuyao_ths":
+    elif key in {"fuyao_ths", "tdx_public"}:
         snapshot = mapping(data.get("all_a_snapshot"))
         requested = first_count(snapshot, "total")
         received = first_count(snapshot, "matched_rows") if snapshot else received
+        if key == "tdx_public" and not data:
+            # The scan has a block for the filler only when it served the snapshot.
+            status = "not_tested"
         data = {**data, **snapshot}
         status = str(snapshot.get("status") or status)
     elif key in {"longhuvip_minute", "tencent_minute"}:

@@ -142,6 +142,8 @@ def observation_source(quote: dict[str, Any] | None) -> str:
         return "longhuvip"
     if source == "fuyao_ths_all_a_snapshot":
         return "fuyao_ths"
+    if source == "tdx_public_all_a_snapshot":
+        return "tdx_public"
     if source == "akshare_tencent_all_a_snapshot":
         return "akshare"
     return "unknown_realtime_source"
@@ -188,8 +190,17 @@ def exchange_time_status(quote: dict[str, Any] | None, observed_at: datetime, ma
     return {**result, "status": "fresh"}
 
 
+#: A snapshot row that names no source is the main source's.
+_MAIN_ALL_A_SOURCE = "fuyao_ths_all_a_snapshot"
+
+
 def quote_from_fuyao(row: dict[str, Any]) -> dict[str, Any] | None:
-    """Preserve the Fuyao adapter's normalized all-A row without fake flow."""
+    """Preserve a normalized all-A snapshot row without fake flow.
+
+    The row keeps the source it says it came from: a minute the fallback filled is never
+    relabelled as the main source.  Its volume then names that source too, because a later
+    watch quote may replace the price label while the cumulative volume stays the snapshot's.
+    """
     def as_number(value: Any) -> float | None:
         try:
             return float(value) if value not in (None, "") else None
@@ -200,12 +211,14 @@ def quote_from_fuyao(row: dict[str, Any]) -> dict[str, Any] | None:
     price = as_number(row.get("price"))
     if not _SYMBOL.fullmatch(symbol) or price is None or price <= 0:
         return None
+    source = str(row.get("price_source") or _MAIN_ALL_A_SOURCE)
     return {
         "symbol": symbol, "name": row.get("name"), "price": price,
         "pct_change": as_number(row.get("pct_change")), "turnover": as_number(row.get("turnover")),
         "volume": as_number(row.get("volume")), "raw": dict(row.get("raw") or row),
-        "price_source": "fuyao_ths_all_a_snapshot", "price_observed_from_depth": False,
+        "price_source": source, "price_observed_from_depth": False,
         "price_observed_at": row.get("price_observed_at"),
+        **({"volume_source": source} if source != _MAIN_ALL_A_SOURCE else {}),
     }
 
 

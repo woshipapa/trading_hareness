@@ -50,9 +50,12 @@ from .akshare_provider import (
     akshare_tencent_all_a_spot,
     normalize_tencent_all_a_spot_rows,
 )
+from .all_a_snapshot_sources import (
+    FailedFillMemory, main_source_reference, read as read_all_a_snapshot, shared_tdx_snapshot,
+)
 from .fuyao_provider import FuyaoProviderError, all_a_snapshot_rows as fuyao_all_a_snapshot_rows
 from .fuyao_provider import fetch as fetch_fuyao_data
-from .limit_up_anchor import live_limit_up_pool_rows
+from .limit_up_anchor import live_limit_up_pool_rows, snapshot_anchor_source
 from .market_history_backfill import append_limit_performance as append_limit_performance_isolated
 from .launch_radar import MODEL_VERSION as LAUNCH_RADAR_MODEL_VERSION
 from .analysis import as_utc
@@ -1743,9 +1746,25 @@ _intraday_longhu_minute_cache: dict[str, tuple[float, dict[str, Any] | None, str
 INTRADAY_ALL_A_SNAPSHOT_TTL_SECONDS = 30.0
 
 
+# The one reader of the TDX all-A snapshot: the shadow capture and the fallback chain both go through it.
+_tdx_all_a_snapshots = shared_tdx_snapshot(
+    lambda: fetch_tdx_all_a_snapshot(), clock=lambda: asyncio.get_running_loop().time(),
+)
+
+
+async def tdx_all_a_snapshot() -> Any:
+    """Return the shared TDX all-A read: at most one in flight, one result for both callers."""
+    return (await _tdx_all_a_snapshots.get())[0]
+
+
+# A failed fill is remembered here, so an outage with an unusable TDX snapshot is not one TDX read a caller.
+_tdx_failed_fills = FailedFillMemory()
+
+
 async def _fetch_intraday_all_a_snapshot_rows() -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Fetch the documented Fuyao/THS cross-section without a Tencent all-A call."""
-    return await fuyao_all_a_snapshot_rows()
+    """Fetch the Fuyao/THS cross-section; a failed Fuyao read is filled by one labelled TDX read."""
+    return await read_all_a_snapshot(
+        fuyao_all_a_snapshot_rows, tdx_all_a_snapshot, tdx_fallback_roster_total, _tdx_failed_fills)
 
 
 _intraday_all_a_snapshots = SharedAsyncSnapshot(
@@ -1753,6 +1772,14 @@ _intraday_all_a_snapshots = SharedAsyncSnapshot(
     ttl_seconds=INTRADAY_ALL_A_SNAPSHOT_TTL_SECONDS,
     clock=lambda: asyncio.get_running_loop().time(),
 )
+
+
+async def cancel_shared_snapshots() -> None:
+    """Cancel the detached all-A reads of both sources at shutdown."""
+    try:
+        await _intraday_all_a_snapshots.cancel_inflight()
+    finally:
+        await _tdx_all_a_snapshots.cancel_inflight()
 
 
 def consume_background_task_exception(task: asyncio.Task[Any]) -> None:
@@ -1772,7 +1799,7 @@ def consume_background_task_exception(task: asyncio.Task[Any]) -> None:
 
 
 async def intraday_all_a_snapshot() -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Return one shared, explicitly aged Fuyao all-A price/turnover snapshot."""
+    """Return one shared, explicitly aged all-A price/turnover snapshot; its metadata names the source."""
     (rows, supplier_status), cache_status = await _intraday_all_a_snapshots.get()
     return rows, {**supplier_status, **cache_status}
 
@@ -3194,18 +3221,26 @@ market_radar = MarketRadarRuntime(MarketRadarDependencies(
     persist_timed_observations=lambda *args: persist_timed_observations(*args)))
 
 
-async def tdx_shadow_roster_total() -> int | None:
-    def read() -> int | None:
-        with db.transaction() as connection:
-            return minute_cross_section.latest_main_total(connection)
+def _read_main_roster_total() -> int | None:
+    with db.transaction() as connection:
+        return minute_cross_section.latest_main_total(connection)
 
-    return await run_tdx_shadow_blocking(read, timeout_seconds=10)
+
+async def tdx_shadow_roster_total() -> int | None:
+    return await run_tdx_shadow_blocking(_read_main_roster_total, timeout_seconds=10)
+
+
+async def tdx_fallback_roster_total() -> int | None:
+    """The fallback chain's roster: what the shadow remembered for the trade date, else one read of its own."""
+    return await tdx_shadow_runtime.remembered_roster_total(
+        lambda: run_database_blocking(_read_main_roster_total, timeout_seconds=10))
+
 
 tdx_shadow_runtime = TdxShadowSnapshotRuntime(TdxShadowSnapshotDependencies(
-    fetch_snapshot=fetch_tdx_all_a_snapshot,
+    fetch_snapshot=tdx_all_a_snapshot,
     run_database=run_tdx_shadow_blocking,
     database=db,
-    recent_reference=minute_cross_section.recent,
+    recent_reference=lambda now: main_source_reference(minute_cross_section.recent(now)),
     storage_allowed=tdx_shadow_storage_allowed,
     roster_total=tdx_shadow_roster_total,
 ))
@@ -3282,11 +3317,11 @@ def _persist_local_limit_pool_failure(error: str) -> None:
         record_provider_failure(connection, "fuyao_derived", "limit_pool", error, None)
 
 
-def _persist_local_limit_pool(rows: list[dict[str, Any]]) -> int:
-    """Store locally derived anchors and their provider health in a DB worker."""
-    stored = persist_market_events("fuyao_derived", rows)
+def _persist_local_limit_pool(rows: list[dict[str, Any]], provider: str = "fuyao_derived") -> int:
+    """Store locally derived anchors and their provider health in a DB worker, under the source they were derived from."""
+    stored = persist_market_events(provider, rows)
     with db.transaction() as connection:
-        record_provider_success(connection, "fuyao_derived", "limit_pool", stored, None)
+        record_provider_success(connection, provider, "limit_pool", stored, None)
     return stored
 
 
@@ -3309,9 +3344,10 @@ async def refresh_intraday_limit_up_anchors(observed_at: datetime) -> dict[str, 
             return {"status": "blocked", "reason": "session trade limits unavailable"}
         snapshot_rows, _meta = await intraday_all_a_snapshot()
         rows = live_limit_up_pool_rows(snapshot_rows, limits, reference.get("names"), observed_at)
-        stored = await run_database_blocking(_persist_local_limit_pool, rows, timeout_seconds=30)
+        provider, source = snapshot_anchor_source(snapshot_rows)
+        stored = await run_database_blocking(_persist_local_limit_pool, rows, provider, timeout_seconds=30)
         return {"status": "completed" if rows else "empty", "received": len(rows), "stored": stored,
-                "source": "fuyao_all_a_plus_stk_limit"}
+                "source": source}
     except ExecutorSaturatedError as error:
         return {"status": "blocked", "reason": safe_error_detail(str(error), 300)}
     # LimitCrossSectionUnavailable: Tencent gave no complete, session-dated limit cross-section.
@@ -4290,7 +4326,7 @@ def _application_lifecycle_dependencies() -> ApplicationLifecycleDependencies:
         verify_strategy_contracts=_verify_strategy_runtime_contracts,
         start_background_tasks=_start_application_background_tasks,
         cancel_background_tasks=cancel_background_tasks,
-        cancel_shared_snapshots=_intraday_all_a_snapshots.cancel_inflight,
+        cancel_shared_snapshots=cancel_shared_snapshots,
         shutdown_super_get_executor=shutdown_super_get_executor,
         shutdown_runtime_executors=shutdown_runtime_executors,
         close_http_clients=close_http_clients,

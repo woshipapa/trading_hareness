@@ -112,6 +112,89 @@ class StrategyCardsSqlTests(unittest.TestCase):
         self.assertEqual(mcs.rows_for(first[1], ["699902.SH"])["699902.SH"], rows[1])
         self.assertEqual(len(mcs.day_documents(connection, SESSION)), 2)
 
+    def test_a_filled_minute_is_stored_under_its_provider_and_read_with_the_others_on_the_real_schema(self) -> None:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        from app import minute_cross_section as mcs
+        from app.indicator_health import minute_document_checks
+
+        connection = self.connection
+
+        class Database:
+            def transaction(self):
+                class Context:
+                    def __enter__(self):
+                        return connection
+
+                    def __exit__(self, *exc):
+                        return False
+                return Context()
+
+        minute = datetime(2099, 3, 4, 10, 0, 50, tzinfo=ZoneInfo("Asia/Shanghai"))
+        row = {"symbol": "699901.SH", "ts_code": "699901.SH", "price": 10.5, "pct_change": 5.0, "turnover": 1e6,
+               "volume": 1e4, "raw": {"open_price": 10.0, "prev_price": 10.0}}
+        main = {"provider_key": "fuyao_ths", "total": 5580}
+        filled = {"provider_key": "tdx_public", "fallback_for": "fuyao_ths", "total": 5579}
+        mcs.persist_document(Database(), minute, [{**row, "price_source": "fuyao_ths_all_a_snapshot"}], main)
+        mcs.persist_document(Database(), minute + timedelta(minutes=1),
+                             [{**row, "price_source": "tdx_public_all_a_snapshot"}], filled,
+                             provider=mcs.snapshot_provider(filled))
+        providers = [record["provider_key"] for record in connection.execute(
+            """SELECT provider_key FROM quant.raw_market_observations
+                WHERE capability='a_share_minute_cross_section' AND symbol IS NULL AND effective_at>=%s
+                ORDER BY effective_at""", (minute,)).fetchall()]
+        self.assertEqual(providers, ["fuyao_ths", "tdx_public"])
+        # The readers see the filled minute like any other; the roster reads the main source alone.
+        latest = mcs.latest(connection, SESSION)
+        self.assertEqual(latest[0], minute + timedelta(minutes=1))
+        self.assertEqual(mcs.rows_of(latest[1])[0]["price_source"], "tdx_public_all_a_snapshot")
+        self.assertEqual(mcs.latest(connection)[0], minute + timedelta(minutes=1))
+        self.assertEqual(mcs.first_between(connection, minute, minute + timedelta(minutes=5))[0], minute)
+        self.assertEqual(len(mcs.day_documents(connection, SESSION)), 2)
+        self.assertEqual(mcs.latest_main_total(connection), 5580)
+        checks = {item["name"]: item for item in minute_document_checks(
+            connection, SESSION, minute + timedelta(minutes=2))}
+        self.assertEqual(checks["present"]["value"], 2)
+        self.assertEqual((checks["fallback_minutes"]["status"], checks["fallback_minutes"]["value"]), ("warn", 1))
+
+    def test_two_providers_at_one_minute_read_the_main_source_first_on_the_real_schema(self) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from app import minute_cross_section as mcs
+
+        connection = self.connection
+
+        class Database:
+            def transaction(self):
+                class Context:
+                    def __enter__(self):
+                        return connection
+
+                    def __exit__(self, *exc):
+                        return False
+                return Context()
+
+        minute = datetime(2099, 3, 4, 10, 0, 50, tzinfo=ZoneInfo("Asia/Shanghai"))
+        row = {"symbol": "699901.SH", "ts_code": "699901.SH", "price": 10.5, "pct_change": 5.0, "turnover": 1e6,
+               "volume": 1e4, "raw": {"open_price": 10.0, "prev_price": 10.0}}
+        filled = {"provider_key": "tdx_public", "fallback_for": "fuyao_ths", "total": 5579}
+        # No writer does this today (one capture, one provider); stored in the order that would
+        # favour the fallback if the reader had no rule of its own.
+        mcs.persist_document(Database(), minute, [{**row, "price_source": "fuyao_ths_all_a_snapshot"}],
+                             {"provider_key": "fuyao_ths", "total": 5580})
+        mcs.persist_document(Database(), minute, [{**row, "price_source": "tdx_public_all_a_snapshot"}], filled,
+                             provider=mcs.snapshot_provider(filled))
+        self.assertEqual(connection.execute(
+            """SELECT count(*) AS n FROM quant.raw_market_observations
+                WHERE capability='a_share_minute_cross_section' AND symbol IS NULL AND effective_at=%s""",
+            (minute,)).fetchone()["n"], 2)
+        for document in (mcs.latest(connection, SESSION), mcs.latest(connection),
+                         mcs.first_between(connection, minute, minute.replace(minute=5))):
+            self.assertEqual(document[0], minute)
+            self.assertEqual(mcs.rows_of(document[1])[0]["price_source"], "fuyao_ths_all_a_snapshot")
+
     def test_the_backfill_converts_verifies_deletes_and_replays_on_the_real_schema(self) -> None:
         import json
         from datetime import datetime, timedelta
