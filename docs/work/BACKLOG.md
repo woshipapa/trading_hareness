@@ -664,12 +664,13 @@
 
 ### B069 审查里推测的四处，要用运行证据确认
 
-- state: open
+- state: done
 - kind: follow-up
 - why: 2026-10-14 审查给出、我没能用代码证明的：(1) `analyst_market_evaluation.py:447` 观测表用 `strategy_available_at >= %s::date`，没转 `Asia/Shanghai`，而同一函数里日内结果的查询转了；若数据库会话时区是 UTC，上海 16:00 之后的观测会划到次日；(2) `derived_daily_readings.py` 把所有读数的 `effective_at` 写成当日 15:00，次日补的读数对只看 `effective_at` 的读者像是昨日已知，要找有没有这样的读者；(3) `all_a_snapshot_sources.py:160-161` 缺状态（`None`）时视为可决策，源码说是有意的向后兼容，要查有没有调用方传 `None`；(4) `longhu_vendor_source.py:363,936` 分钟批量默认 12 并发，高于仓库的 8
 - how: (1) 在 owner 库只读跑 `SHOW timezone` 与一条带跨 16:00 观测的对比；(2)(3) 全仓库查读者与调用方；(4) 看实际调用路径是不是大批量，是的话改默认或封顶 8
 - who: agent
-- needs: 无
+- needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
+- result: 2026-10-14 四处逐条结论：(1) 已改，提交 496d0339：观测表按 `AT TIME ZONE 'Asia/Shanghai'` 取日，与同函数的日内查询一致；没有探测数据库会话时区，所以不知道线上是否真的错过日，修改在会话时区是上海时等价。(2) 不改：`derived_daily_readings.newest` 只按日取读数，没有按时刻的读者，补录读数在“按日取”下就是当日读数，不构成前视；若以后有按时刻回放的读者，要同时过滤 `available_at`。(3) 不改：源码注释写明缺状态视为可决策是为兼容没有该标志的老调用方，`all_a_snapshot_rows` 总返回状态字典，`intraday_features` 另外要求 `status` 为 fresh/cached；没有找到会传 `None` 的调用方。(4) 已改，提交 496d0339：直连分钟批量的并发封顶 8（`LICENSED_READ_MAX_IN_FLIGHT`，依据 F027）；经 owner 网关的那一支原来就用 `minute_batch_workers()`（默认 4）。全套 3,239 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-3-release-path.out.txt`
 - updated: 2026-10-14
 
 ## Closed
