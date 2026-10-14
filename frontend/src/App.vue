@@ -10,6 +10,7 @@ const CloseReviewTab = defineAsyncComponent(() => import('./views/research/Close
 const SessionRadarTab = defineAsyncComponent(() => import('./views/research/SessionRadarTab.vue'));
 const SentimentTemperatureTab = defineAsyncComponent(() => import('./views/research/SentimentTemperatureTab.vue'));
 const LimitUpRiskTab = defineAsyncComponent(() => import('./views/research/LimitUpRiskTab.vue'));
+const TacticTrialsTab = defineAsyncComponent(() => import('./views/research/TacticTrialsTab.vue'));
 const StrategyTab = defineAsyncComponent(() => import('./views/research/StrategyTab.vue'));
 const FactorLabTab = defineAsyncComponent(() => import('./views/research/FactorLabTab.vue'));
 const StockStudyTab = defineAsyncComponent(() => import('./views/research/StockStudyTab.vue'));
@@ -51,6 +52,9 @@ const PersonalDecisionView = defineAsyncComponent(() => import('./views/Personal
             </el-tab-pane>
             <el-tab-pane label="涨停风险分" name="limit-up-risk" lazy>
               <LimitUpRiskTab />
+            </el-tab-pane>
+            <el-tab-pane label="战法试验台" name="tactic-trials" lazy>
+              <TacticTrialsTab />
             </el-tab-pane>
             <el-tab-pane label="收盘复盘" name="close-review">
               <CloseReviewTab />

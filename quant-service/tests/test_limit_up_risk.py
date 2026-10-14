@@ -9,7 +9,7 @@ from unittest import mock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.limit_up_risk import fifth_comparison, recent_status, score_day
+from app.limit_up_risk import decode_limit_rows, fifth_comparison, recent_status, score_day
 from app.limit_up_risk_repository import read_inputs, read_lists
 from app.routers.market_radar_reads import build_market_radar_router
 
@@ -18,6 +18,27 @@ FIXTURE = json.loads(Path("tests/fixtures/limit_up_risk_20260918.json").read_tex
 
 
 class LimitUpRiskTests(unittest.TestCase):
+    def test_decoder_filters_malformed_duplicate_and_not_at_limit(self):
+        row = ["000001", "A", 0, "", 1_758_200_000, "Theme", 2, 3, 4, 0, 0, 5, "", 6, 0, 2, 1, 0, "", "", 0, 0, 0]
+        lists = {f"pid:{pid}": [] for pid in "12345"}
+        lists["pid:1"] = [["short"], row, row, ["000002", "B", 0, "", 1_758_200_000, "Theme", 2, 3, 4, 0, 0, 5, "", 6, 0, 2, 1, 0, "", "", 0, 0, 0]]
+        bars = {
+            "000001.SZ": {"pre_close": 10, "close": 11, "limit_up": 11},
+            "000002.SZ": {"pre_close": 10, "close": 10.5, "limit_up": 11},
+        }
+
+        decoded = decode_limit_rows(lists, bars)
+
+        self.assertEqual(decoded["coverage"], {
+            "malformed": 1, "excluded_code": 0, "duplicate": 1, "missing_bar": 0,
+            "limit_ratio": 0, "not_at_limit": 1,
+        })
+        self.assertEqual(decoded["rows"], [{
+            "symbol": "000001.SZ", "name": "A", "sector": "Theme", "first_seal_time": 1_758_200_000,
+            "seal_money": 2.0, "seal_max": 3.0, "main_net": 4.0, "turnover": 5.0,
+            "float_cap": 6.0, "boards": 2.0, "reopened": 1.0, "bar": bars["000001.SZ"],
+        }])
+
     def test_fixture_parity(self):
         actual = score_day(FIXTURE["lists"], FIXTURE["bars"])
         expected = {row["symbol"]: row for row in FIXTURE["expected"]}

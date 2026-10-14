@@ -59,13 +59,14 @@ def _limit_up(code: str, bar: Mapping[str, Any]) -> float:
     return round(float(bar["pre_close"]) * (1.2 if code.startswith(("30", "68")) else 1.1), 2)
 
 
-def score_day(
+def decode_limit_rows(
     lists: Mapping[str, list[list[Any]]], bars: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
+    """Decode valid limit-list rows before the scorer's history gate."""
     coverage = {key: 0 for key in (
-        "malformed", "excluded_code", "duplicate", "missing_bar", "limit_ratio", "not_at_limit", "insufficient_history",
+        "malformed", "excluded_code", "duplicate", "missing_bar", "limit_ratio", "not_at_limit",
     )}
-    candidates: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     for list_key in ("pid:1", "pid:2", "pid:3", "pid:4", "pid:5"):
         for row in lists.get(list_key, []):
@@ -92,24 +93,44 @@ def score_day(
             if float(bar["close"]) < limit_up - 0.005:
                 coverage["not_at_limit"] += 1
                 continue
-            prior = list(bar.get("prior_amounts") or [])
-            if len(prior) < 10:
-                coverage["insufficient_history"] += 1
-                continue
-            turnover = float(bar["amount"])
-            seal_time = _seal_time(row[4])
-            candidates.append({
-                "symbol": symbol, "name": row[1], "sector": row[5],
-                "vr": turnover / (fsum(float(value) for value in prior[-20:]) / len(prior[-20:])),
-                "gap": float(bar["open"]) / float(bar["pre_close"]) - 1,
-                "intraday": float(bar["close"]) / float(bar["open"]) - 1,
-                "flow": float(row[8]) / float(row[11]),
-                "seal_ratio": float(row[6]) / float(row[11]),
-                "seal_minutes": _seal_minutes(row[4]),
-                "first_seal_time": seal_time.strftime("%H:%M:%S"),
-                "opened": float(row[16]), "boards": float(row[15]), "float_cap": float(row[13]),
-                "sealed_from_open": _seal_minutes(row[4]) == 0,
+            rows.append({
+                "symbol": symbol, "name": row[1], "sector": row[5], "first_seal_time": row[4],
+                "seal_money": float(row[6]), "seal_max": float(row[7]), "main_net": float(row[8]),
+                "turnover": float(row[11]), "float_cap": float(row[13]), "boards": float(row[15]),
+                "reopened": float(row[16]), "bar": bar,
             })
+    return {"rows": rows, "coverage": coverage}
+
+
+def score_day(
+    lists: Mapping[str, list[list[Any]]], bars: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    coverage = {key: 0 for key in (
+        "malformed", "excluded_code", "duplicate", "missing_bar", "limit_ratio", "not_at_limit", "insufficient_history",
+    )}
+    decoded = decode_limit_rows(lists, bars)
+    coverage.update(decoded["coverage"])
+    candidates: list[dict[str, Any]] = []
+    for decoded_row in decoded["rows"]:
+        bar = decoded_row["bar"]
+        prior = list(bar.get("prior_amounts") or [])
+        if len(prior) < 10:
+            coverage["insufficient_history"] += 1
+            continue
+        turnover = float(bar["amount"])
+        candidates.append({
+            "symbol": decoded_row["symbol"], "name": decoded_row["name"], "sector": decoded_row["sector"],
+            "vr": turnover / (fsum(float(value) for value in prior[-20:]) / len(prior[-20:])),
+            "gap": float(bar["open"]) / float(bar["pre_close"]) - 1,
+            "intraday": float(bar["close"]) / float(bar["open"]) - 1,
+            "flow": decoded_row["main_net"] / decoded_row["turnover"],
+            "seal_ratio": decoded_row["seal_money"] / decoded_row["turnover"],
+            "seal_minutes": _seal_minutes(decoded_row["first_seal_time"]),
+            "first_seal_time": _seal_time(decoded_row["first_seal_time"]).strftime("%H:%M:%S"),
+            "opened": decoded_row["reopened"], "boards": decoded_row["boards"],
+            "float_cap": decoded_row["float_cap"],
+            "sealed_from_open": _seal_minutes(decoded_row["first_seal_time"]) == 0,
+        })
 
     if not candidates:
         return {"rows": [], "coverage": coverage, "ranks_reliable": False}
@@ -170,4 +191,7 @@ def recent_status(summaries: list[Mapping[str, Any]], limit: int = 120) -> dict[
             "difference_points": difference_points, "t_value": t_value, "status": status}
 
 
-__all__ = ["COEFFICIENTS", "COEFFICIENTS_FILE_SHA256", "VERSION", "fifth_comparison", "recent_status", "score_day"]
+__all__ = [
+    "COEFFICIENTS", "COEFFICIENTS_FILE_SHA256", "VERSION", "decode_limit_rows", "fifth_comparison",
+    "recent_status", "score_day",
+]

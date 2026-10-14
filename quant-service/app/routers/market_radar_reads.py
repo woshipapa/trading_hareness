@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from ..market_radar import CN_TZ
 from ..indicator_health import indicator_health
@@ -22,6 +22,13 @@ from ..market_temperature_runtime import daily_series as temperature_daily_serie
 from ..research_boards import datasource_board, strategy_board
 from ..minute_cross_section_export import panel as minute_panel
 from ..strategy_cards_read_model import strategy_cards
+from ..tactic_trial_runtime import read_board as tactic_trial_board
+from ..tactic_trial_runtime import read_cases as tactic_trial_cases
+from ..tactic_trial_runtime import read_summary as tactic_trial_summary
+from ..tactic_trial_runtime import tactic_by_key
+
+
+TACTIC_FIRST_DAY = date(2023, 1, 1)   # before the stored history; a date near year 1 would overflow the look-back
 
 
 def build_market_radar_router(database: Any, run_database_blocking: Callable[..., Awaitable[Any]]) -> APIRouter:
@@ -120,6 +127,23 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
     @router.get("/api/v1/market/auction-desk/track")
     async def auction_open_desk_track_route(days: int = Query(120, ge=1, le=500)) -> dict[str, Any]:
         return await run_database_blocking(auction_open_desk_track, database, days, timeout_seconds=120)
+
+    @router.get("/api/v1/market/tactic-trials/board")
+    async def tactic_trials_board(trade_date: date | None = Query(None, alias="date", ge=TACTIC_FIRST_DAY)) -> dict[str, Any]:
+        """Decision 0023: a session's board of the tactic trial ledger (research-only evidence)."""
+        return await run_database_blocking(tactic_trial_board, database, trade_date, timeout_seconds=30)
+
+    @router.get("/api/v1/market/tactic-trials/summary")
+    async def tactic_trials_summary(trade_date: date | None = Query(None, alias="date", ge=TACTIC_FIRST_DAY)) -> dict[str, Any]:
+        return await run_database_blocking(tactic_trial_summary, database, trade_date, timeout_seconds=30)
+
+    @router.get("/api/v1/market/tactic-trials/cases")
+    async def tactic_trials_cases(tactic: str = Query(..., min_length=1, max_length=64),
+                                  days: int = Query(10, ge=1, le=20)) -> dict[str, Any]:
+        registered = tactic_by_key(tactic)
+        if registered is None:
+            raise HTTPException(status_code=404, detail="unknown tactic")
+        return await run_database_blocking(tactic_trial_cases, database, registered, days, timeout_seconds=60)
 
     @router.get("/api/v1/datasources/board")
     async def datasources_board_route() -> dict[str, Any]:

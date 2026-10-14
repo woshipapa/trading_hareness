@@ -3,7 +3,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.t1_settlement import (
-    MAX_EXIT_ROLL_SESSIONS, ROUND_TRIP_COST, SettlementBar, market_window_return, settle,
+    MAX_EXIT_ROLL_SESSIONS, ROUND_TRIP_COST, SettlementBar, closes_at_up_limit, market_window_return,
+    opens_at_up_limit, price_window, sale_blocked, settle, walk_exit,
 )
 
 D = Decimal
@@ -29,6 +30,52 @@ def bars(*specs, start=date(2026, 9, 1), symbol_limit=D("0.10")):
 
 
 class T1SettlementTests(unittest.TestCase):
+    def test_price_window_uses_one_raw_basis_when_factor_is_missing(self):
+        path = bars({"open": 10, "close": 10, "adj": 2}, {"open": 5, "close": 5})
+        path[1] = SettlementBar(**{**path[1].__dict__, "adj_factor": None})
+        window = price_window(path)
+
+        self.assertEqual(window.basis, "unadjusted_missing_adj_factor")
+        self.assertEqual(window.bars[0].close, D("10"))
+        self.assertEqual(window.bars[1].close, D("5"))
+
+    def test_walk_exit_rolls_a_down_limit_open_to_a_later_close(self):
+        path = bars({"open": 9, "close": 9}, {"open": 9.5, "close": 9.5})
+
+        result = walk_exit(path, symbol="600000.SH", rule=lambda _index, _bar: "open")
+
+        self.assertEqual(result, {
+            "status": "settled", "exit_index": 1, "field": "close", "price": D("9.5"),
+            "reason": "exit_rolled_past_blocked_session",
+        })
+        self.assertTrue(sale_blocked("600000.SH", path[0], "open"))
+
+    def test_walk_exit_rolls_a_blocked_close(self):
+        path = bars({"open": 10, "close": 9}, {"open": 9.5, "close": 9.5})
+
+        result = walk_exit(path, symbol="600000.SH", rule=lambda _index, _bar: "close")
+
+        self.assertEqual(result["exit_index"], 1)
+        self.assertEqual(result["field"], "close")
+        self.assertEqual(result["reason"], "exit_rolled_past_blocked_session")
+
+    def test_up_limit_predicates_use_stored_and_fallback_limits(self):
+        stored = bars({"open": 11, "close": 11})[0]
+        fallback = SettlementBar(
+            trading_date=date(2026, 9, 1), open=D("11"), high=D("11"), low=D("11"), close=D("11"),
+            pre_close=D("10"), adj_factor=D("1"),
+        )
+        missing = SettlementBar(
+            trading_date=date(2026, 9, 1), open=None, high=None, low=None, close=None, pre_close=D("10"), adj_factor=D("1"),
+        )
+
+        self.assertTrue(opens_at_up_limit("600000.SH", stored))
+        self.assertTrue(closes_at_up_limit("600000.SH", stored))
+        self.assertTrue(opens_at_up_limit("600000.SH", fallback))
+        self.assertTrue(closes_at_up_limit("600000.SH", fallback))
+        self.assertIsNone(opens_at_up_limit("600000.SH", missing))
+        self.assertIsNone(closes_at_up_limit("600000.SH", missing))
+
     def test_a_one_day_horizon_cannot_sell_the_day_it_bought(self):
         # Old rule: buy 10.0 open, sell 10.5 same-day close (+5%).  Under T+1
         # the earliest exit is the next session's close.

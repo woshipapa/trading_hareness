@@ -77,7 +77,30 @@ class SettlementBar:
         )
 
 
-def _limits(bar: SettlementBar, symbol: str) -> tuple[Decimal | None, Decimal | None]:
+@dataclass(frozen=True)
+class PricedBar:
+    """One bar scaled onto the window's common price basis."""
+
+    source: SettlementBar
+    trading_date: date
+    open: Decimal | None
+    high: Decimal | None
+    low: Decimal | None
+    close: Decimal | None
+    pre_close: Decimal | None
+    adj_factor: Decimal | None
+    is_suspended: bool
+    limit_up: Decimal | None
+    limit_down: Decimal | None
+
+
+@dataclass(frozen=True)
+class PriceWindow:
+    bars: tuple[PricedBar, ...]
+    basis: str
+
+
+def _limits(bar: SettlementBar | PricedBar, symbol: str) -> tuple[Decimal | None, Decimal | None]:
     """Exact limits when stored, else the board band around the pre-close."""
     if bar.limit_up is not None and bar.limit_down is not None:
         return bar.limit_up, bar.limit_down
@@ -89,7 +112,26 @@ def _limits(bar: SettlementBar, symbol: str) -> tuple[Decimal | None, Decimal | 
     return bar.limit_up if bar.limit_up is not None else band_up, bar.limit_down if bar.limit_down is not None else band_down
 
 
-def entry_block_reason(bar: SettlementBar, direction: int, symbol: str) -> str | None:
+def price_window(bars: Sequence[SettlementBar | Mapping[str, Any]]) -> PriceWindow:
+    """Scale every OHLC and limit price using one basis for the supplied window."""
+    path = [bar if isinstance(bar, SettlementBar) else SettlementBar.from_row(bar) for bar in bars]
+    adjusted = all(bar.adj_factor is not None and bar.adj_factor > 0 for bar in path)
+    basis = "adj_factor_adjusted" if adjusted else "unadjusted_missing_adj_factor"
+
+    def scale(value: Decimal | None, bar: SettlementBar) -> Decimal | None:
+        return value * bar.adj_factor if adjusted and value is not None else value
+
+    return PriceWindow(tuple(
+        PricedBar(
+            source=bar, trading_date=bar.trading_date, open=scale(bar.open, bar), high=scale(bar.high, bar),
+            low=scale(bar.low, bar), close=scale(bar.close, bar), pre_close=scale(bar.pre_close, bar),
+            adj_factor=Decimal("1") if adjusted else None, is_suspended=bar.is_suspended,
+            limit_up=scale(bar.limit_up, bar), limit_down=scale(bar.limit_down, bar),
+        ) for bar in path
+    ), basis)
+
+
+def entry_block_reason(bar: SettlementBar | PricedBar, direction: int, symbol: str) -> str | None:
     """Why the entry session's open could not be traded, if it could not."""
     if bar.is_suspended:
         return "entry_suspended"
@@ -103,14 +145,93 @@ def entry_block_reason(bar: SettlementBar, direction: int, symbol: str) -> str |
     return None
 
 
-def exit_blocked(bar: SettlementBar, direction: int, symbol: str) -> bool:
+def sale_blocked(symbol: str, bar: SettlementBar | PricedBar, field: str) -> bool:
+    """Whether a long sale at ``field`` is unavailable on this bar."""
+    if field not in {"open", "close"}:
+        raise ValueError(f"unsupported sale field: {field}")
+    price = getattr(bar, field)
+    if bar.is_suspended or price is None or price <= 0:
+        return True
+    _limit_up, limit_down = _limits(bar, symbol)
+    return limit_down is not None and price <= limit_down * (1 + _LIMIT_TOLERANCE)
+
+
+def exit_blocked(bar: SettlementBar | PricedBar, direction: int, symbol: str) -> bool:
     """A close sealed against the exit side, or no session, cannot be sold into."""
+    if direction > 0:
+        return sale_blocked(symbol, bar, "close")
     if bar.is_suspended or bar.close is None or bar.close <= 0:
         return True
-    limit_up, limit_down = _limits(bar, symbol)
-    if direction > 0:
-        return limit_down is not None and bar.close <= limit_down * (1 + _LIMIT_TOLERANCE)
+    limit_up, _limit_down = _limits(bar, symbol)
     return limit_up is not None and bar.close >= limit_up * (1 - _LIMIT_TOLERANCE)
+
+
+def opens_at_up_limit(symbol: str, bar: SettlementBar | PricedBar) -> bool | None:
+    if bar.open is None:
+        return None
+    limit_up, _limit_down = _limits(bar, symbol)
+    return limit_up is not None and bar.open >= limit_up * (1 - _LIMIT_TOLERANCE)
+
+
+def closes_at_up_limit(symbol: str, bar: SettlementBar | PricedBar) -> bool | None:
+    if bar.close is None:
+        return None
+    limit_up, _limit_down = _limits(bar, symbol)
+    return limit_up is not None and bar.close >= limit_up * (1 - _LIMIT_TOLERANCE)
+
+
+ExitDecision = str | tuple[str, Decimal]
+ExitRule = Callable[[int, PricedBar], ExitDecision | None]
+
+
+def walk_exit(
+    bars: Sequence[SettlementBar | Mapping[str, Any]] | PriceWindow, *, symbol: str, rule: ExitRule,
+    max_exit_roll_sessions: int = MAX_EXIT_ROLL_SESSIONS, direction: int = 1,
+) -> dict[str, Any]:
+    """Apply a sell rule and roll a blocked sale through later close prices."""
+    window = bars if isinstance(bars, PriceWindow) else price_window(bars)
+    for index, bar in enumerate(window.bars):
+        decision = rule(index, bar)
+        if decision is None:
+            continue
+        if isinstance(decision, tuple):
+            field, fixed_price = decision
+            if field in {"target", "stop"}:
+                return {"status": "settled", "exit_index": index, "field": field,
+                        "price": fixed_price, "reason": "rule"}
+        else:
+            field = decision
+        if field not in {"open", "close"}:
+            raise ValueError(f"unsupported sale field: {field}")
+        for roll in range(max_exit_roll_sessions + 1):
+            candidate_index = index + roll
+            if candidate_index >= len(window.bars):
+                return {"status": "pending", "reason": "not_resolved"}
+            candidate = window.bars[candidate_index]
+            candidate_field = field if roll == 0 else "close"
+            blocked = sale_blocked(symbol, candidate, candidate_field) if direction > 0 else exit_blocked(candidate, -1, symbol)
+            if not blocked:
+                reason = "rule" if roll == 0 else "exit_rolled_past_blocked_session"
+                if field == "open" and roll == 0:
+                    reason = "rule"
+                return {
+                    "status": "settled", "exit_index": candidate_index, "field": candidate_field,
+                    "price": getattr(candidate, candidate_field), "reason": reason,
+                }
+            close_blocked = sale_blocked(symbol, candidate, "close") if direction > 0 else exit_blocked(candidate, -1, symbol)
+            if candidate_field == "open" and not close_blocked:
+                return {
+                    "status": "settled", "exit_index": candidate_index, "field": "close",
+                    "price": candidate.close, "reason": "open_blocked_close_fallback",
+                }
+            if roll == max_exit_roll_sessions:
+                if candidate.close is None:
+                    return {"status": "pending", "reason": "exit_blocked_without_price"}
+                return {
+                    "status": "settled", "exit_index": candidate_index, "field": "close",
+                    "price": candidate.close, "reason": "exit_blocked_valued_at_close",
+                }
+    return {"status": "pending", "reason": "not_resolved"}
 
 
 def settle(
@@ -141,35 +262,24 @@ def settle(
 
     held_sessions = max(int(horizon_sessions), MIN_HOLDING_SESSIONS)
     target_index = held_sessions - 1
-    exit_index = target_index
-    while True:
-        if exit_index >= len(path):
-            return {"status": "pending", "reason": "exit_session_not_observed", "entry_date": entry.trading_date}
-        if not exit_blocked(path[exit_index], direction, symbol):
-            tradability = "observed_open" if exit_index == target_index else "exit_rolled_past_blocked_session"
-            break
-        if exit_index - target_index >= max_exit_roll_sessions:
-            # Still sealed or suspended after the bound: value it at this close
-            # and say so, rather than hold the outcome open indefinitely.
-            if path[exit_index].close is None:
-                return {"status": "pending", "reason": "exit_blocked_without_price", "entry_date": entry.trading_date}
-            tradability = "exit_blocked_valued_at_close"
-            break
-        exit_index += 1
+    if target_index >= len(path):
+        return {"status": "pending", "reason": "exit_session_not_observed", "entry_date": entry.trading_date}
+    walked = walk_exit(path[target_index:], symbol=symbol, direction=direction, rule=lambda _index, _bar: "close",
+                       max_exit_roll_sessions=max_exit_roll_sessions)
+    if walked["status"] != "settled":
+        return {"status": "pending", "reason": "exit_blocked_without_price" if walked["reason"] == "exit_blocked_without_price" else "exit_session_not_observed", "entry_date": entry.trading_date}
 
+    exit_index = target_index + walked["exit_index"]
     window = path[: exit_index + 1]
+    priced = price_window(window)
+    priced_window = priced.bars
     exit_bar = window[-1]
-    adjusted = all(bar.adj_factor is not None and bar.adj_factor > 0 for bar in window)
-
-    def price(bar: SettlementBar, value: Decimal | None) -> Decimal | None:
-        if value is None:
-            return None
-        return value * bar.adj_factor if adjusted else value
-
-    entry_price = price(entry, entry.open)
-    exit_price = price(exit_bar, exit_bar.close)
-    highs = [price(bar, bar.high if bar.high is not None else bar.close) for bar in window]
-    lows = [price(bar, bar.low if bar.low is not None else bar.close) for bar in window]
+    priced_entry = priced_window[0]
+    priced_exit = priced_window[-1]
+    entry_price = priced_entry.open
+    exit_price = priced_exit.close
+    highs = [bar.high if bar.high is not None else bar.close for bar in priced_window]
+    lows = [bar.low if bar.low is not None else bar.close for bar in priced_window]
     highs = [value for value in highs if value is not None]
     lows = [value for value in lows if value is not None]
     gross = (exit_price / entry_price - 1) * direction
@@ -179,6 +289,7 @@ def settle(
         favorable, adverse = entry_price / min(lows) - 1, entry_price / max(highs) - 1
     market = benchmark_return(entry.trading_date, exit_bar.trading_date) if benchmark_return else None
     benchmark = market * direction if market is not None else None
+    tradability = "observed_open" if walked["exit_index"] == 0 and walked["reason"] == "rule" else walked["reason"]
     return {
         "status": "settled",
         "settlement_version": SETTLEMENT_VERSION,
@@ -187,7 +298,7 @@ def settle(
         "exit_date": exit_bar.trading_date,
         "entry_price": entry.open,
         "exit_price": exit_bar.close,
-        "price_basis": "adj_factor_adjusted" if adjusted else "unadjusted_missing_adj_factor",
+        "price_basis": priced.basis,
         "requested_horizon_sessions": int(horizon_sessions),
         "sessions_held": exit_index + 1,
         "exit_rolled_sessions": exit_index - target_index,
@@ -228,5 +339,6 @@ def market_window_return(
 
 __all__ = [
     "BENCHMARK_KEY", "MAX_EXIT_ROLL_SESSIONS", "MIN_HOLDING_SESSIONS", "ROUND_TRIP_COST", "SETTLEMENT_VERSION",
-    "SettlementBar", "entry_block_reason", "exit_blocked", "market_window_return", "settle",
+    "PriceWindow", "PricedBar", "SettlementBar", "closes_at_up_limit", "entry_block_reason", "exit_blocked",
+    "market_window_return", "opens_at_up_limit", "price_window", "sale_blocked", "settle", "walk_exit",
 ]

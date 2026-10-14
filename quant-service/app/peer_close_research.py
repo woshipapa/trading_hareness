@@ -44,14 +44,15 @@ from .market_temperature_runtime import refresh as refresh_market_temperature
 STAGES = ("teacher_review_roll", "teacher_outcome_review", "watch_daily_review", "xiaojie_outcomes",
           "daily_digest",
           "peer_limit_performance_lists", "peer_limit_up_risk", "peer_market_temperature",
-          "peer_broad_etf_flow", "peer_market_timing")
+          "peer_broad_etf_flow", "peer_market_timing", "peer_tactic_trials")
 STAGE_TIMEOUT_SECONDS = {"teacher_review_roll": 300.0, "teacher_outcome_review": 240.0,
                          "watch_daily_review": 240.0, "xiaojie_outcomes": 150.0, "daily_digest": 120.0,
                          "peer_limit_performance_lists": 120.0, "peer_limit_up_risk": 120.0,
+                         "peer_tactic_trials": 600.0,
                          "peer_market_temperature": 180.0, "peer_broad_etf_flow": 180.0,
                          "peer_market_timing": 120.0}
 #: A stage whose named stage did not complete for the same day is recorded blocked and tried on the next tick.
-STAGE_DEPENDENCIES = {"peer_limit_up_risk": "peer_limit_performance_lists"}
+STAGE_DEPENDENCIES = {"peer_limit_up_risk": "peer_limit_performance_lists", "peer_tactic_trials": "peer_limit_up_risk"}
 #: What the loop also runs for the session before the target: an evening that failed is repaired the next day.
 REPAIR_STAGES = ("peer_limit_performance_lists", "peer_limit_up_risk")
 #: The owner's close pipeline has published the day's bars by ~16:05.
@@ -144,6 +145,8 @@ class PeerCloseDependencies:
     call_longhu: Callable[[dict[str, Any]], Awaitable[Any]] | None = None
     refresh_broad_etf_flow: Callable[[date], Awaitable[Any]] | None = None
     refresh_market_timing: Callable[[date], Awaitable[Any]] | None = None
+    #: The tactic trial ledger's evening run (decision 0023): readings, settlement, summary.
+    tactic_trials: Callable[[date], Awaitable[Any]] | None = None
 
 
 def peer_stages(deps: PeerCloseDependencies) -> dict[str, Callable[[date], Awaitable[Any]]]:
@@ -166,6 +169,8 @@ def peer_stages(deps: PeerCloseDependencies) -> dict[str, Callable[[date], Await
         stages["peer_broad_etf_flow"] = deps.refresh_broad_etf_flow
     if deps.refresh_market_timing is not None:
         stages["peer_market_timing"] = deps.refresh_market_timing
+    if deps.tactic_trials is not None:
+        stages["peer_tactic_trials"] = deps.tactic_trials
     return stages
 
 

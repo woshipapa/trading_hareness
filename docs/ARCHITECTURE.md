@@ -43,6 +43,15 @@ peer's own loop, `peer_close_research`, behind `peer_`-prefixed receipts that
 close only when the day's product is stored (decision 0021); adding a stage to
 the stage table alone schedules nothing on the peer.
 
+The tactic trial ledger (`tactic_*` modules, decision 0023) records which
+registered tactic or condition picked which limit-up stock at the close and at
+the 09:25 auction, and what happened afterwards. Tactics are evidence
+observations, not strategies: no contract, no promotion row, no weight, and no
+strategy, alert or order path reads them. Its evening run is the peer loop's
+stage `peer_tactic_trials`; its auction reading is built by the `tactic_auction`
+task from the stored auction table. The evening summary folds one small digest
+per settled day, so its memory does not grow with the history.
+
 Both profiles run the same committed source revision. The distinction is
 runtime configuration and ownership, not a long-lived server branch: releases
 publish a Git SHA and image/source provenance through the loopback health
