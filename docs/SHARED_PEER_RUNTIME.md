@@ -139,6 +139,9 @@ reading the owner API until the tunnel is restored.
 
 ## Owner bootstrap
 
+> 2026-10-13 起量化服务运行在 `118.178.133.37`（SSH 端口 22，用户 `stockpeer`）。本节命令里的 `47.110.79.189` 和端口 `3535` 是迁移前那台主机的，
+> 留作当时怎样搭建的记录；对新主机执行时换成新的地址和端口。旧主机上的量化容器已停用，不要恢复。
+
 The following script is a legacy least-privilege hardening tool. The current
 owner decision intentionally preserves the existing `stock_peer` write ACLs;
 do not run its mutating mode on the shared production database unless the

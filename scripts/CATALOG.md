@@ -4,7 +4,7 @@
 > in that file (owner component and host). Tests (`test_*.py`, `*.test.mjs`) and the probe data under
 > `scripts/data/` are not listed.
 
-## release (19)
+## release (20)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -23,15 +23,17 @@
 | `shared-peer/deploy-code-only.sh` | quant-research | workstation | The operator's checkout of the release tooling, resolved before any cd. |
 | `shared-peer/deploy-full-release.sh` | quant-research | workstation | Full owner release: new checkout, new image, then the main service before the scheduler. |
 | `shared-peer/package-peer-release.sh` | quant-research | workstation | Build the peer source archive from the checkout tree, not a short allow-list |
+| `shared-peer/schema-gate.sh` | quant-research | workstation | The schema gate of an owner release. |
 | `verify-release-provenance.mjs` | platform | workstation |  |
 | `verify-ten-day-shadow-release.mjs` | quant-research | workstation |  |
 | `verify-zero-downtime-handoff.mjs` | quant-research | workstation |  |
 | `workflow-status.sh` | platform | workstation | Read-only drift report: both n8n instances against the committed workflow sources. |
 
-## owner runtime (12)
+## owner runtime (13)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
+| `backfill-full-market-daily.sh` | quant-research | 47owner | Deepen the all-A daily history the post-close screens need. |
 | `cutover/export_intraday_watchlist.py` | quant-research | 47owner (inside the container) | Export only explicit intraday watchlist control rows as JSON. |
 | `cutover/import_intraday_watchlist.py` | quant-research | 47owner (inside the container) | Import explicit intraday watchlist control rows into the owner database. |
 | `cutover/verify_owner_longhu_priority.py` | quant-research | 47owner (inside the container) | Read-only in-container acceptance. Prints no credentials or private addresses. |
@@ -114,16 +116,15 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (63)
+## research data (62)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
 | `analyst-weekly-review.py` | quant-research | workstation | Weekly analyst review, 2026-08-24 to 2026-08-28. |
 | `audit-fuyao-capabilities.py` | quant-research | workstation | Run bounded, data-free live checks for every allowlisted Fuyao REST route. |
 | `backfill-eastmoney-hot-rank-history.py` | quant-research | workstation | Backfill about a year of Eastmoney daily popularity rank per stock. |
-| `backfill-full-market-daily.sh` | quant-research | workstation | Deepen the all-A daily history the post-close screens need. |
 | `check-provider-health.py` | quant-research | workstation | Opt-in bounded provider smoke checks using the deployed app adapters. |
-| `fill-longhu-sector-membership.py` | quant-research | quant container | Refresh the sector map from Longhu, inside the quant-service container. |
+| `fill-longhu-sector-membership.py` | quant-research | 47owner (copied into the container) | Refresh the sector map from Longhu, inside the quant-service container. |
 | `generate-tdx-bj-codes.py` | quant-research | workstation | Generate the old-to-new BJ stock code table of the TDX server from its addedcode_bj.cfg. |
 | `generate-tdx-hosts.py` | quant-research | workstation | Generate the ranked, research-only TDX host pool from probe JSON. |
 | `import-adjusted-research-bars.py` | quant-research | workstation | Import the latest stock-brain qfq research panel into PostgreSQL. |

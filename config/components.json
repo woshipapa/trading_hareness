@@ -359,8 +359,8 @@
       "unit": "owner-quant",
       "reuses_image": true,
       "full_release_required_when": [
-        "requirements.txt / 锁文件 / Dockerfile / compose / 系统包 / supervisor 契约",
-        "quant-service/migrations/versions/*.py（注释与 docstring 改动除外）"
+        "镜像的输入：quant-service/requirements.txt / Dockerfile.peer / .dockerignore",
+        "主机自己的目录树：deploy/shared-peer/（compose、systemd 单元）与 scripts/CATALOG.md 里 Runs on 为 47owner 的脚本"
       ]
     },
     "edge-quant-console": {

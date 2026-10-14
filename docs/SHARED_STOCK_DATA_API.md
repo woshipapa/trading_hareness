@@ -37,9 +37,9 @@ http://127.0.0.1:15682
 先建立 SSH 隧道：
 
 ```bash
-ssh -N -p 3535 -i ~/.ssh/stockpeer_ed25519 \
+ssh -N -p 22 -i ~/.ssh/stockpeer_ed25519 \
   -L 15682:127.0.0.1:15682 \
-  stockpeer@47.110.79.189
+  stockpeer@118.178.133.37
 ```
 
 随后访问：

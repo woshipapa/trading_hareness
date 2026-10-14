@@ -81,13 +81,16 @@ class OwnerAllowlistTests(unittest.TestCase):
             self.assertNotIn(forbidden, arm, f"{forbidden} 不能进 owner 运行时文件集")
 
     def test_an_unknown_path_fails_closed(self) -> None:
-        self.assertRegex(self.text, r"\*\) printf 'full\\t%s\\n' \"\$path\" ;;")
-        # and the deploy refuses whenever the rules report a full path
-        self.assertIn('echo "full release required for: $path" >&2; done <<<"$full_paths"\n  exit 1', self.script)
+        self.assertRegex(self.text, r"\*\) printf 'unclassified\\t%s\\n' \"\$path\" ;;")
+        # and the deploy refuses whenever the rules report such a path, a host-tree path or an image input
+        for kind in ("full", "image", "tunnel-image", "unclassified"):
+            self.assertIn(f"\nrefuse {kind} '", self.script)
+        self.assertIn('[[ "$refused" == false ]] || exit 1', self.script)
 
-    def test_a_migration_change_forces_a_full_release(self) -> None:
+    def test_a_migration_change_goes_through_the_schema_gate(self) -> None:
         self.assertIn("quant-service/migrations/versions/*.py", self.text)
-        self.assertIn("printf 'full", self.text)
+        self.assertIn("printf 'migration", self.text)
+        self.assertIn('schema-gate.sh" "$target_sha" || exit $?', self.script)
 
 
 def _dirty_pathspec(path: pathlib.Path) -> list[str]:

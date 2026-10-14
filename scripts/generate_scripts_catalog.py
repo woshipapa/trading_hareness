@@ -56,6 +56,7 @@ RULES: list[tuple[str, str, str, str]] = [
     ("serve_service_index.py", "workstation services", "platform", "workstation"),
     ("shared-peer/deploy-*.sh", "release", "quant-research", "workstation"),
     ("shared-peer/classify-owner-paths.sh", "release", "quant-research", "workstation"),
+    ("shared-peer/schema-gate.sh", "release", "quant-research", "workstation"),
     ("shared-peer/package-peer-release.sh", "release", "quant-research", "workstation"),
     ("edge/deploy-quant-console-edge.sh", "release", "quant-research (dashboard)", "workstation"),
     ("deploy-local-research-release.sh", "release", "quant-research", "workstation"),
@@ -67,6 +68,8 @@ RULES: list[tuple[str, str, str, str]] = [
     ("verify-zero-downtime-handoff.mjs", "release", "quant-research", "workstation"),
     # owner runtime and its Windows workstation
     ("peer-session-guard.sh", "owner runtime", "quant-research", "47owner"),
+    # The host's peer-daily-backfill.service runs it (deploy/shared-peer/systemd).
+    ("backfill-full-market-daily.sh", "owner runtime", "quant-research", "47owner"),
     ("shared-peer/release-lock.sh", "owner runtime", "quant-research", "47owner"),
     ("shared-peer/activate-peer-release.sh", "owner runtime", "quant-research", "47owner"),
     ("shared-peer/ensure-batch-tunnel.sh", "owner runtime", "quant-research", "47owner"),
@@ -115,7 +118,8 @@ RULES: list[tuple[str, str, str, str]] = [
     ("audit-fuyao-capabilities.py", "research data", "quant-research", "workstation"),
     ("backfill-*", "research data", "quant-research", "workstation"),
     ("check-provider-health.py", "research data", "quant-research", "workstation"),
-    ("fill-*.py", "research data", "quant-research", "quant container"),
+    # Run on the peer: `docker cp` from the host's tree into the container (OPERATIONS.md), so the host needs it.
+    ("fill-*.py", "research data", "quant-research", "47owner (copied into the container)"),
     ("import-*.py", "research data", "quant-research", "workstation"),
     ("probe-public-sources.py", "research data", "quant-research", "workstation"),
     ("refresh-watchlist-from-proposals.py", "research data", "quant-research", "workstation"),

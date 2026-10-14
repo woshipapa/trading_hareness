@@ -109,15 +109,21 @@ class FailClosedTests(unittest.TestCase):
                        "xhs dashboard verification failed")
 
     def test_the_owner_path_gates_on_migrations_and_unknown_paths(self) -> None:
-        # The path rules live in classify-owner-paths.sh, shared with scripts/release_plan.py;
-        # the deploy script refuses whenever they report a path that needs a full release.
+        # The path rules live in classify-owner-paths.sh, shared with scripts/release_plan.py. The deploy script
+        # refuses a path the rules do not name (it builds nothing for it), a path of the host's tree and an input
+        # of the image; a migration goes on only through the schema gate.
         rules = (ROOT / "scripts/shared-peer/classify-owner-paths.sh").read_text(encoding="utf-8")
         script = (ROOT / PATHS["quant-research"]["script"]).read_text(encoding="utf-8")
-        self.assertTrue("quant-service/migrations/versions/*.py" in rules, "迁移文件必须要求全量发布")
-        self.assertTrue(re.search(r"\*\) printf 'full\\t%s\\n' \"\$path\" ;;", rules),
+        self.assertTrue(re.search(r"quant-service/migrations/versions/\*\.py\)[\s\S]{0,260}printf 'migration\\t%s\\n'", rules),
+                        "改了代码的迁移文件必须归为 migration")
+        self.assertTrue(re.search(r"\*\) printf 'unclassified\\t%s\\n' \"\$path\" ;;", rules),
                         "owner 路径规则缺少「未知路径一律拒绝」的兜底分支")
-        self.assertTrue("classify-owner-paths.sh" in script and 'echo "full release required for: $path"' in script,
-                        "owner 发布脚本必须按规则拒绝需要全量发布的路径")
+        for refusal in ("refuse full 'full release required for'", "refuse image 'image build required for'",
+                        "refuse tunnel-image 'tunnel image input'", "refuse unclassified 'unclassified path'"):
+            self.assertIn(refusal, script, "owner 发布脚本必须按规则拒绝这一类路径")
+        self.assertIn('[[ "$refused" == false ]] || exit 1', script)
+        self.assertIn('\nbash "$tool_root/scripts/shared-peer/schema-gate.sh" "$target_sha" || exit $?\n',
+                      script, "每次热发布都必须先过库版本闸门，不看这次差异里有没有迁移文件")
 
 
 class ProofOfExecutionTests(unittest.TestCase):

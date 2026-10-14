@@ -172,7 +172,7 @@ python scripts/teacher_review_daily.py outcome $J --date <T>    # 第 0 步；--
 python scripts/teacher_review_daily.py status $J                # 随时查看观察池
 ```
 
-脚本通过 SSH（`stockpeer@47.110.79.189:3535`）在 peer API 容器里执行 `python -m app.teacher_review_ops`。策略包经 stdin 传入，不落任何临时文件。导入调用服务自己的 `POST /api/v1/teacher-review/packs`，写权限 key 由容器从自身环境变量读取，全程不打印。
+脚本通过 SSH（`stockpeer@118.178.133.37`，端口 22）在 peer API 容器里执行 `python -m app.teacher_review_ops`。策略包经 stdin 传入，不落任何临时文件。导入调用服务自己的 `POST /api/v1/teacher-review/packs`，写权限 key 由容器从自身环境变量读取，全程不打印。
 
 ## 次日结果复盘（每天自动跑，也可以手动重算）
 

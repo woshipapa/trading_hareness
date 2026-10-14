@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ("scripts/release_plan.py", "scripts/release_window.py", "scripts/shared-peer/classify-owner-paths.sh",
-         "config/release-windows.json", "quant-service/scripts/migration_lineage.py")
+         "config/release-windows.json", "quant-service/scripts/migration_lineage.py", "scripts/CATALOG.md")
 MIGRATIONS = "quant-service/migrations/versions"
 
 
@@ -60,14 +60,44 @@ class ReleasePlanTests(unittest.TestCase):
     def test_a_dependency_change_needs_a_full_release_and_says_why(self) -> None:
         target = self.commit({"quant-service/requirements.txt": "x==1\n"}, "dependency")
         out = self.plan(target, self.base, self.base)
-        self.assertIn("owner: FULL release (1 path(s) need it, e.g. quant-service/requirements.txt)", out)
+        self.assertIn("owner: FULL release (1 path(s) need it, e.g. quant-service/requirements.txt); "
+                      "it builds the image on the host", out)
         self.assertIn("edge: nothing for the edge changed", out)
+
+    def test_a_change_to_the_hosts_tree_needs_a_full_release(self) -> None:
+        target = self.commit({"deploy/shared-peer/compose.yaml": "services: {}\n", "scripts/peer-session-guard.sh": "# edited\n"},
+                             "host tree")
+        out = self.plan(target, self.base, self.base)
+        self.assertIn("owner: FULL release (2 path(s) need it, e.g. deploy/shared-peer/compose.yaml, scripts/peer-session-guard.sh); "
+                      "it ships the host's tree", out)
+
+    def test_a_tunnel_image_input_is_shipped_but_said_not_to_take_effect(self) -> None:
+        target = self.commit({"deploy/shared-peer/ssh-tunnel-entrypoint.sh": "# edited\n"}, "tunnel")
+        out = self.plan(target, self.base, self.base)
+        self.assertIn("owner: FULL release (1 path(s) need it, e.g. deploy/shared-peer/ssh-tunnel-entrypoint.sh)", out)
+        self.assertIn("no release rebuilds the tunnel image or recreates the tunnels", out)
+
+    def test_a_path_without_a_rule_is_not_releasable_and_asks_for_the_rule(self) -> None:
+        target = self.commit({"newdir/thing.txt": "x\n", "scripts/not-in-the-catalog.py": "x\n",
+                              "quant-service/requirements.txt": "x==1\n"}, "unknown")
+        out = self.plan(target, self.base, self.base)
+        self.assertIn("owner: NOT RELEASABLE yet (2 path(s) have no rule, e.g. newdir/thing.txt, scripts/not-in-the-catalog.py)", out)
+        self.assertIn("nothing is built for an unknown path", out)
+        self.assertNotIn("release owner full", out)
+
+    def test_a_workstation_script_never_reaches_the_owner(self) -> None:
+        target = self.commit({"scripts/svc_supervisor.py": "# edited\n", "launchd/x.plist": "<plist/>\n",
+                              "workflows/x.json": "{}\n", "compose.yaml": "services: {}\n"}, "workstation")
+        self.assertIn("owner: nothing reaches the owner runtime", self.plan(target, self.base, self.base))
 
     def test_a_new_migration_lists_what_the_owner_must_apply_first(self) -> None:
         target = self.commit({f"{MIGRATIONS}/0002_b.py": "revision = 'b'\ndown_revision = 'a'\n"}, "migration")
         out = self.plan(target, self.base, self.base, db="a")
-        self.assertIn("owner: FULL release", out)
+        self.assertIn("owner: code-only overlay (0 runtime file(s), 1 migration file(s): "
+                      "the owner database must be at their head first)", out)
         self.assertIn("schema: owner database at a, target needs b; apply first on Windows (stage D): b", out)
+        self.assertIn("--apply    # refused until the schema line below is at the head", out)
+        self.assertNotIn("# refused", self.plan(target, self.base, self.base, db="b"))
 
     def test_edge_parts_and_the_windows_are_reported(self) -> None:
         target = self.commit({"feishu-relay/adapter/index.mjs": "changed\n", "workflows/edge-relay/workflows/x.json": "{}\n"},

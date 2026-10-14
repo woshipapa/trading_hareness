@@ -20,7 +20,7 @@
 | | n8n `feishu-relay-edge-n8n`（`127.0.0.1:5678`）的 4 个 webhook 工作流 | `scripts/deploy-edge-relay-workflows.sh` | `scripts/verify-edge-relay-workflows.sh`（只读漂移比对） |
 | | `stock-reports-import` watchdog | `scripts/install-edge-import-watchdog.sh` | systemd 状态 |
 | | **已退役**：`quant-intraday-edge.service` 及其 timers | 不部署 | 必须保持 `inactive`/`disabled` |
-| **47 owner**（Longhu 主机 / lightServer1）`stockpeer@47.110.79.189 -p 3535`，密钥 `stockpeer_ed25519`，rootless Docker，compose 项目 `trading-hareness-peer` | `db-tunnel` | release 归档 + `scripts/shared-peer/activate-peer-release.sh` + compose | 容器健康 |
+| **47 owner**（Longhu 主机 / lightServer1）`stockpeer@118.178.133.37 -p 22`（2026-10-13 迁到这台；此前是 `47.110.79.189 -p 3535`，那台上的量化容器已停用，不要恢复），密钥 `stockpeer_ed25519`，rootless Docker，compose 项目 `trading-hareness-peer` | `db-tunnel` | release 归档 + `scripts/shared-peer/activate-peer-release.sh` + compose | 容器健康 |
 | | `quant-research`（`127.0.0.1:15682`，`QUANT_RUNTIME_PROFILE=intraday_edge`，唯一盘中写入者） | 同上，镜像在主机上用 wheelhouse 构建 | `/health` 的 `build.git_sha`；容器 profile |
 | | `quant-research-scheduler`（`127.0.0.1:15683`，`research`） | 同上，复用同一镜像 | `/health` 的 `build.git_sha` |
 | | systemd `--user`：`peer-session-guard-{heal,preopen}.timer`、`peer-daily-backfill.timer` | 从 release 目录安装单元文件 | `systemctl --user list-timers` |
@@ -55,7 +55,7 @@ owner 容器设置了 `QUANT_SKIP_MIGRATIONS=true`，服务启动时只检查几
 
   ```bash
   export RELAY_EDGE_SSH_KEY=~/.ssh/feishu_relay_edge_ed25519   # 47 edge root
-  export OWNER_PEER_SSH_KEY=~/.ssh/stockpeer_ed25519           # 47 owner stockpeer，端口 3535
+  export OWNER_PEER_SSH_KEY=~/.ssh/stockpeer_ed25519           # 47 owner stockpeer，端口 22
   ```
 
   脚本默认路径是 `/Users/papa/.ssh/...`，在其他机器上必须 export 上面两个变量。
@@ -92,7 +92,7 @@ scripts/release-sync-status.sh --sha origin/main | tee ~/release-sync-logs/$(dat
 ```bash
 E=root@47.114.113.152
 ssh -i "$RELAY_EDGE_SSH_KEY" $E 'readlink /opt/feishu-relay-edge/hotfix/current; cat /opt/feishu-relay-edge/hotfix/current/.base-git-sha'
-ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 \
+ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 \
   'ls -1 ~/.local/share/trading-hareness/releases/; ls ~/.local/share/trading-hareness/releases/*/trading_hareness/quant-service/migrations/versions/ 2>/dev/null | grep -E "_0(09[5-9]|1[0-9][0-9])_" | sort -u'
 ```
 
@@ -446,7 +446,7 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
    wheelhouse：如果 `quant-service/requirements.txt` 自 owner 上次发布以来没有变化（PR #2 没有改它），就直接复用 owner 上现有的 wheelhouse，在 owner 上打包：
 
    ```bash
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 \
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 \
      'tar -C ~ -chf /tmp/wheelhouse-current.tar wheelhouse && tar -tf /tmp/wheelhouse-current.tar | grep -c SHA256SUMS'
    ```
 
@@ -455,9 +455,9 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
 2. **上传并激活**。首次同步必须使用新版本里的激活脚本，因为旧版脚本不会保留 `intraday-secrets.env`：
 
    ```bash
-   O="-i $OWNER_PEER_SSH_KEY -P 3535"
-   scp $O "/tmp/trading_hareness-$X.tar" stockpeer@47.110.79.189:/tmp/
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 "set -euo pipefail
+   O="-i $OWNER_PEER_SSH_KEY -P 22"
+   scp $O "/tmp/trading_hareness-$X.tar" stockpeer@118.178.133.37:/tmp/
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 "set -euo pipefail
      tar -xOf /tmp/trading_hareness-$X.tar trading_hareness/scripts/shared-peer/activate-peer-release.sh > /tmp/activate-peer-release.sh
      RELEASE_ID='$L' bash /tmp/activate-peer-release.sh /tmp/trading_hareness-$X.tar /tmp/wheelhouse-current.tar
      test -s ~/trading_hareness/deploy/shared-peer/.env
@@ -471,7 +471,7 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
    `.env` 是指向 `~/.secrets/owner/.env.owner` 的软链接，必须写软链接背后的真实文件（`resolve()`），否则 `replace` 会把软链接换成普通文件，从此脱离集中凭据。整个重建期间持有守护锁，heal 定时器不会在中途重启容器；主服务 `--wait` 健康之后才启动 scheduler，二者同时启动会抢写同一批目录表：
 
    ```bash
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 "set -euo pipefail
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 "set -euo pipefail
      export XDG_RUNTIME_DIR=/run/user/\$(id -u) DOCKER_HOST=unix:///run/user/\$(id -u)/docker.sock
      LOCK=~/trading_hareness/scripts/shared-peer/release-lock.sh
      bash \$LOCK hold '$L' 3600
@@ -506,7 +506,7 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
 5. **核验**：
 
    ```bash
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 'set -a; . ~/trading_hareness/deploy/shared-peer/intraday-secrets.env; set +a
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 'set -a; . ~/trading_hareness/deploy/shared-peer/intraday-secrets.env; set +a
      ~/trading_hareness/scripts/peer-session-guard.sh preopen
      curl -fsS http://127.0.0.1:15683/api/v1/intraday/services/status | head -c 800; echo
      curl -fsS "http://127.0.0.1:15682/api/v1/research/trials?limit=3" | head -c 400'
@@ -527,18 +527,38 @@ scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> \
   --from-sha <active_sha> --apply
 ```
 
-脚本先比较两个 Git SHA 之间改动的每个路径，分三类：
+脚本先比较两个 Git SHA 之间改动的每个路径，分六类（规则在
+`scripts/shared-peer/classify-owner-paths.sh`，`scripts/release plan` 用的是同一份）：
 
-- **随本次发布**：`quant-service/app/*`、`entrypoint.py`、`run_server.py`、
-  `database_bootstrap.py`、`alembic.ini`。
-- **跳过**，这些路径不进入 owner 运行时：
+- **`runtime`，随本次发布**：`quant-service/app/*`、`entrypoint.py`、`run_server.py`、
+  `database_bootstrap.py`。
+- **`migration`，随本次发布，但先过库版本闸门**：改了代码的迁移文件、`alembic.ini`、
+  `quant-service/migrations/` 下的其他文件。迁移由对方在 Windows 工作站上执行，我们这一侧
+  的服务从不自己执行；闸门（`scripts/shared-peer/schema-gate.sh`，全量发布用的是同一个）
+  读对方服务报告的库版本：已到本次发布的 head 才继续，落后就拒绝并列出要先执行的迁移。
+- **`skip`，不进入 owner 运行时**：
   - `quant-service/tests/`、`docs/`、任何 `*.md`、`.github/`；
-  - `feishu-relay/` 和 `frontend/`，它们随 F6 的 edge overlay 发布；
-  - 发布工具：状态脚本、本脚本、edge 包装脚本、`scripts/windows/`、脚本测试；
+  - `feishu-relay/`、`frontend/`、`frontend-shared/`、`xhs-intel/`，它们在 edge 发布；
+  - 本机和其他主机的部署文件：根目录 `compose.yaml`、`launchd/`、`workflows/`、
+    `deploy/` 里列明的网关配置、服务器 compose 和已停用的 edge 运行时（`deploy/intraday-edge/`）；
+  - `scripts/` 下的脚本，按 `scripts/CATALOG.md` 的“Runs on”一列：`workstation…`、`owner-windows`、
+    `never run`、`no host runs it` 跳过；这几个和 `47owner…` 之外的登记值一律按 `unclassified` 拒绝；
   - 只改了注释或 docstring 的迁移文件，脚本会比对去掉 docstring 后的语法树。
-- **其余一律**输出 `full release required for: <path>` 并退出，包括：迁移代码、依赖、
-  Dockerfile、compose、`deploy/`，以及在 owner 上从发布检出运行的 guard 脚本等其他
-  `scripts/`。
+- **`full`，主机自己的目录树**：`deploy/shared-peer/`（compose、systemd 单元）和
+  目录里“Runs on”为 `47owner` 的脚本。输出 `full release required for: <path>` 并退出。
+  某个脚本的“Runs on”在两个提交之间跨过了 `47owner` 这条线（登记错了被改对，或反过来）时，即使
+  这次差异里没有这个脚本，它也按 `full` 输出：登记成别的主机期间，对它的改动都被跳过了，主机上
+  那份可能是旧的。核对过主机上那份就是目标提交的内容之后，把它的路径写进
+  `RELEASE_RELABELLED_CURRENT`（空格分隔）再发布。
+- **`tunnel-image`，隧道镜像的输入**：`deploy/shared-peer/Dockerfile.ssh-tunnel`、
+  `deploy/shared-peer/ssh-tunnel-entrypoint.sh`。纯代码发布拒绝。全量发布会把文件带到主机的目录树里，
+  但不重建隧道镜像、也不重建隧道容器：在跑的隧道继续用旧的入口脚本，要和对方约时间手工做。
+- **`image`，镜像的输入**：`quant-service/requirements.txt`、`quant-service/Dockerfile.peer`、
+  `.dockerignore`。输出 `image build required for: <path>` 并退出；只有全量发布会构建镜像。
+- **`unclassified`，没有规则提到的路径**：输出 `unclassified path: <path>` 并退出，什么都不
+  构建。处理办法是给它加一条规则（脚本：在 `scripts/generate_scripts_catalog.py` 里登记它在
+  哪台机器上运行），不是去做全量发布。2026-10-14 之前这类路径一律被当成“需要全量发布”，
+  而全量发布要在只有 894 MB 内存的主机上构建镜像。
 
 所以合并进 `main` 的普通 PR（代码连同测试和文档）可以直接走快速通道。如果两个 SHA
 之间没有 owner 运行时改动（例如只改了 edge），发布只会刷新记录的 SHA，这样
@@ -636,7 +656,8 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 
 1. 所有改动经 PR 合入 `main`。普通源码改动按 F5/F6 使用干净 Git SHA 的源码 overlay，
    overlay 可以长期作为常规发布模型运行，但**不允许**运行在 `-dirty` release 上；依赖、
-   镜像、compose、systemd 或迁移变化必须按完整发布流程切换到新的 immutable image 和/或数据库结构。
+   镜像、compose、systemd 变化必须按完整发布流程切换到新的 immutable image。迁移文件随 overlay 带上，
+   前提是对方的库已经到本次发布的 head（每次纯代码发布都查，没到就拒绝）。
 2. `scripts/release-sync-status.sh --sha origin/main`：记录回滚点，看清漂移。
 3. 有 hotfix 或未提交内容时，先做阶段 B。
 4. `X=origin/main`，推送 `edge-*` 标签，等镜像发布完成。
