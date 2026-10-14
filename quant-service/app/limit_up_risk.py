@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from math import fsum
 from statistics import mean, stdev
+from types import MappingProxyType
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
@@ -191,7 +192,36 @@ def recent_status(summaries: list[Mapping[str, Any]], limit: int = 120) -> dict[
             "difference_points": difference_points, "t_value": t_value, "status": status}
 
 
+#: What a buyer at the next open pays, round trip, as a fraction of the position.  The two figures are the all-in
+#: costs the source of the open-to-close test states (5 basis points of commission with 10 or with 20 of slippage);
+#: neither is the exchange's fee schedule, and they are not summed with a stamp-tax figure.
+ROUND_TRIP_COSTS: Mapping[str, float] = MappingProxyType({
+    "commission_5bp_slippage_10bp": 0.0015,
+    "commission_5bp_slippage_20bp": 0.0025,
+})
+
+
+def open_to_close_status(summaries: list[Mapping[str, Any]], limit: int = 120) -> dict[str, Any]:
+    """The score judged as a buyer meets it: enter at the next session's open, leave at its close.
+
+    The close-to-close comparison counts the overnight gap, which a buyer at the open never receives.  The same
+    working rule applies; the means are reported before and after each round-trip cost set.
+    """
+    recent = summaries[-limit:]
+    means = {side: (mean(float(item[side]["mean_next_day_return"]) for item in recent) if recent else None)
+             for side in ("lowest", "highest")}
+    return {
+        **recent_status(summaries, limit),
+        "basis": "next_session_open_to_close",
+        "mean_open_to_close": means,
+        "net_of_round_trip_costs": {
+            name: {side: None if value is None else value - cost for side, value in means.items()}
+            for name, cost in ROUND_TRIP_COSTS.items()
+        },
+    }
+
+
 __all__ = [
-    "COEFFICIENTS", "COEFFICIENTS_FILE_SHA256", "VERSION", "decode_limit_rows", "fifth_comparison",
-    "recent_status", "score_day",
+    "COEFFICIENTS", "COEFFICIENTS_FILE_SHA256", "ROUND_TRIP_COSTS", "VERSION", "decode_limit_rows",
+    "fifth_comparison", "open_to_close_status", "recent_status", "score_day",
 ]

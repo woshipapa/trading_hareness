@@ -9,7 +9,9 @@ from unittest import mock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.limit_up_risk import decode_limit_rows, fifth_comparison, recent_status, score_day
+from app.limit_up_risk import (
+    ROUND_TRIP_COSTS, decode_limit_rows, fifth_comparison, open_to_close_status, recent_status, score_day,
+)
 from app.limit_up_risk_repository import read_inputs, read_lists
 from app.routers.market_radar_reads import build_market_radar_router
 
@@ -126,6 +128,26 @@ class LimitUpRiskTests(unittest.TestCase):
         summaries = [{"lowest": {"big_loss_rate": 0.08}, "highest": {"big_loss_rate": 0.13}} for _ in range(60)]
         self.assertIsNone(recent_status(summaries)["t_value"])
 
+    def test_open_to_close_status_reports_the_buyers_net_after_two_cost_sets(self):
+        days = [{"lowest": {"big_loss_rate": 0.05, "mean_next_day_return": 0.004},
+                 "highest": {"big_loss_rate": 0.12 + index % 3 * 0.005, "mean_next_day_return": -0.006}}
+                for index in range(60)]
+        result = open_to_close_status(days)
+        self.assertEqual(result["status"], "working")
+        self.assertEqual(result["basis"], "next_session_open_to_close")
+        self.assertAlmostEqual(result["mean_open_to_close"]["highest"], -0.006)
+        self.assertEqual(set(result["net_of_round_trip_costs"]), set(ROUND_TRIP_COSTS))
+        for name, cost in ROUND_TRIP_COSTS.items():
+            self.assertAlmostEqual(result["net_of_round_trip_costs"][name]["highest"], -0.006 - cost)
+            self.assertAlmostEqual(result["net_of_round_trip_costs"][name]["lowest"], 0.004 - cost)
+        self.assertLess(ROUND_TRIP_COSTS["commission_5bp_slippage_10bp"], ROUND_TRIP_COSTS["commission_5bp_slippage_20bp"])
+
+    def test_open_to_close_status_with_no_sessions_is_insufficient_not_an_error(self):
+        result = open_to_close_status([])
+        self.assertEqual(result["status"], "insufficient_history")
+        self.assertIsNone(result["mean_open_to_close"]["highest"])
+        self.assertIsNone(result["net_of_round_trip_costs"]["commission_5bp_slippage_20bp"]["highest"])
+
     def test_repository_bar_sql_has_unit_filter_limit_resolution_and_bounded_history(self):
         statements = []
 
@@ -162,7 +184,9 @@ class LimitUpRiskTests(unittest.TestCase):
                     return Result([{"calendar_date": date(2026, 9, 17), "next_day": date(2026, 9, 18)}])
                 if "canonical_bars_daily" in sql:
                     symbols, dates = params
-                    return Result([{"symbol": symbol, "trading_date": day, "close": 100.0}
+                    # The next session opens above where it closes: its overnight gap is not a buyer's return.
+                    return Result([{"symbol": symbol, "trading_date": day, "close": 100.0,
+                                    "open": 102.0 if day == date(2026, 9, 18) else 100.0}
                                    for symbol, day in zip(symbols, dates)])
                 return Result([])
         class Database:
@@ -188,9 +212,18 @@ class LimitUpRiskTests(unittest.TestCase):
         symbols, dates = connection.params[-1]
         expected_pairs = [(row["symbol"], day) for row in rows for day in (date(2026, 9, 17), date(2026, 9, 18))]
         self.assertEqual(list(zip(symbols, dates)), expected_pairs)
-        self.assertEqual(result["days"], [{"trade_date": "2026-09-17",
-                                           "lowest": {"big_loss_rate": 0.0, "mean_next_day_return": 0.0},
-                                           "highest": {"big_loss_rate": 0.0, "mean_next_day_return": 0.0}}])
+        intraday = 100.0 / 102.0 - 1
+        self.assertEqual(result["days"], [{
+            "trade_date": "2026-09-17",
+            "lowest": {"big_loss_rate": 0.0, "mean_next_day_return": 0.0},
+            "highest": {"big_loss_rate": 0.0, "mean_next_day_return": 0.0},
+            "open_to_close": {"lowest": {"big_loss_rate": 0.0, "mean_next_day_return": intraday},
+                              "highest": {"big_loss_rate": 0.0, "mean_next_day_return": intraday}},
+        }])
+        self.assertEqual(result["judged_on"], "next_session_open_to_close")
+        self.assertEqual(result["recent_open_to_close"]["basis"], "next_session_open_to_close")
+        self.assertAlmostEqual(result["recent_open_to_close"]["mean_open_to_close"]["highest"], intraday)
+        self.assertEqual(result["recent"]["sessions"], 1, "the close-to-close block is kept as it was")
 
     def test_daily_returns_the_requested_session_not_the_oldest_stored_one(self):
         from app import limit_up_risk_runtime

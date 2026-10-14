@@ -8,7 +8,7 @@ from typing import Any
 
 from . import derived_daily_readings
 from .derived_daily_readings import CN_TZ
-from .limit_up_risk import VERSION, fifth_comparison, recent_status, score_day
+from .limit_up_risk import VERSION, fifth_comparison, open_to_close_status, recent_status, score_day
 from .limit_up_risk_repository import read_inputs
 
 CAPABILITY = "limit_up_risk_daily"
@@ -78,14 +78,16 @@ def track(database: Any, days: int = 250) -> dict[str, Any]:
         symbols = [symbol for symbol, _day in needed]
         dates = [day for _symbol, day in needed]
         bars = connection.execute(
-            """SELECT b.symbol,b.trading_date,b.close FROM quant.canonical_bars_daily b
+            """SELECT b.symbol,b.trading_date,b.open,b.close FROM quant.canonical_bars_daily b
                 JOIN unnest(%s::text[], %s::date[]) AS needed(symbol,trading_date)
                    ON needed.symbol=b.symbol AND needed.trading_date=b.trading_date
                 WHERE NOT coalesce(b.is_suspended, false) AND b.pre_close > 0 AND b.open > 0 AND b.close > 0""",
             (symbols, dates),
         ).fetchall() if needed else []
         closes = {(str(row["symbol"]), row["trading_date"]): float(row["close"]) for row in bars}
+        opens = {(str(row["symbol"]), row["trading_date"]): float(row["open"]) for row in bars}
         summaries = []
+        open_to_close_summaries = []
         for reading in readings:
             rows = reading.get("rows") or []
             day = date.fromisoformat(reading["trade_date"])
@@ -94,10 +96,21 @@ def track(database: Any, days: int = 250) -> dict[str, Any]:
                 continue
             returns = {row["symbol"]: closes[(row["symbol"], next_day)] / closes[(row["symbol"], day)] - 1
                        for row in rows if (row["symbol"], day) in closes and (row["symbol"], next_day) in closes}
+            # What a buyer at the next open meets: the overnight gap is not his.
+            intraday_returns = {row["symbol"]: closes[(row["symbol"], next_day)] / opens[(row["symbol"], next_day)] - 1
+                                for row in rows if (row["symbol"], next_day) in closes}
             comparison = fifth_comparison(rows, returns)
+            intraday = fifth_comparison(rows, intraday_returns)
+            if intraday is not None:
+                open_to_close_summaries.append({"trade_date": reading["trade_date"], **intraday})
             if comparison is not None:
-                summaries.append({"trade_date": reading["trade_date"], **comparison})
-    return {"version": VERSION, "days": summaries, "recent": recent_status(summaries), "stale_versions": stale_versions,
+                summaries.append({"trade_date": reading["trade_date"], **comparison,
+                                  **({"open_to_close": intraday} if intraday is not None else {})})
+    return {"version": VERSION, "days": summaries, "recent": recent_status(summaries),
+            # ``recent`` above is close to close and is kept as it was; the judgement that counts for a buyer is
+            # this one: the high-risk fifth must do worse from the open to the close, after costs.
+            "recent_open_to_close": open_to_close_status(open_to_close_summaries),
+            "judged_on": "next_session_open_to_close", "stale_versions": stale_versions,
             "research_only": True, "live_effect": "none"}
 
 
