@@ -3329,7 +3329,7 @@ export interface paths {
         };
         /**
          * Tactic Trials Board
-         * @description Decision 0023: the 09:25 board of the tactic trial ledger (research-only evidence).
+         * @description Decision 0023: a session's board of the tactic trial ledger (research-only evidence).
          */
         get: operations["tactic_trials_board_api_v1_market_tactic_trials_board_get"];
         put?: never;

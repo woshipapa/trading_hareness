@@ -4,7 +4,7 @@ import { Refresh } from '@element-plus/icons-vue';
 import { getJson } from '../../api/http';
 import { shanghaiToday } from '../../research/session-radar';
 import {
-  SIDE_NAMES, SLOT_NAMES, boardRows, fixed, labelName, labelTag, pairRows, percent, recordRows, summarySections,
+  SIDE_NAMES, SLOT_NAMES, boardRows, fixed, labelName, labelTag, latestOnly, pairRows, percent, recordRows, summaryCaption, summarySections,
   type RecordRow, type TacticBoard, type TacticCases, type TacticSide, type TacticSummary,
 } from '../../research/tactic-trials';
 
@@ -17,34 +17,47 @@ const casesOpen = ref(false);
 const casesLoading = ref(false);
 const loading = ref(false);
 const error = ref<string | null>(null);
+// A slow answer to an earlier date or an earlier row must not replace a later one's.
+const beginDay = latestOnly();
+const beginCases = latestOnly();
 
-async function loadDay(day?: string) {
+async function loadDay(day: string | undefined, current: () => boolean) {
   // Literal paths: the relay route contract test reads each research path up to its '?'.
   const [boardValue, summaryValue] = await Promise.all(day
     ? [getJson<TacticBoard>(`/api/research/market/tactic-trials/board?date=${encodeURIComponent(day)}`),
        getJson<TacticSummary>(`/api/research/market/tactic-trials/summary?date=${encodeURIComponent(day)}`)]
     : [getJson<TacticBoard>('/api/research/market/tactic-trials/board'),
        getJson<TacticSummary>('/api/research/market/tactic-trials/summary')]);
+  if (!current()) return;
   board.value = boardValue;
   summary.value = summaryValue;
   if (!day) tradeDate.value = boardValue.trade_date;
 }
 
 async function load(day?: string) {
+  const current = beginDay();
   loading.value = true;
   error.value = null;
-  try { await loadDay(day); }
-  catch (cause) { board.value = null; summary.value = null; error.value = cause instanceof Error ? cause.message : String(cause); }
-  finally { loading.value = false; }
+  try { await loadDay(day, current); }
+  catch (cause) {
+    if (current()) { board.value = null; summary.value = null; error.value = cause instanceof Error ? cause.message : String(cause); }
+  }
+  finally { if (current()) loading.value = false; }
 }
 
 async function openCases(row: RecordRow) {
+  const current = beginCases();
   casesOpen.value = true;
   casesLoading.value = true;
   cases.value = null;
-  try { cases.value = await getJson<TacticCases>(`/api/research/market/tactic-trials/cases?tactic=${encodeURIComponent(row.key)}&days=20`); }
-  catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause); casesOpen.value = false; }
-  finally { casesLoading.value = false; }
+  try {
+    const value = await getJson<TacticCases>(`/api/research/market/tactic-trials/cases?tactic=${encodeURIComponent(row.key)}&days=10`);
+    if (current()) cases.value = value;
+  }
+  catch (cause) {
+    if (current()) { error.value = cause instanceof Error ? cause.message : String(cause); casesOpen.value = false; }
+  }
+  finally { if (current()) casesLoading.value = false; }
 }
 
 onMounted(() => { void load(); });
@@ -118,12 +131,13 @@ const closeSides = computed(() => (board.value?.close ? SIDES.map((side) => ({ s
 
     <el-card shadow="never" class="gap">
       <template #header>{{ reading?.trade_date ?? tradeDate }} 每日总结<span class="caption"> · 固定模板生成，没有模型参与撰写</span></template>
+      <div v-if="reading" class="caption">“当日”各节是最新有结果的选股日：{{ summaryCaption(reading) }}</div>
       <el-collapse v-if="sections.length">
         <el-collapse-item v-for="section in sections" :key="section.title" :title="section.title">
           <div v-for="(line, index) in section.lines" :key="index" class="line">{{ line }}</div>
         </el-collapse-item>
       </el-collapse>
-      <el-empty v-else description="该日期没有总结（收盘后生成）" />
+      <el-empty v-else description="该日期及之前没有总结（收盘后生成）" />
     </el-card>
 
     <el-card v-if="reading" shadow="never" class="gap">

@@ -25,12 +25,9 @@ export interface BoardRow {
   sector: string | null;
   boards: number | null;
   gap: number | null;
-  opens_at_limit: boolean | null;
-  amount: number | null;
   auction_amount_rank: number | null;
   risk_rank: number | null;
   first_seal_time: string | null;
-  seal_money: number | null;
   tactics: string[];
   conditions: string[];
 }
@@ -97,10 +94,21 @@ export interface PairTable {
   lowest: MinedPair[];
 }
 
+/** One slot of the summary's day section: the pick day its outcomes belong to, beside today's own sample size. */
+export interface SampleSize {
+  pick_day: string | null;
+  rows: number;
+  cumulative_rows: number;
+  today_rows: number | null;
+}
+
 export interface TacticSummaryReading {
   trade_date: string;
   version: string;
   lines: string[];
+  day: { sample_sizes: Record<TacticSlot, SampleSize> };
+  open_days: number;
+  stale_digest_days: number;
   records: Record<string, SummaryRecord>;
   conditions: ConditionDay[];
   pairs: Record<TacticSlot, PairTable>;
@@ -175,16 +183,45 @@ export interface RecordRow {
   recent: TacticRecord;
 }
 
-/** The tactic table: the registered combinations first, in registry order, then the single conditions. */
+/**
+ * The tactic table: the registered combinations first, in the order of the board's cards (the registry's), then the
+ * single conditions by name. The order never comes from the keys of ``records``: a stored JSON object has none.
+ */
 export function recordRows(summary: TacticSummaryReading | null, cards: TacticCard[]): RecordRow[] {
   if (!summary) return [];
+  const order = new Map(cards.map((item, index) => [item.key, index]));
   const byKey = new Map(cards.map((item) => [item.key, item]));
   return Object.entries(summary.records)
     .map(([key, value]) => ({
       key, name: value.name, slot: value.slot, side: byKey.get(key)?.side ?? null, source: byKey.get(key)?.source ?? null,
       primary_name: value.primary_name, combination: byKey.has(key), label: value.label, q: value.q, ...value.records,
     }))
-    .sort((left, right) => Number(right.combination) - Number(left.combination));
+    .sort((left, right) => (left.combination && right.combination
+      ? order.get(left.key)! - order.get(right.key)!
+      : Number(right.combination) - Number(left.combination) || left.name.localeCompare(right.name, 'zh-Hans-CN') || left.key.localeCompare(right.key)));
+}
+
+/** What the summary card says under its title: whose outcomes the day section shows, and what is not final yet. */
+export function summaryCaption(summary: TacticSummaryReading): string {
+  const parts = (['close', 'auction'] as const).map((slot) => {
+    const sample = summary.day.sample_sizes[slot];
+    return `${SLOT_NAMES[slot]}选股日 ${sample.pick_day ?? '无数据'}（今日样本 ${sample.today_rows ?? '—'} 行）`;
+  });
+  if (summary.open_days) parts.push(`未定稿 ${summary.open_days} 天`);
+  if (summary.stale_digest_days) parts.push(`登记表变更后待重建 ${summary.stale_digest_days} 天`);
+  return parts.join(' · ');
+}
+
+/**
+ * Orders overlapping requests of one kind: ``begin()`` starts a request and returns a check that stays true only
+ * while no later request of that kind has begun, so a slow earlier answer is dropped instead of shown.
+ */
+export function latestOnly(): () => () => boolean {
+  let turn = 0;
+  return () => {
+    const mine = ++turn;
+    return () => mine === turn;
+  };
 }
 
 export interface SummarySection { title: string; lines: string[] }

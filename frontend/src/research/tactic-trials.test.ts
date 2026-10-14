@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  boardRows, labelName, pairRows, percent, recordRows, summarySections,
+  boardRows, labelName, latestOnly, pairRows, percent, recordRows, summaryCaption, summarySections,
   type BoardRow, type TacticBoard, type TacticCard, type TacticRecord, type TacticSummaryReading,
 } from './tactic-trials';
 
@@ -12,8 +12,8 @@ const record = (picks: number, in_sample = false): TacticRecord => ({
   days_with_picks: picks, picks, mean_daily_picks_mean: 0.01, mean_daily_difference: 0.02, t: 1.5, positive_share: 0.6, in_sample,
 });
 const row = (symbol: string, tactics: string[]): BoardRow => ({
-  symbol, name: symbol, sector: null, boards: 2, gap: 0.03, opens_at_limit: false, amount: null, auction_amount_rank: null,
-  risk_rank: 40, first_seal_time: null, seal_money: null, tactics, conditions: [],
+  symbol, name: symbol, sector: null, boards: 2, gap: 0.03, auction_amount_rank: null,
+  risk_rank: 40, first_seal_time: null, tactics, conditions: [],
 });
 
 describe('tactic trial helpers', () => {
@@ -31,7 +31,30 @@ describe('tactic trial helpers', () => {
     ]);
     expect(boardRows(null, 'avoid', board)).toEqual([]);
   });
-  it('lists the registered combinations before the single conditions', () => {
+  it('lists the registered combinations in card order, then the single conditions by name', () => {
+    const single = (name: string) => ({ name, slot: 'close', primary: 'seal', primary_name: '再封板率', expects: 1, label: 'collecting', q: null,
+      records: { replay: record(40, true), forward: record(2), recent: record(2) } });
+    const summary = { records: {
+      'only.b': single('乙'), relay_4: single('四板'), 'only.a': single('甲'), relay_2_3: single('二三板接力'),
+    } } as unknown as TacticSummaryReading;
+    const rows = recordRows(summary, [card('relay_2_3', '二三板接力'), card('relay_4', '四板')]);
+    expect(rows.map((item) => item.key)).toEqual(['relay_2_3', 'relay_4', 'only.a', 'only.b']);
+  });
+  it('says whose outcomes the summary shows and what is not final', () => {
+    const size = (pick_day: string | null, today_rows: number | null) => ({ pick_day, rows: 60, cumulative_rows: 900, today_rows });
+    const summary = { day: { sample_sizes: { close: size('2026-10-13', 67), auction: size(null, null) } }, open_days: 3, stale_digest_days: 0 };
+    expect(summaryCaption(summary as unknown as TacticSummaryReading))
+      .toBe('收盘选股日 2026-10-13（今日样本 67 行） · 竞价选股日 无数据（今日样本 — 行） · 未定稿 3 天');
+    expect(summaryCaption({ ...summary, open_days: 0, stale_digest_days: 2 } as unknown as TacticSummaryReading)).toContain('待重建 2 天');
+  });
+  it('keeps only the newest of overlapping requests', () => {
+    const begin = latestOnly();
+    const first = begin();
+    expect(first()).toBe(true);
+    const second = begin();
+    expect([first(), second()]).toEqual([false, true]);
+  });
+  it('marks the registered combinations and carries their side', () => {
     const summary = { records: {
       'only.theme_big': { name: '大题材', slot: 'close', primary: 'seal', primary_name: '再封板率', expects: 1, label: 'collecting', q: null,
         records: { replay: record(40, true), forward: record(2), recent: record(2) } },
