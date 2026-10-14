@@ -541,11 +541,18 @@ scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> \
   - `feishu-relay/`、`frontend/`、`frontend-shared/`、`xhs-intel/`，它们在 edge 发布；
   - 本机和其他主机的部署文件：根目录 `compose.yaml`、`launchd/`、`workflows/`、
     `deploy/` 里列明的网关配置、服务器 compose 和已停用的 edge 运行时（`deploy/intraday-edge/`）；
-  - `scripts/` 下的脚本，按 `scripts/CATALOG.md` 的“Runs on”一列：不是 `47owner` 的都跳过
-    （工作站、edge、对方的 Windows 工作站、CI）；
+  - `scripts/` 下的脚本，按 `scripts/CATALOG.md` 的“Runs on”一列：`workstation…`、`owner-windows`、
+    `never run`、`no host runs it` 跳过；这几个和 `47owner…` 之外的登记值一律按 `unclassified` 拒绝；
   - 只改了注释或 docstring 的迁移文件，脚本会比对去掉 docstring 后的语法树。
-- **`full`，主机自己的目录树**：`deploy/shared-peer/`（compose、systemd 单元、隧道镜像）和
+- **`full`，主机自己的目录树**：`deploy/shared-peer/`（compose、systemd 单元）和
   目录里“Runs on”为 `47owner` 的脚本。输出 `full release required for: <path>` 并退出。
+  某个脚本的“Runs on”在两个提交之间跨过了 `47owner` 这条线（登记错了被改对，或反过来）时，即使
+  这次差异里没有这个脚本，它也按 `full` 输出：登记成别的主机期间，对它的改动都被跳过了，主机上
+  那份可能是旧的。核对过主机上那份就是目标提交的内容之后，把它的路径写进
+  `RELEASE_RELABELLED_CURRENT`（空格分隔）再发布。
+- **`tunnel-image`，隧道镜像的输入**：`deploy/shared-peer/Dockerfile.ssh-tunnel`、
+  `deploy/shared-peer/ssh-tunnel-entrypoint.sh`。纯代码发布拒绝。全量发布会把文件带到主机的目录树里，
+  但不重建隧道镜像、也不重建隧道容器：在跑的隧道继续用旧的入口脚本，要和对方约时间手工做。
 - **`image`，镜像的输入**：`quant-service/requirements.txt`、`quant-service/Dockerfile.peer`、
   `.dockerignore`。输出 `image build required for: <path>` 并退出；只有全量发布会构建镜像。
 - **`unclassified`，没有规则提到的路径**：输出 `unclassified path: <path>` 并退出，什么都不
@@ -649,7 +656,8 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 
 1. 所有改动经 PR 合入 `main`。普通源码改动按 F5/F6 使用干净 Git SHA 的源码 overlay，
    overlay 可以长期作为常规发布模型运行，但**不允许**运行在 `-dirty` release 上；依赖、
-   镜像、compose、systemd 或迁移变化必须按完整发布流程切换到新的 immutable image 和/或数据库结构。
+   镜像、compose、systemd 变化必须按完整发布流程切换到新的 immutable image。迁移文件随 overlay 带上，
+   前提是对方的库已经到本次发布的 head（每次纯代码发布都查，没到就拒绝）。
 2. `scripts/release-sync-status.sh --sha origin/main`：记录回滚点，看清漂移。
 3. 有 hotfix 或未提交内容时，先做阶段 B。
 4. `X=origin/main`，推送 `edge-*` 标签，等镜像发布完成。

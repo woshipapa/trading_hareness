@@ -28,4 +28,4 @@
 - `scripts/shared-peer/deploy-full-release.sh` 的迁移闸门（退出码 6）。
 - `quant-service/scripts/migration_lineage.py`（只用标准库，可离线读迁移链）。
 - `scripts/test_migration_lineage.py` 断言仓库只有一个迁移 head。
-- `deploy-code-only.sh` 遇到迁移文件的实质改动直接拒绝。
+- `deploy-code-only.sh` 每次都先过库版本闸门（`scripts/shared-peer/schema-gate.sh`）：对方的库没到本次发布的 head 就拒绝。（2026-10-14 更正：原文是“遇到迁移文件的实质改动直接拒绝”；迁移文件现在随覆盖层带上，见决定 0024。）

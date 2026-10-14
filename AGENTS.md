@@ -236,8 +236,10 @@ image.
   (`scripts/shared-peer/classify-owner-paths.sh`) names six kinds: `runtime`
   and `migration` ship in the overlay (a migration only through
   `scripts/shared-peer/schema-gate.sh`), `skip` never reaches the owner,
-  `full` is the host's tree, `image` is an input of the image, and
-  `unclassified` asks for a rule and builds nothing.
+  `full` is the host's tree, `image` is an input of the image,
+  `tunnel-image` is an input of the tunnel image (no release rebuilds it), and
+  `unclassified` asks for a rule and builds nothing. The code-only path
+  enforces this; the full release does not read the classification.
 - A database migration must be applied and verified before switching code that
   depends on its schema. Do not recreate an unavailable historical migration
   from memory; use an observed, idempotent repair or stop and document the

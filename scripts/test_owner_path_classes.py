@@ -50,7 +50,9 @@ class OwnerPathClassTests(unittest.TestCase):
         """A COPY source is runtime, a migration or an image input. The skipped ones are named here, one by one."""
         copied = re.findall(r"^COPY (?!--from)(\S+) ", (ROOT / "quant-service/Dockerfile.peer").read_text(encoding="utf-8"), re.M)
         self.assertIn("quant-service/app", copied)
-        kinds = {source: {kind for path, kind in self.classes.items() if path == source or path.startswith(source + "/")}
+        # A document inside a copied directory is skipped like any other document.
+        kinds = {source: {kind for path, kind in self.classes.items()
+                          if (path == source or path.startswith(source + "/")) and not path.endswith(".md")}
                  for source in copied}
         self.assertEqual([source for source, found in kinds.items() if not found], [], "a COPY source matches no tracked path")
         # The tests are not imported by the app. The two tools have no caller inside the image; its copies are

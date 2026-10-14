@@ -83,8 +83,8 @@ class OwnerAllowlistTests(unittest.TestCase):
     def test_an_unknown_path_fails_closed(self) -> None:
         self.assertRegex(self.text, r"\*\) printf 'unclassified\\t%s\\n' \"\$path\" ;;")
         # and the deploy refuses whenever the rules report such a path, a host-tree path or an image input
-        for kind in ("full", "image", "unclassified"):
-            self.assertIn(f'done <<<"$(of_kind {kind})"', self.script)
+        for kind in ("full", "image", "tunnel-image", "unclassified"):
+            self.assertIn(f"\nrefuse {kind} '", self.script)
         self.assertIn('[[ "$refused" == false ]] || exit 1', self.script)
 
     def test_a_migration_change_goes_through_the_schema_gate(self) -> None:

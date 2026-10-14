@@ -118,12 +118,12 @@ class FailClosedTests(unittest.TestCase):
                         "改了代码的迁移文件必须归为 migration")
         self.assertTrue(re.search(r"\*\) printf 'unclassified\\t%s\\n' \"\$path\" ;;", rules),
                         "owner 路径规则缺少「未知路径一律拒绝」的兜底分支")
-        for refusal in ('echo "full release required for: $path"', 'echo "image build required for: $path',
-                        'echo "unclassified path: $path'):
+        for refusal in ("refuse full 'full release required for'", "refuse image 'image build required for'",
+                        "refuse tunnel-image 'tunnel image input'", "refuse unclassified 'unclassified path'"):
             self.assertIn(refusal, script, "owner 发布脚本必须按规则拒绝这一类路径")
         self.assertIn('[[ "$refused" == false ]] || exit 1', script)
-        self.assertIn('[[ -z "$migration_files" ]] || bash "$tool_root/scripts/shared-peer/schema-gate.sh" "$target_sha" || exit $?',
-                      script, "带迁移文件的热发布必须先过库版本闸门")
+        self.assertIn('\nbash "$tool_root/scripts/shared-peer/schema-gate.sh" "$target_sha" || exit $?\n',
+                      script, "每次热发布都必须先过库版本闸门，不看这次差异里有没有迁移文件")
 
 
 class ProofOfExecutionTests(unittest.TestCase):

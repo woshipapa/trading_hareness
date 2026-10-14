@@ -26,6 +26,7 @@
 | [0020](0020-feishu-relay-creates-target-bots.md) | 飞书转发：用账号自己的会话在目标群里创建自定义机器人 | 生效 |
 | [0021](0021-peer-evening-stages.md) | 我们这一侧每晚要的产出，由我们自己的晚间循环启动（回执只在产出存在时关闭） | 生效 |
 | [0022](0022-feishu-relay-uses-existing-group-bots.md) | 飞书转发：可以借用群里已有的自定义机器人发消息，但不改它、不删它 | 生效 |
+| [0024](0024-owner-paths-are-classified-not-built.md) | owner 的改动按路径分类；不认识的路径是缺一条规则，不是去构建镜像；迁移随覆盖层发布并每次过库版本闸门 | 生效 |
 
 格式：
 
