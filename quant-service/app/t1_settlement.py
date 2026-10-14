@@ -31,7 +31,7 @@ from decimal import Decimal
 from typing import Any, Callable, Mapping, Sequence
 
 from .ashare_reality import round_trip_cost_pct
-from .market_rules import a_share_limit_ratio
+from .market_rules import a_share_limit_prices, a_share_limit_ratio
 
 SETTLEMENT_VERSION = "t1-settlement-v1"
 #: The session after entry is the earliest one a T+1 position can be sold in.
@@ -106,9 +106,7 @@ def _limits(bar: SettlementBar | PricedBar, symbol: str) -> tuple[Decimal | None
         return bar.limit_up, bar.limit_down
     if bar.pre_close is None or bar.pre_close <= 0:
         return bar.limit_up, bar.limit_down
-    ratio = Decimal(str(a_share_limit_ratio(symbol, False, bar.trading_date)))
-    band_up = (bar.pre_close * (1 + ratio)).quantize(Decimal("0.01"))
-    band_down = (bar.pre_close * (1 - ratio)).quantize(Decimal("0.01"))
+    band_up, band_down = a_share_limit_prices(symbol, bar.pre_close, a_share_limit_ratio(symbol, False, bar.trading_date))
     return bar.limit_up if bar.limit_up is not None else band_up, bar.limit_down if bar.limit_down is not None else band_down
 
 

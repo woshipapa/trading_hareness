@@ -63,6 +63,10 @@ class MarketHistoryBackfillTests(unittest.TestCase):
     def test_longhu_list_shapes_and_limit_performance_calls(self):
         self.assertEqual(_info_rows({"info": [[["000917", "电广传媒"]], {"extra": 1}]}), [["000917", "电广传媒"]])
         self.assertEqual(_info_rows({"info": [[64, 5, "2026-09-22"]]}), [[64, 5, "2026-09-22"]])
+        # What the vendor returned for the empty four-board list of 2026-10-13 (BACKLOG B045).
+        self.assertEqual(_info_rows({"info": [[], "暂无数据"]}), [])
+        self.assertEqual(_info_rows({"info": [[]]}), [])
+        self.assertEqual(_info_rows({"info": []}), [])
         calls = []
 
         async def call(request):

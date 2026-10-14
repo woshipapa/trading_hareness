@@ -88,6 +88,10 @@ def _iso(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
+# A turnover or sealing amount of one stock on one day: a million yuan to a trillion.
+AMOUNT_YUAN_MIN, AMOUNT_YUAN_MAX = 1e6, 1e12
+
+
 def validate_pack(pack: Any) -> list[str]:
     """Return human-readable problems; an empty list means the pack is well-formed."""
     if not isinstance(pack, dict):
@@ -142,6 +146,15 @@ def validate_pack(pack: Any) -> list[str]:
             provenance = str(params.get(f"{name}_src") or "")
             if not provenance or provenance[0] not in "TDI":
                 problems.append(f"{tag}: param {name} needs {name}_src starting with T/D/I")
+        # Amounts are yuan. A pack written in 万 or 亿 (2026-10-12: auction_amount_min) would otherwise import
+        # cleanly and set a threshold thousands of times too low.
+        for name, value in params.items():
+            if "amount" not in name or name.endswith("_src") or name == "amount_mult":
+                continue
+            for item in value if isinstance(value, list) else [value]:
+                if isinstance(item, bool) or not isinstance(item, (int, float)) or not AMOUNT_YUAN_MIN <= item <= AMOUNT_YUAN_MAX:
+                    problems.append(f"{tag}: param {name}={item!r} is not an amount in yuan "
+                                    f"(expected {AMOUNT_YUAN_MIN:.0f} to {AMOUNT_YUAN_MAX:.0f}; 7100 万 is 71000000)")
         for name in ("hold_ma", "floor_ma", "pullback_ma", "trend_floor_ma", "support_ma", "invalid_ma", "ma"):
             if name in params and int(params[name]) not in (5, 10, 20, 60):
                 problems.append(f"{tag}: {name} must be one of 5/10/20/60")

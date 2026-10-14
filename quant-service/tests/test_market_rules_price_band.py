@@ -3,7 +3,9 @@ from datetime import date
 
 from app.ashare_reality import price_limit_state
 from app.live_policy import live_policy_gate
-from app.market_rules import a_share_board, a_share_limit_ratio
+from decimal import Decimal
+
+from app.market_rules import a_share_board, a_share_limit_prices, a_share_limit_ratio
 from app.watchlist_daily_factors import daily_factors_from_rows
 
 
@@ -29,6 +31,13 @@ class PriceBandTests(unittest.TestCase):
         self.assertEqual(a_share_limit_ratio("600001.SH", True, date(2026, 7, 3)), 0.05)
         self.assertEqual(a_share_limit_ratio("600001.SH", True, "2026-07-06"), 0.10)
         self.assertEqual(a_share_limit_ratio("000001.SZ", True, "20260707"), 0.10)
+
+    def test_limit_prices_round_half_up_except_in_beijing_where_they_round_toward_the_close(self):
+        self.assertEqual(a_share_limit_prices("600000.SH", Decimal("10.05"), 0.10), (Decimal("11.06"), Decimal("9.05")))
+        self.assertEqual(a_share_limit_prices("000001.SZ", Decimal("3.33"), 0.05), (Decimal("3.50"), Decimal("3.16")))
+        # 12.34 x 1.3 = 16.042 and x 0.7 = 8.638; 5.55 x 1.3 = 7.215 and x 0.7 = 3.885
+        self.assertEqual(a_share_limit_prices("920819.BJ", Decimal("12.34"), 0.30), (Decimal("16.04"), Decimal("8.64")))
+        self.assertEqual(a_share_limit_prices("830799.BJ", Decimal("5.55"), 0.30), (Decimal("7.21"), Decimal("3.89")))
 
     def test_board_classifier(self):
         self.assertEqual(a_share_board("920819.BJ"), "beijing")

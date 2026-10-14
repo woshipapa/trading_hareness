@@ -7,6 +7,7 @@ replay, and execution simulation use the same fallback semantics.
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
 
@@ -17,6 +18,8 @@ def cn_today(now: datetime | None = None) -> date:
 
 # Main-board risk-warning (ST/*ST) stocks moved from a 5% to a 10% daily band
 # when the revised SSE/SZSE trading rules took effect on Monday 2026-07-06.
+# Open (BACKLOG B009): the limits stored for 2026-10-12 showed 141 main-board ST stocks at 5% and the one 302xxx
+# code not at 20% (decision 0018). Neither is changed here until the stored limits are read again by source.
 MAIN_BOARD_ST_TEN_PERCENT_FROM = date(2026, 7, 6)
 # ChiNext uses 300/301/302 and STAR uses 688/689; both keep a 20% band for
 # ST names too, since the ST 5% band was only ever a main-board rule.
@@ -67,6 +70,18 @@ def a_share_limit_ratio(symbol: str, is_st: bool | None = False,
         session = as_exchange_date(trade_date) or cn_today()
         return 0.10 if session >= MAIN_BOARD_ST_TEN_PERCENT_FROM else 0.05
     return 0.10
+
+
+def a_share_limit_prices(symbol: str, pre_close: Decimal, ratio: Decimal | float) -> tuple[Decimal, Decimal]:
+    """The up and down limit prices of a band around the previous close, to the cent.
+
+    Shanghai and Shenzhen round half up. Beijing rounds toward the previous close: the up-limit down, the
+    down-limit up (decision 0018: half-up rounding missed the stored Beijing limits of 176 stocks on 2026-10-12).
+    """
+    ratio, cent = Decimal(str(ratio)), Decimal("0.01")
+    beijing = a_share_board(symbol) == "beijing"
+    return ((pre_close * (1 + ratio)).quantize(cent, ROUND_FLOOR if beijing else ROUND_HALF_UP),
+            (pre_close * (1 - ratio)).quantize(cent, ROUND_CEILING if beijing else ROUND_HALF_UP))
 
 
 def is_st_security_name(name: object) -> bool:

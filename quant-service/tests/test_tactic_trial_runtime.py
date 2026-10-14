@@ -380,8 +380,8 @@ class AuctionLoopTests(unittest.TestCase):
 
     def test_a_busy_database_is_waited_out(self):
         busy = runtime.ExecutorSaturatedError("database executor saturated")
-        calls, _sleeps, lines = self._run("2026-10-14T09:25:05", [busy, TimeoutError(), "completed"])
-        self.assertEqual(len(calls), 3)
+        calls, _sleeps, lines = self._run("2026-10-14T09:25:05", [busy, TimeoutError(), runtime.PoolTimeout(), "completed"])
+        self.assertEqual(len(calls), 4)
         self.assertEqual(lines, ["tactic_auction trade_date=2026-10-14 status=completed"])
         _calls, _sleeps, lines = self._run("2026-10-14T09:25:05", [busy])
         self.assertEqual(lines, ["tactic_auction trade_date=2026-10-14 status=database_busy"],

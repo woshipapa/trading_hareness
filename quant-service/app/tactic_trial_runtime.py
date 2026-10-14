@@ -13,6 +13,8 @@ from decimal import Decimal
 from statistics import median
 from typing import Any, Mapping, Sequence
 
+from psycopg_pool import PoolTimeout
+
 from . import derived_daily_readings, limit_up_risk_repository, tactic_trial_repository
 from .derived_daily_readings import CN_TZ, session_close
 from .limit_up_risk import decode_limit_rows
@@ -453,7 +455,8 @@ def read_cases(database: Any, tactic: Tactic, days: int = 10) -> dict[str, Any]:
     return _research({"version": VERSION, "tactic": tactic_card(tactic), "sessions": len(sessions), "days": result})
 
 
-DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
+# The pool's own timeout is the same condition one layer down: every connection is in use.
+DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError, PoolTimeout)
 AUCTION_FROM, AUCTION_UNTIL = time(9, 25, 5), time(9, 45)
 
 
@@ -469,8 +472,8 @@ class TacticAuctionDependencies:
 async def auction_reading(deps: TacticAuctionDependencies, trade_date: date) -> str:
     """Wait for the day's stored 09:25 table, then store the auction reading; the status says how the morning ended.
 
-    The stored table is the only interface to the auction capture. A saturated executor or a timed-out call is
-    waited out; any other database error ends the task, and the task supervisor starts it again.
+    The stored table is the only interface to the auction capture. A saturated executor, a timed-out call or an
+    exhausted connection pool is waited out; any other database error ends the task, and the task supervisor starts it again.
     """
     session, status = None, "not_ready"
     while deps.now().astimezone(CN_TZ).time() <= AUCTION_UNTIL:

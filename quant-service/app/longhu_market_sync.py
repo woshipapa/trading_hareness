@@ -7,7 +7,7 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Mapping
 
-from .market_rules import a_share_board, a_share_limit_ratio, is_st_security_name
+from .market_rules import a_share_board, a_share_limit_prices, a_share_limit_ratio, is_st_security_name
 
 
 PROVIDER_KEY = "longhuvip_composite"
@@ -185,11 +185,10 @@ def build_control_rows(daily_rows: list[dict[str, Any]]) -> dict[str, list[dict[
         if pre_close is None or pre_close <= 0:
             continue
         ratio, rule = _limit_ratio(symbol, name, row.get("trade_date"))
-        quantum = Decimal("0.01")
+        up_limit, down_limit = a_share_limit_prices(symbol, pre_close, ratio)
         limits.append({
             "ts_code": symbol, "trade_date": row["trade_date"],
-            "up_limit": str((pre_close * (Decimal("1") + ratio)).quantize(quantum, rounding=ROUND_HALF_UP)),
-            "down_limit": str((pre_close * (Decimal("1") - ratio)).quantize(quantum, rounding=ROUND_HALF_UP)),
+            "up_limit": str(up_limit), "down_limit": str(down_limit),
             "derivation": "preclose_times_board_limit_ratio", "board_rule": rule,
             "exception_warning": "IPO/resumption/no-limit exceptions are not inferred",
         })
