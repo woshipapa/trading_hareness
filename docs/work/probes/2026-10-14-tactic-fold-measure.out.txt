@@ -1,0 +1,10 @@
+# PYTHONPATH=. python <this script> digest|fold <file>, each phase under /usr/bin/time -l, in quant-service/ of the worktree at def28cf8 (2026-10-14, the Mac)
+digest phase: 858.2s; mean digest 25.4 KB, mean pairs document 25.4 KB
+      858.45 real       851.27 user         3.09 sys
+            69435392  maximum resident set size
+fold phase: 3.6s; summary 155 KB, 203 lines
+        3.90 real         3.78 user         0.07 sys
+           107790336  maximum resident set size
+# one day after the digest computes only the outcomes a record uses (af2ddca7):
+close: generate 0.005s digest 0.227s pairs 0.084s
+auction: generate 0.003s digest 0.033s pairs 0.094s

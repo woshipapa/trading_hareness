@@ -72,14 +72,39 @@ class ChatMembersTest(unittest.TestCase):
 		])
 		answer = ROUTES["/chat-members/list"](Bridge(client), {"chat_id": "7001"})
 		self.assertEqual(answer, {"status": "ok", "chat_id": "7001", "members": [
-			{"user_id": "100", "name": "用户100", "joined_at": 10, "is_bot": False, "is_self": True},
-			{"user_id": "200", "name": "用户200", "joined_at": 20, "is_bot": False, "is_self": False},
-			{"user_id": "300", "name": "用户300", "joined_at": 30, "is_bot": False, "is_self": False},
+			{"user_id": "100", "name": "用户100", "alias": "", "joined_at": 10, "is_bot": False, "is_self": True},
+			{"user_id": "200", "name": "用户200", "alias": "", "joined_at": 20, "is_bot": False, "is_self": False},
+			{"user_id": "300", "name": "用户300", "alias": "", "joined_at": 30, "is_bot": False, "is_self": False},
 		]})
 		self.assertEqual(client.calls, [
 			("chats.PullChatChattersV2Request", {"chatId": "7001", "limit": 100}),
 			("chats.PullChatChattersV2Request", {"chatId": "7001", "limit": 100, "cursor": 9}),
+			("chatters.PullChattersByIdsRequest", {"chatterIds": ["200", "300"]}),
 		])
+
+	def test_an_alias_is_written_for_one_person_and_an_empty_one_clears_it(self):
+		client = Client()
+		answer = ROUTES["/users/alias"](Bridge(client), {"user_id": "200", "alias": " 阿明 108三个月 "})
+		self.assertEqual(answer, {"status": "ok", "user_id": "200", "alias": "阿明 108三个月"})
+		self.assertEqual(client.calls, [("users.PutUserAliasRequest", {"targetId": 200, "name": "阿明 108三个月"})])
+		ROUTES["/users/alias"](Bridge(client), {"user_id": "200", "alias": ""})
+		self.assertEqual(client.calls[-1], ("users.PutUserAliasRequest", {"targetId": 200, "name": ""}))
+		with self.assertRaises(ValueError):
+			ROUTES["/users/alias"](Bridge(client), {"user_id": "ou_x", "alias": "x"})
+		self.assertEqual(len(client.calls), 2)
+
+	def test_a_refused_alias_write_carries_the_gateways_reason(self):
+		client = Client(pages=[{"sid": "no permission", "payloadType": 2}])
+		with self.assertRaisesRegex(GroupAdminError, "no permission"):
+			ROUTES["/users/alias"](Bridge(client), {"user_id": "200", "alias": "x"})
+
+	def test_member_list_carries_the_alias_the_account_gave_each_person(self):
+		client = Client(pages=[
+			{"chatterJoinTimeSec": {"100": 10, "200": 20, "300": 30}},
+			{"chatters": {"200": {"alias": "阿明 108三个月"}, "300": {"name": "没有备注的人"}}},
+		])
+		answer = ROUTES["/chat-members/list"](Bridge(client), {"chat_id": "7001"})
+		self.assertEqual([(member["user_id"], member["alias"]) for member in answer["members"]], [("100", ""), ("200", "阿明 108三个月"), ("300", "")])
 
 	def test_member_list_marks_custom_and_app_bots_and_the_account(self):
 		client = Client(
@@ -91,9 +116,9 @@ class ChatMembersTest(unittest.TestCase):
 		)
 		answer = ROUTES["/chat-members/list"](Bridge(client), {"chat_id": "7001"})
 		self.assertEqual(answer["members"], [
-			{"user_id": "100", "name": "用户100", "joined_at": 10, "is_bot": False, "is_self": True},
-			{"user_id": "bot-custom", "name": "用户bot-custom", "joined_at": 20, "is_bot": True, "is_self": False},
-			{"user_id": "bot-app", "name": "用户bot-app", "joined_at": 30, "is_bot": True, "is_self": False},
+			{"user_id": "100", "name": "用户100", "alias": "", "joined_at": 10, "is_bot": False, "is_self": True},
+			{"user_id": "bot-custom", "name": "用户bot-custom", "alias": "", "joined_at": 20, "is_bot": True, "is_self": False},
+			{"user_id": "bot-app", "name": "用户bot-app", "alias": "", "joined_at": 30, "is_bot": True, "is_self": False},
 		])
 		self.assertEqual(client.chat_bot_calls, ["7001"])
 

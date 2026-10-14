@@ -97,6 +97,56 @@ describe('target group panels render what their composables hold', () => {
     wrapper.unmount();
   });
 
+  it('shows each member\'s alias, fills the edit form from it, and sends a typed expiry date', async () => {
+    const membership = { target_chat_id: 'oc_summary', user_id: '200', display_name: '群昵称', alias: '阿明 到12月底 918三个月', started_on: '2026-09-01', term_months: 1, expires_on: '2026-10-01', expiry_fixed: false, note: null, reminded_on: null, left_at: null, status: '已到期',
+      suggestions: [{ started_on: null, term_months: null, expires_on: '2026-12-31', label: '到 12-31', span: [3, 8] }, { started_on: '2026-09-18', term_months: 3, expires_on: null, label: '09-18 起 3 个月', span: [9, 15] }] };
+    const settings = { target_chat_id: 'oc_summary', enabled: false, default_term_months: 1, remind_text: '会员已到期，请联系群主续费', exempt_user_ids: [], last_review_on: null };
+    const sent: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') { sent.push(JSON.parse(String(init.body))); return jsonResponse({ member: membership }); }
+      return jsonResponse(String(url).includes('membership-settings') ? { settings } : { members: [membership], today: '2026-10-13', target_chat_id: 'oc_summary' });
+    }));
+    const wrapper = mountWithContext(MembershipPanel, target);
+    await flushPromises();
+    expect(wrapper.find('.el-table__body tbody tr').text()).toContain('阿明 到12月底 918三个月');
+    const edit = wrapper.findAll('.el-table__body tbody tr button').find((button) => button.text().includes('编辑'));
+    await edit!.trigger('click');
+    await flushPromises();
+    const dialog = [...document.body.querySelectorAll('.el-dialog')].find((node) => node.textContent?.includes('编辑会员')) as HTMLElement;
+    const click = async (label: string) => { ([...dialog.querySelectorAll('button')].find((button) => button.textContent?.trim() === label) as HTMLButtonElement).click(); await flushPromises(); };
+    expect(dialog.textContent).toContain('按备注名填');
+    await click('09-18 起 3 个月');
+    await click('保存');
+    expect(sent.at(-1)).toMatchObject({ started_on: '2026-09-18', term_months: 3, expires_on: null });
+    await edit!.trigger('click');
+    await flushPromises();
+    const again = [...document.body.querySelectorAll('.el-dialog')].find((node) => node.textContent?.includes('编辑会员')) as HTMLElement;
+    ([...again.querySelectorAll('button')].find((button) => button.textContent?.trim() === '到 12-31') as HTMLButtonElement).click();
+    await flushPromises();
+    ([...again.querySelectorAll('button')].find((button) => button.textContent?.trim() === '保存') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(sent.at(-1)).toMatchObject({ started_on: '2026-09-01', expires_on: '2026-12-31' });
+    // The alias is sent only when it was changed in the form.
+    expect(sent.every((body) => !('alias' in body))).toBe(true);
+    await edit!.trigger('click');
+    await flushPromises();
+    const third = [...document.body.querySelectorAll('.el-dialog')].find((node) => node.textContent?.includes('编辑会员')) as HTMLElement;
+    ([...third.querySelectorAll('button')].find((button) => button.textContent?.trim() === '09-18 起 3 个月') as HTMLButtonElement).click();
+    await flushPromises();
+    const month = third.querySelector('.el-input-number input') as HTMLInputElement;
+    month.value = '6';
+    month.dispatchEvent(new Event('input'));
+    month.dispatchEvent(new Event('change'));
+    await flushPromises();
+    ([...third.querySelectorAll('button')].find((button) => button.textContent?.trim() === '按下面的日期改写') as HTMLButtonElement).click();
+    await flushPromises();
+    expect((third.querySelector('input[placeholder="没有备注名"]') as HTMLInputElement).value).toBe('阿明 到12月底 918六个月');
+    ([...third.querySelectorAll('button')].find((button) => button.textContent?.trim() === '保存') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(sent.at(-1)).toMatchObject({ started_on: '2026-09-18', term_months: 6, alias: '阿明 到12月底 918六个月' });
+    wrapper.unmount();
+  });
+
   it('mounts the whole page with every panel and hands no component a ref where a value belongs', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {

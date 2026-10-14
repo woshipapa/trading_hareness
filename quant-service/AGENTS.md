@@ -10,12 +10,15 @@ Component `quant-research` (runtime `47owner`). Release units: `owner-quant`
   and `app/main.py` is a composition root — no new business logic there.
 - **Hot update, never an image rebuild** for ordinary `app/**` changes:
   `scripts/shared-peer/deploy-code-only.sh <sha> <label> --from-sha <active> --apply`.
-  It fails closed on requirements, Dockerfile, compose, lockfile and migration
-  changes — those need `docs/RELEASE_SYNC_47.md`.
+  It fails closed on requirements, Dockerfile and compose changes — those need
+  `docs/RELEASE_SYNC_47.md` — and on a path no rule names, which needs a rule in
+  `scripts/shared-peer/classify-owner-paths.sh`, not an image build.
 - A migration is a **separate release unit**: apply and verify it on the owner
   *before* shipping code that depends on its schema. Commit migrations in their
-  own commit; `quant-service/app/*` is on the code-only allowlist and
-  `quant-service/migrations/**` is not.
+  own commit. The code-only release ships `quant-service/migrations/**` in the
+  overlay, and when a migration changed it first checks that the owner database
+  is at the release head (`scripts/shared-peer/schema-gate.sh`); behind is
+  refused with the list to apply.
 - An app change and its tests belong in the same commit: the code-only release
   ships `quant-service/app/*` and skips `quant-service/tests/**` (it does not
   refuse them; `scripts/shared-peer/deploy-code-only.test.mjs` checks this).

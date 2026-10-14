@@ -1,0 +1,8 @@
+Mem:             894         614          86           1         335         279
+Swap:           2047         434        1613
+605577.SH 2023-08-15..2023-11-15: bars 61, without adj_factor 48
+  1. price-chain breaks: none
+  2. factors on the canonical bars: ['1.018']
+  3. factors in the factor table (61 rows, providers ['tushare_primary', 'tushare_super_sdk']): ['1.018']
+  to write: adj_factor 1.018 on 48 sessions, 2023-08-15 .. 2023-11-09
+dry run: nothing written (pass --apply to write)

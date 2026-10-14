@@ -20,7 +20,7 @@
 | | n8n `feishu-relay-edge-n8n`（`127.0.0.1:5678`）的 4 个 webhook 工作流 | `scripts/deploy-edge-relay-workflows.sh` | `scripts/verify-edge-relay-workflows.sh`（只读漂移比对） |
 | | `stock-reports-import` watchdog | `scripts/install-edge-import-watchdog.sh` | systemd 状态 |
 | | **已退役**：`quant-intraday-edge.service` 及其 timers | 不部署 | 必须保持 `inactive`/`disabled` |
-| **47 owner**（Longhu 主机 / lightServer1）`stockpeer@47.110.79.189 -p 3535`，密钥 `stockpeer_ed25519`，rootless Docker，compose 项目 `trading-hareness-peer` | `db-tunnel` | release 归档 + `scripts/shared-peer/activate-peer-release.sh` + compose | 容器健康 |
+| **47 owner**（Longhu 主机 / lightServer1）`stockpeer@118.178.133.37 -p 22`（2026-10-13 迁到这台；此前是 `47.110.79.189 -p 3535`，那台上的量化容器已停用，不要恢复），密钥 `stockpeer_ed25519`，rootless Docker，compose 项目 `trading-hareness-peer` | `db-tunnel` | release 归档 + `scripts/shared-peer/activate-peer-release.sh` + compose | 容器健康 |
 | | `quant-research`（`127.0.0.1:15682`，`QUANT_RUNTIME_PROFILE=intraday_edge`，唯一盘中写入者） | 同上，镜像在主机上用 wheelhouse 构建 | `/health` 的 `build.git_sha`；容器 profile |
 | | `quant-research-scheduler`（`127.0.0.1:15683`，`research`） | 同上，复用同一镜像 | `/health` 的 `build.git_sha` |
 | | systemd `--user`：`peer-session-guard-{heal,preopen}.timer`、`peer-daily-backfill.timer` | 从 release 目录安装单元文件 | `systemctl --user list-timers` |
@@ -55,7 +55,7 @@ owner 容器设置了 `QUANT_SKIP_MIGRATIONS=true`，服务启动时只检查几
 
   ```bash
   export RELAY_EDGE_SSH_KEY=~/.ssh/feishu_relay_edge_ed25519   # 47 edge root
-  export OWNER_PEER_SSH_KEY=~/.ssh/stockpeer_ed25519           # 47 owner stockpeer，端口 3535
+  export OWNER_PEER_SSH_KEY=~/.ssh/stockpeer_ed25519           # 47 owner stockpeer，端口 22
   ```
 
   脚本默认路径是 `/Users/papa/.ssh/...`，在其他机器上必须 export 上面两个变量。
@@ -92,7 +92,7 @@ scripts/release-sync-status.sh --sha origin/main | tee ~/release-sync-logs/$(dat
 ```bash
 E=root@47.114.113.152
 ssh -i "$RELAY_EDGE_SSH_KEY" $E 'readlink /opt/feishu-relay-edge/hotfix/current; cat /opt/feishu-relay-edge/hotfix/current/.base-git-sha'
-ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 \
+ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 \
   'ls -1 ~/.local/share/trading-hareness/releases/; ls ~/.local/share/trading-hareness/releases/*/trading_hareness/quant-service/migrations/versions/ 2>/dev/null | grep -E "_0(09[5-9]|1[0-9][0-9])_" | sort -u'
 ```
 
@@ -446,7 +446,7 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
    wheelhouse：如果 `quant-service/requirements.txt` 自 owner 上次发布以来没有变化（PR #2 没有改它），就直接复用 owner 上现有的 wheelhouse，在 owner 上打包：
 
    ```bash
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 \
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 \
      'tar -C ~ -chf /tmp/wheelhouse-current.tar wheelhouse && tar -tf /tmp/wheelhouse-current.tar | grep -c SHA256SUMS'
    ```
 
@@ -455,9 +455,9 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
 2. **上传并激活**。首次同步必须使用新版本里的激活脚本，因为旧版脚本不会保留 `intraday-secrets.env`：
 
    ```bash
-   O="-i $OWNER_PEER_SSH_KEY -P 3535"
-   scp $O "/tmp/trading_hareness-$X.tar" stockpeer@47.110.79.189:/tmp/
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 "set -euo pipefail
+   O="-i $OWNER_PEER_SSH_KEY -P 22"
+   scp $O "/tmp/trading_hareness-$X.tar" stockpeer@118.178.133.37:/tmp/
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 "set -euo pipefail
      tar -xOf /tmp/trading_hareness-$X.tar trading_hareness/scripts/shared-peer/activate-peer-release.sh > /tmp/activate-peer-release.sh
      RELEASE_ID='$L' bash /tmp/activate-peer-release.sh /tmp/trading_hareness-$X.tar /tmp/wheelhouse-current.tar
      test -s ~/trading_hareness/deploy/shared-peer/.env
@@ -471,7 +471,7 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
    `.env` 是指向 `~/.secrets/owner/.env.owner` 的软链接，必须写软链接背后的真实文件（`resolve()`），否则 `replace` 会把软链接换成普通文件，从此脱离集中凭据。整个重建期间持有守护锁，heal 定时器不会在中途重启容器；主服务 `--wait` 健康之后才启动 scheduler，二者同时启动会抢写同一批目录表：
 
    ```bash
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 "set -euo pipefail
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 "set -euo pipefail
      export XDG_RUNTIME_DIR=/run/user/\$(id -u) DOCKER_HOST=unix:///run/user/\$(id -u)/docker.sock
      LOCK=~/trading_hareness/scripts/shared-peer/release-lock.sh
      bash \$LOCK hold '$L' 3600
@@ -506,7 +506,7 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
 5. **核验**：
 
    ```bash
-   ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 'set -a; . ~/trading_hareness/deploy/shared-peer/intraday-secrets.env; set +a
+   ssh -i "$OWNER_PEER_SSH_KEY" -p 22 stockpeer@118.178.133.37 'set -a; . ~/trading_hareness/deploy/shared-peer/intraday-secrets.env; set +a
      ~/trading_hareness/scripts/peer-session-guard.sh preopen
      curl -fsS http://127.0.0.1:15683/api/v1/intraday/services/status | head -c 800; echo
      curl -fsS "http://127.0.0.1:15682/api/v1/research/trials?limit=3" | head -c 400'
@@ -527,18 +527,38 @@ scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> \
   --from-sha <active_sha> --apply
 ```
 
-脚本先比较两个 Git SHA 之间改动的每个路径，分三类：
+脚本先比较两个 Git SHA 之间改动的每个路径，分六类（规则在
+`scripts/shared-peer/classify-owner-paths.sh`，`scripts/release plan` 用的是同一份）：
 
-- **随本次发布**：`quant-service/app/*`、`entrypoint.py`、`run_server.py`、
-  `database_bootstrap.py`、`alembic.ini`。
-- **跳过**，这些路径不进入 owner 运行时：
+- **`runtime`，随本次发布**：`quant-service/app/*`、`entrypoint.py`、`run_server.py`、
+  `database_bootstrap.py`。
+- **`migration`，随本次发布，但先过库版本闸门**：改了代码的迁移文件、`alembic.ini`、
+  `quant-service/migrations/` 下的其他文件。迁移由对方在 Windows 工作站上执行，我们这一侧
+  的服务从不自己执行；闸门（`scripts/shared-peer/schema-gate.sh`，全量发布用的是同一个）
+  读对方服务报告的库版本：已到本次发布的 head 才继续，落后就拒绝并列出要先执行的迁移。
+- **`skip`，不进入 owner 运行时**：
   - `quant-service/tests/`、`docs/`、任何 `*.md`、`.github/`；
-  - `feishu-relay/` 和 `frontend/`，它们随 F6 的 edge overlay 发布；
-  - 发布工具：状态脚本、本脚本、edge 包装脚本、`scripts/windows/`、脚本测试；
+  - `feishu-relay/`、`frontend/`、`frontend-shared/`、`xhs-intel/`，它们在 edge 发布；
+  - 本机和其他主机的部署文件：根目录 `compose.yaml`、`launchd/`、`workflows/`、
+    `deploy/` 里列明的网关配置、服务器 compose 和已停用的 edge 运行时（`deploy/intraday-edge/`）；
+  - `scripts/` 下的脚本，按 `scripts/CATALOG.md` 的“Runs on”一列：`workstation…`、`owner-windows`、
+    `never run`、`no host runs it` 跳过；这几个和 `47owner…` 之外的登记值一律按 `unclassified` 拒绝；
   - 只改了注释或 docstring 的迁移文件，脚本会比对去掉 docstring 后的语法树。
-- **其余一律**输出 `full release required for: <path>` 并退出，包括：迁移代码、依赖、
-  Dockerfile、compose、`deploy/`，以及在 owner 上从发布检出运行的 guard 脚本等其他
-  `scripts/`。
+- **`full`，主机自己的目录树**：`deploy/shared-peer/`（compose、systemd 单元）和
+  目录里“Runs on”为 `47owner` 的脚本。输出 `full release required for: <path>` 并退出。
+  某个脚本的“Runs on”在两个提交之间跨过了 `47owner` 这条线（登记错了被改对，或反过来）时，即使
+  这次差异里没有这个脚本，它也按 `full` 输出：登记成别的主机期间，对它的改动都被跳过了，主机上
+  那份可能是旧的。核对过主机上那份就是目标提交的内容之后，把它的路径写进
+  `RELEASE_RELABELLED_CURRENT`（空格分隔）再发布。
+- **`tunnel-image`，隧道镜像的输入**：`deploy/shared-peer/Dockerfile.ssh-tunnel`、
+  `deploy/shared-peer/ssh-tunnel-entrypoint.sh`。纯代码发布拒绝。全量发布会把文件带到主机的目录树里，
+  但不重建隧道镜像、也不重建隧道容器：在跑的隧道继续用旧的入口脚本，要和对方约时间手工做。
+- **`image`，镜像的输入**：`quant-service/requirements.txt`、`quant-service/Dockerfile.peer`、
+  `.dockerignore`。输出 `image build required for: <path>` 并退出；只有全量发布会构建镜像。
+- **`unclassified`，没有规则提到的路径**：输出 `unclassified path: <path>` 并退出，什么都不
+  构建。处理办法是给它加一条规则（脚本：在 `scripts/generate_scripts_catalog.py` 里登记它在
+  哪台机器上运行），不是去做全量发布。2026-10-14 之前这类路径一律被当成“需要全量发布”，
+  而全量发布要在只有 894 MB 内存的主机上构建镜像。
 
 所以合并进 `main` 的普通 PR（代码连同测试和文档）可以直接走快速通道。如果两个 SHA
 之间没有 owner 运行时改动（例如只改了 edge），发布只会刷新记录的 SHA，这样
@@ -636,7 +656,8 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 
 1. 所有改动经 PR 合入 `main`。普通源码改动按 F5/F6 使用干净 Git SHA 的源码 overlay，
    overlay 可以长期作为常规发布模型运行，但**不允许**运行在 `-dirty` release 上；依赖、
-   镜像、compose、systemd 或迁移变化必须按完整发布流程切换到新的 immutable image 和/或数据库结构。
+   镜像、compose、systemd 变化必须按完整发布流程切换到新的 immutable image。迁移文件随 overlay 带上，
+   前提是对方的库已经到本次发布的 head（每次纯代码发布都查，没到就拒绝）。
 2. `scripts/release-sync-status.sh --sha origin/main`：记录回滚点，看清漂移。
 3. 有 hotfix 或未提交内容时，先做阶段 B。
 4. `X=origin/main`，推送 `edge-*` 标签，等镜像发布完成。
@@ -723,6 +744,7 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 | 2026-10-12 夜至 10-13 凌晨 | `dff8acee` → `b0bea637` → `857e4832` → `5e2d159a`（owner）；edge 中继与控制台源 `857e4832` / `5e2d159a` | `owner-full-20261012-20`、`owner-code-20261012-21`、`owner-code-20261013-01`、`owner-code-20261013-02`；edge 中继 `hotfix-20261012T162327Z-857e48320e2b-18399`；edge 控制台 `console-20261012T163536Z-5e2d159a1753` | edge 中继相对上一版 `c6ddf086` 只多了 `adapter/research-routes.mjs` 的两条读取路由；其他会话未提交的中继改动没有带上 | owner 全量发布的回滚点 `~/.local/state/owner-release/owner-full-20261012-20.rollback`（上一版 `owner-full-20261012-19`，`004e3f88`）；三次纯代码发布各保留上一版 overlay；alembic `20261010_ow0121` 不变；中继上一版 `hotfix-20261012T085004Z-c6ddf086bf1f-25695`；控制台上一版 `console-20261012T072415Z-e91a2d3414f4` | 四次 owner 发布后 `release-sync-status.sh` 的 owner 行全部 PASS，最后一次连同 edge 行 ALL CHECKS PASSED；`-20`：当日涨停榜落库 5 张、历史榜单补 9 个交易日、大面风险分从 2023-09-11 回算到 10-12，线上当日结果与研究逐只一致，回看接口留出段 8.5% 对 19.0%；`-21`：竞价处置表与大面风险分路由可访问，两个新指标在健康检查里为未到产出时点；`-01`：`?date=` 生效，回看 500 天 23 秒降到 7 秒；`-02`：在服务实际运行的 overlay 源码上读取，竞价池的上一交易日读数为 2026-10-12（46 只），池子 78 只。中继：新路由经 `:18300` 可访问，原有温度路由正常；控制台：`/research` 返回新构建，包里有“涨停风险分”页签、研究用途标注和两条路由 | • `-20`：通达信全市场快照并行采集（`tdx_all_a_shadow`）与涨停股次日大面风险分后端（决策 0016）。• `-21`：竞价池采集与 09:25 处置表（决策 0017），10-13 首次运行。• `-01`：大面风险分的日期查询修正、回看提速与“近期是否有效”判定，配套中继路由和控制台页面。• `-02`：修复 `limit_up_risk_runtime.daily` 返回窗口内最早读数而不是指定交易日的错误；该错误随 `-21` 上线，在首个交易时段之前发现并修复，否则竞价池会取到 2024 年的涨停股。• 同晚的手工数据修复（非代码发布）：9 月 21 日至 10 月 12 日补日线 818 条、复权因子 814 个、涨跌停价 811 条，老师复盘包以新编号重导，脚本与日志在 `state/research/owner_repairs_20261012/`。 |
 | 2026-10-13 午间 | `29f3ffdf`（owner）；量化控制台源 `ac15bcde` | `owner-code-20261013-03`；edge 控制台 `console-20261013T031958Z-ac15bcdebbc8` | edge 中继没有改动，仍是 `hotfix-20261012T162327Z-857e48320e2b-18399`；控制台是独立单元，11:20 先行发布 | 上一版 overlay `owner-code-20261013-02`（`5e2d159a`）保留；alembic `20261010_ow0121` 不变；控制台上一版 `console-20261012T163536Z-5e2d159a1753` | `release-sync-status.sh --owner-source-sha 29f3ffdf --edge-source-sha 857e4832`：ALL CHECKS PASSED；主服务与 scheduler 两个容器实际导入的源码目录都是 `owner-code-20261013-03`，盘后阶段表里 `daily_close_completion` 位于 `full_market_daily` 之后、`limit_performance_lists` 之前；健康检查出现 `data.daily_bars_complete`（未到产出时点）；经 `:18300` 的雷达、大面风险分路由返回 200（重启后第一次请求曾返回一次 503）；控制台包里有新图的标题与图例。首次盘后运行在 10-13 晚核对 | • `-03`：日线收盘补全（决策 0018）——全市场日线之后按名册逐只补缺失日线、涨跌停价和复权因子，结果分类入账，新增健康检查。• 控制台：盘面雷达的“主动买/卖·主力净额”图重画（结论数字、四条线、9:25 与 9:30 标记、悬停说明），大面风险分页的日度请求改成两条字面路径。• 发布后发现并已在 main 修复、尚未发布：两个回看接口按日历取“最近 N 个交易日”时没有以当天为上界，把日历里未来的交易日也算了进去 |
 | 2026-10-13 傍晚 | `26170231`（owner） | `owner-code-20261013-04`（仅 owner，17:41） | 未发布 edge：中继已由另一条工作线在当天发到 `hotfix-20261013T070041Z-49b44b1da5e4-5527`（源 `49b44b1d`），`release plan` 显示 edge 相对它没有待发布改动；控制台仍是 `console-20261013T031958Z-ac15bcdebbc8` | 上一版 overlay `owner-code-20261013-03`（`29f3ffdf`）保留；alembic `20261010_ow0121` 不变 | `release-sync-status.sh --owner-source-sha 26170231 --edge-source-sha 49b44b1d`：ALL CHECKS PASSED；主服务与 scheduler 两个容器实际导入的源码目录都是 `owner-code-20261013-04`，其中 `intraday_schedule.seconds_until_slot` 和目录里的 `SESSION_AGREEMENT_RULES` 可用；通达信当日汇总命令在生产上即刻返回（当天 238 份并行快照；比对行都是发布前写的、没有数据时间，所以可判分钟为 0）；回看接口 `track?days=60` 返回 59 天（修复前是 1 天）。两条采集循环只在交易时段运行，新节拍的第一次真实运行在 10-14 09:15，届时核对 | • 通达信补主行情快照的第一步（工作线 W008，方案 P1–P4）：主行情与通达信两条全市场采集固定在每分钟第 50、52 秒启动（原先“采完再等 60 秒”会漂移漏分钟）；通达信快照的完整性门槛；比对按数据时间记录；当日汇总不再读快照正文并报告当天是否达标。不改任何绑定的状态或可用于决策的标记。• 回看接口按日历取“最近 N 个交易日”时以当天为上界（`7bb29e71`）。• 当天 15:07–17:00 中转服务器不响应（原因未知，重启后恢复），发布在恢复之后进行；edge 读 owner 的路由在发布时仍返回 `fetch failed`，与本次发布无关，待 edge 一侧重连 |
+| 2026-10-14 凌晨 | `0a57d7fb`（owner） | `owner-code-20261013-06`（仅 owner，00:43，用户执行） | 未发布 edge：中继由另一条工作线发布，当时是 `hotfix-20261013T162249Z-83b5d49e0b70-12319`（源 `83b5d49e`） | 上一版 overlay `owner-code-20261013-05`（`e8cb8dbf`）保留；纯代码发布不构建镜像（镜像 ID 这次没有另行读取）；alembic `20261010_ow0121` 不变 | `release-sync-status.sh --owner-source-sha 0a57d7fb --edge-source-sha 83b5d49e`：ALL CHECKS PASSED（输出 `docs/work/probes/2026-10-14-release-status-06.out.txt`）；主服务与 scheduler 都报告 `owner-code-20261013-06`；发布后 45 秒内晚间循环补跑了 10 月 13 日的五个新阶段和 10 月 12 日的两个补做阶段，回执全部 completed，日志里没有“left open”；10 月 12、13 日的情绪温度、宽基 ETF 放量、金银指读数已存（`docs/work/probes/2026-10-14-peer-evening-receipts.out.txt`）；发布后主机可用内存 336 MB、交换区已用 448 MB，scheduler 容器 27 MiB、主服务 173 MiB | • 我们这一侧每晚要的产出由自己的晚间循环启动（工作线 W011，决定 0021）：涨停榜、涨停股次日大面风险分、情绪温度、宽基 ETF 放量、金银指，排在老师复盘的五个阶段之后；回执只在产出存进库里时关闭；每轮在当天阶段之后补做前一交易日的榜单和风险分。运行时文件 3 个。• 没看到的：第一次真正的当晚自动运行（10 月 14 日 16:15 之后）；16:20 左右的风险分读数与 19:00 后重算是否一致 |
 | 2026-10-13 夜 | `e8cb8dbf`（owner） | `owner-code-20261013-05`（仅 owner，22:38；迁到新服务器 `118.178.133.37` 后的第一次发布） | 未发布 edge：中继当晚由另一条工作线两次热更新，发布后是 `hotfix-20261013T142445Z-3c78e23ec2e8-28449`（源 `3c78e23e`） | 上一版 overlay `owner-code-20261013-04`（`26170231`）保留在新服务器上；镜像仍是 `58da6ff8766c`，没有重建；alembic `20261010_ow0121` 不变 | `release-sync-status.sh --owner-source-sha e8cb8dbf --edge-source-sha 3c78e23e`：ALL CHECKS PASSED；主服务与 scheduler 两个容器实际导入的源码目录都是 `owner-code-20261013-05`，目录的 `AGREEMENT_KEYS` 里有 `min_share`；发布后主机可用内存 323 MB、交换区已用 332 MB，四个容器 healthy；发布后 `limit-up-risk/daily` 仍返回当晚手工补的 10 月 13 日读数（67 行） | • 通达信补主行情快照的第二步（工作线 W008，方案 B3）：数据源目录里比对项可以按“达标占比”判定，通达信全 A 快照对主源的比对声明（价格 0.5% 以内占 95%）；通达信并行采集的当日汇总写明自己量的是哪个数据源和能力。不改任何绑定的状态或可用于决策的标记。运行时文件 2 个。• 发布工具的默认目标改为新服务器（`4bb8c7ff`）；两个手工脚本的默认地址因会把发布判成全量而撤回（`e8cb8dbf`）。• 发布输出里有两条 compose 警告（两个数据卷“已存在但不是 compose 建的”），是迁移时卷被手工恢复所致，不影响运行 |
 | 2026-10-13 14:02 | edge 中继源 `ea3d5865` | edge 中继 `hotfix-20261013T060210Z-ea3d5865b40e-16279`（仅 edge 中继） | owner 和 edge 控制台没有动；中继相对上一版 `857e4832` 只多这一个提交：看板里登记新来源标签、配置新目标群的 webhook（决定 0019，工作线 W009） | 上一版 overlay `hotfix-20261012T162327Z-857e48320e2b-18399` 保留，回滚用 `hotfix-feishu-relay-edge.sh --rollback <该编号> --apply`；启动时新建表 `feishu_group_relay_webhook_targets`（`CREATE TABLE IF NOT EXISTS`，旧版代码不读它） | `release-sync-status.sh --skip-owner --edge-source-sha ea3d5865` ALL CHECKS PASSED；adapter 与 bridge 的 release 都是新编号，WebSocket 14:03:59 已重连、监听 24 个会话、10 条启用路由全部 healthy；新接口的五种拒绝情形按预期返回且不入库；看板构建里有新增的表单文字。输出存 `docs/work/probes/2026-10-13-feishu-relay-w009-live-check.out.txt`。没有在线上真的登记一个新标签或新增一个目标群 |
 | 2026-10-13 15:00 | edge 中继源 `49b44b1d` | edge 中继 `hotfix-20261013T070041Z-49b44b1da5e4-5527`（仅 edge 中继） | owner 和 edge 控制台没有动；中继相对上一版 `ea3d5865` 只多这一个提交：目标群的自定义机器人由中继用账号自己的会话创建（决定 0020，工作线 W009） | 上一版 overlay `hotfix-20261013T060210Z-ea3d5865b40e-16279` 保留；启动时给 `feishu_group_relay_webhook_targets` 加两列 `bot_id`、`managed`（`ADD COLUMN IF NOT EXISTS`，上一版代码不读它们，回滚不受影响） | `release-sync-status.sh --skip-owner --edge-source-sha 49b44b1d` ALL CHECKS PASSED；发布前在 edge 上跑完整 bridge 测试 174 项通过；15:02 经 adapter 接口在运维通知群自动建机器人并登记目标群、重复调用沿用同一机器人、删除时机器人一并移除，群里机器人列表恢复原样；两边日志里没有 webhook 地址。输出存 `docs/work/probes/2026-10-13-feishu-chat-bot-trial.out.txt` |
@@ -737,3 +759,5 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 | 2026-10-13 22:55 | edge 中继源 `53ccf010` | edge 中继 `hotfix-20261013T145534Z-53ccf010c296-27015`（仅 edge 中继） | W010 会员期限：审查、预览、“再提醒一次”的语句在 PostgreSQL 上报 `timestamp with time zone < interval`，上线以来发不出任何提醒；参数加类型后可运行 | 上一版 overlay 保留；没有新表 | 状态脚本 ALL CHECKS PASSED；anqiang 群预览回 200、列出 3 人、不发送；本地临时 PostgreSQL 16 上模块 16 步全过（`docs/work/probes/2026-10-13-memberships-pg-probe.*`）；真实的一次发送未在线上验 |
 | 2026-10-13 23:28 | edge 中继源 `a4680889` | edge 中继 `hotfix-20261013T152842Z-a46808893420-19935`（仅 edge 中继） | W010：“目标群”页列出本账号是群主的所有群（不只是转发目标）；会员行改按群的数字编号存，旧行第一次用到时搬过去；没有机器人的群可管成员和期限，发提醒前要先建机器人 | 上一版 overlay 保留；没有新表，`feishu_group_relay_target_groups` 多了以群编号为键的行，会员两张表的键从目标编号变为群编号（回退到旧代码会读不到已搬的行） | 状态脚本 ALL CHECKS PASSED；识别后 13 行（5 个目标＋8 个仅管理）；anqiang 群 22 行会员发布前后逐字段一致；擒龙群成员和会员接口可用；本地临时 PostgreSQL 16 上 21 步全过；没在真浏览器里核对 |
 | 2026-10-13 23:51 | edge 中继源 `49253195` | edge 中继 `hotfix-20261013T155137Z-49253195dac9-7689`（仅 edge 中继） | W010：群可以借用已有的自定义机器人作发送出口（决定 0022）——bridge 多两个只读接口，adapter 存地址时不发测试消息、不接管机器人；看板多“用已有机器人” | 上一版 overlay 保留；没有新表 | 状态脚本 ALL CHECKS PASSED；bridge 全套在 edge 上 221 项通过；擒龙群接入 itougu 监听在用的机器人：回 200、回应里没有地址、会员 10 行前后一致、itougu 监听仍 healthy；经它真的发一条提醒未做 |
+| 2026-10-14 00:13 | edge 中继源 `34ff843b` | edge 中继 `hotfix-20261013T161335Z-34ff843b4f50-21014`（仅 edge 中继） | W010：会员表显示每个成员的备注名，编辑框里给出按备注名读出的日期和期限供点选；可以指定到期日 | 上一版 overlay 保留；`feishu_group_relay_memberships` 启动时加两列 `alias`、`expiry_fixed`（`ADD COLUMN IF NOT EXISTS`，回退到旧代码不受影响） | 状态脚本 ALL CHECKS PASSED；bridge 全套在 edge 上 222 项；anqiang 群和擒龙群同步后备注名入库（22/22、9/10），日期和备注栏前后一致；本地临时 PostgreSQL 16 上从旧表结构起步 11 步全过；没在真浏览器里核对 |
+| 2026-10-14 00:22 | edge 中继源 `83b5d49e` | edge 中继 `hotfix-20261013T162249Z-83b5d49e0b70-12319`（仅 edge 中继） | W010：保存会员时可一并改飞书里的备注名（bridge 多一个写备注名的接口；编辑框里“按下面的日期改写”） | 上一版 overlay 保留；没有新表新列 | 状态脚本 ALL CHECKS PASSED；bridge 全套在 edge 上 224 项；写备注名的命令由用户当天的探测证明可用；经线上接口的第一次真实写入留给用户在看板上做；没在真浏览器里核对 |
