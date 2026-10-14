@@ -266,6 +266,80 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
             asyncio.run(run_auction_pool_capture_loop(runtime))
         self.assertEqual(clock.sleeps[-1], 23 * 3600 + 44 * 60)
 
+    def _loop_until_next_day(self, runtime, clock):
+        """Run the outer loop once through a session; it stops at the sleep to the next 09:14."""
+        class StopLoop(Exception):
+            pass
+
+        async def sleep(seconds):
+            clock.sleeps.append(seconds)
+            if seconds > 3600:
+                raise StopLoop
+            clock.current += timedelta(seconds=seconds)
+
+        object.__setattr__(runtime.deps, "sleep", sleep)
+        with self.assertRaises(StopLoop):
+            asyncio.run(run_auction_pool_capture_loop(runtime))
+
+    def test_outer_loop_retries_a_late_table_the_provider_did_not_give_final(self):
+        scored = [{"symbol": "000001.SZ", "name": "A", "boards": 2, "risk_rank": 10.0, "sealed_from_open": False, "previous_close": 10.0}]
+        reads = []
+
+        async def fetch(symbols, _wait):
+            reads.append(symbols)
+            if len(reads) == 1:
+                return {"auction_phase": "closed", "data_status": "pending", "item": []}
+            return {"auction_phase": "closed", "data_status": "final", "item": [
+                {"thscode": symbol, "open_price": 10.5, "auction_price": 10.5, "auction_amount": 5e6, "auction_volume": 4762,
+                 "auction_unmatched": 100, "pre_close_price": 10.0, "last_price": 10.9} for symbol in symbols.split(",")]}
+
+        runtime, clock, _persisted, _calls, _curves, _bids = self.dependencies(
+            current=time(9, 26), scored=scored, table_stored=False, fetch=fetch)
+        stored = AsyncMock()
+        runtime._persist_table = stored
+        self._loop_until_next_day(runtime, clock)
+        self.assertEqual(len(reads), 2, "one read at the start, one after the minute")
+        self.assertEqual(stored.await_count, 1)
+        self.assertIn(60, clock.sleeps)
+        self.assertGreater(clock.sleeps[-1], 3600, "then the loop sleeps to the next session")
+
+    def test_late_table_retries_stop_at_the_limit_and_at_the_end_of_the_morning(self):
+        from app import auction_pool_runtime
+
+        scored = [{"symbol": "000001.SZ", "name": "A", "boards": 2, "risk_rank": 10.0, "sealed_from_open": False, "previous_close": 10.0}]
+        reads = []
+
+        async def pending(symbols, _wait):
+            reads.append(symbols)
+            return {"auction_phase": "closed", "data_status": "pending", "item": []}
+
+        runtime, clock, _persisted, _calls, _curves, _bids = self.dependencies(
+            current=time(9, 26), scored=scored, table_stored=False, fetch=pending)
+        self._loop_until_next_day(runtime, clock)
+        self.assertEqual(len(reads), 1 + auction_pool_runtime.LATE_TABLE_RETRY_LIMIT)
+
+        reads.clear()
+        runtime, clock, _persisted, _calls, _curves, _bids = self.dependencies(
+            current=time(11, 29, 30), scored=scored, table_stored=False, fetch=pending)
+        self._loop_until_next_day(runtime, clock)
+        self.assertEqual(len(reads), 1, "a retry a minute later would be past 11:30: none is made")
+
+    def test_outer_loop_waits_for_a_pool_that_is_built_after_the_session_opens(self):
+        runtime, clock, _persisted, _fuyao, _curves, _bids = self.dependencies()
+        clock.current = datetime.combine(DAY, time(9, 20), tzinfo=CN)
+        capture = AsyncMock(side_effect=[{"status": "no_pool"}, {"status": "completed"}])
+        runtime.capture_session = capture
+        self._loop_until_next_day(runtime, clock)
+        self.assertEqual(capture.await_count, 2)
+        self.assertEqual(clock.sleeps[0], 30)
+
+        clock.current = datetime.combine(DAY, time(9, 31), tzinfo=CN)
+        clock.sleeps.clear()
+        capture = AsyncMock(return_value={"status": "no_pool"})
+        runtime.capture_session = capture
+        self._loop_until_next_day(runtime, clock)
+        self.assertEqual(capture.await_count, 1, "after 09:30 an empty pool is not retried")
+
 
 class AuctionTrackCalendarTest(unittest.TestCase):
     def test_track_counts_sessions_back_from_today(self):

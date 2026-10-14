@@ -13,8 +13,11 @@ from .automation_run_repository import start_run, finish_run, fail_run
 from .point_in_time import exchange_day_end
 
 CN = ZoneInfo("Asia/Shanghai")
-METHODOLOGY_VERSION = "analyst-market-review-v1"
+METHODOLOGY_VERSION = "analyst-market-review-v2"
 MIN_REGRESSION_DAYS = 8
+#: A week holds at most five sessions, below the gate above, so the weekly report's own seven days could never
+#: fit.  The report keeps showing those seven days; its regression reads the four weeks that end with them.
+REGRESSION_LOOKBACK_DAYS = 27
 
 
 def ordinary_least_squares(rows: list[dict[str, Any]], x_key: str, y_key: str) -> dict[str, Any]:
@@ -48,6 +51,10 @@ def _period(cadence: str, as_of: date) -> tuple[date, date]:
     # The report is generated at Friday close; use the preceding seven calendar
     # days so holiday weeks remain visible rather than inventing observations.
     return as_of - timedelta(days=6), as_of
+
+
+def _regression_window(as_of: date) -> tuple[date, date]:
+    return as_of - timedelta(days=REGRESSION_LOOKBACK_DAYS), as_of
 
 
 def _market_points(database: Any, start: date, end: date, evaluation: dict[str, Any]) -> list[dict[str, Any]]:
@@ -90,12 +97,17 @@ def build_analyst_market_review(database: Any, cadence: str, as_of_date: date | 
     evaluation = analyst_market_evaluation(database, start, end)
     points = _market_points(database, start, end, evaluation)
     regressions = []
+    regression_window = None
     if cadence == "weekly":
+        fit_start, fit_end = _regression_window(as_of)
+        fit_points = _market_points(database, fit_start, fit_end, analyst_market_evaluation(database, fit_start, fit_end))
+        regression_window = {"start_date": str(fit_start), "end_date": str(fit_end)}
         for key in ("net_direction_score", "positive_claims", "negative_claims", "concept_positive_ratio"):
-            regressions.append(ordinary_least_squares(points, key, "market_mean_change_pct"))
+            regressions.append(ordinary_least_squares(fit_points, key, "market_mean_change_pct"))
     status = "ready" if points and (cadence == "daily" or any(r.get("status") == "ready" for r in regressions)) else "insufficient_history"
     summary = {"cadence": cadence, "period": {"start_date": str(start), "end_date": str(end)},
                "daily_points": points, "evaluation": evaluation, "regressions": regressions,
+               "regression_window": regression_window,
                "governance": {"live_effect": "none", "replay_only_author_actions": True,
                               "notice": "描述性研究；回归样本不足时不拟合、不调实时阈值。"},
                "generated_at": datetime.now(CN).isoformat()}

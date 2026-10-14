@@ -35,6 +35,15 @@ FUYAO_REQUEST_TIMEOUT_SECONDS = 4
 # The order book is evidence of the open. Taken later than this after 09:30 it is some other moment's book, and
 # storing it under 09:30 would say otherwise (2026-10-14: a restart at 11:04 stored 93 books of 11:08 that way).
 BID_LATE_AFTER_SECONDS = 300
+#: A late table that the provider did not give final (or that failed) is asked for again every minute; the final
+#: auction stays served all day, so the bound is the loop's own morning window and a count.
+LATE_TABLE_RETRYABLE = frozenset({"failed", "not_final", "database_busy"})
+LATE_TABLE_RETRY_SECONDS = 60
+LATE_TABLE_RETRY_LIMIT = 30
+#: The pool is built the evening before; one made after 09:14 (by hand) is still worth the open.
+NO_POOL_RETRY_SECONDS = 30
+NO_POOL_RETRY_UNTIL = time(9, 30)
+SESSION_END = time(11, 30)
 
 
 def _database_busy(error: BaseException) -> dict[str, Any]:
@@ -218,6 +227,22 @@ class AuctionPoolCaptureRuntime:
             next_call = max(next_call, self.deps.now().astimezone(CN_TZ)) + timedelta(seconds=1)
         return counts
 
+    async def retry_late_table(self, trade_date: date) -> str:
+        """Ask again for the 09:25 table that ``capture_session`` could not store (a failed or not-final read)."""
+        try:
+            pool = await self.deps.run_database(
+                self.deps.read_pool, self.deps.database, trade_date, timeout_seconds=SESSION_GATE_TIMEOUT_SECONDS,
+            )
+            scored_rows = await self.deps.run_database(
+                self.deps.read_scored_rows, self.deps.database, trade_date, timeout_seconds=SESSION_GATE_TIMEOUT_SECONDS,
+            )
+        except DATABASE_UNAVAILABLE:
+            return "database_busy"
+        scored_pool = [row for row in scored_rows if str(row["symbol"]) in pool]
+        if not pool or not scored_pool:
+            return "no_pool"
+        return await self._late_table(trade_date, pool, scored_pool)
+
     async def capture_session(self, session_date: date | None = None) -> dict[str, Any]:
         observed = self.deps.now().astimezone(CN_TZ)
         trade_date = session_date or observed.date()
@@ -293,12 +318,25 @@ async def run_auction_pool_capture_loop(
         now = runtime.deps.now().astimezone(CN_TZ)
         if now.weekday() < 5 and time(9, 14) <= now.time() <= time(11, 30):
             result = await runtime.capture_session(now.date())
-            while result.get("status") == "database_busy":
+            while True:
                 retry_at = runtime.deps.now().astimezone(CN_TZ)
-                if retry_at.time() > time(11, 30):
+                if result.get("status") == "database_busy" and retry_at.time() <= SESSION_END:
+                    wait = 5
+                elif result.get("status") == "no_pool" and retry_at.time() <= NO_POOL_RETRY_UNTIL:
+                    wait = NO_POOL_RETRY_SECONDS
+                else:
                     break
-                await runtime.deps.sleep(5)
+                await runtime.deps.sleep(wait)
                 result = await runtime.capture_session(retry_at.date())
+            attempts = 0
+            while result.get("late_table") in LATE_TABLE_RETRYABLE and attempts < LATE_TABLE_RETRY_LIMIT:
+                retry_at = runtime.deps.now().astimezone(CN_TZ) + timedelta(seconds=LATE_TABLE_RETRY_SECONDS)
+                if retry_at.time() > SESSION_END:
+                    break
+                await runtime.deps.sleep(LATE_TABLE_RETRY_SECONDS)
+                attempts += 1
+                result = {**result, "late_table": await runtime.retry_late_table(retry_at.date())}
+                log(f"auction_pool_capture_retry late_table={result['late_table']} attempt={attempts}")
             log("auction_pool_capture " + " ".join(f"{key}={result.get(key, 0)}" for key in (
                 "scheduled", "stored", "rate_limited", "failed", "curves", "bids", "late_table",
             )))
