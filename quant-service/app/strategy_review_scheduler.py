@@ -17,6 +17,12 @@ from .scheduler_error_detail import scheduler_error_detail
 
 
 REVIEW_CHECKPOINTS: tuple[tuple[str, time], ...] = (("midday", time(11, 31)), ("close", time(15, 5)))
+#: A close checkpoint missed in its two minutes (the process was down, or every call failed) is built in the evening.
+#: It rests on persisted data only, and the durable receipt keeps it from being built twice.  The midday checkpoint
+#: is a point in time and is not caught up.
+CLOSE_CATCH_UP_FROM = time(15, 10)
+CLOSE_CATCH_UP_UNTIL = time(22, 0)
+CATCH_UP_RETRY_SECONDS = 600
 
 
 @dataclass(frozen=True)
@@ -39,6 +45,7 @@ class StrategyReviewSchedulerDependencies:
 async def strategy_review_scheduler_step(
     completed: set[tuple[date, str]], dependencies: StrategyReviewSchedulerDependencies,
     *, local: datetime | None = None,
+    attempts: dict[tuple[date, str], datetime] | None = None,
 ) -> tuple[str, ...]:
     """Run eligible checkpoint(s) once and return completed session names.
 
@@ -54,7 +61,10 @@ async def strategy_review_scheduler_step(
     for session, checkpoint in REVIEW_CHECKPOINTS:
         key = (exchange_date, session)
         checkpoint_end = (datetime.combine(exchange_date, checkpoint) + timedelta(minutes=2)).time()
-        if key in completed or not (checkpoint <= local.time() < checkpoint_end):
+        in_window = checkpoint <= local.time() < checkpoint_end
+        catching_up = (session == "close" and CLOSE_CATCH_UP_FROM <= local.time() < CLOSE_CATCH_UP_UNTIL
+                       and dependencies.completed_for_checkpoint is not None)
+        if key in completed or not (in_window or catching_up):
             continue
         # A process-local set only prevents repeats while this instance lives.
         # On restart, reuse the persisted completed review for the exact
@@ -65,6 +75,11 @@ async def strategy_review_scheduler_step(
             completed.add(key)
             completed_now.append(session)
             continue
+        if catching_up and not in_window and attempts is not None:
+            previous = attempts.get(key)
+            if previous is not None and (local - previous).total_seconds() < CATCH_UP_RETRY_SECONDS:
+                continue
+            attempts[key] = local
         try:
             if session == "close":
                 await dependencies.sync_index_context(exchange_date)
@@ -96,8 +111,9 @@ async def strategy_review_scheduler_step(
 async def strategy_review_scheduler(dependencies: StrategyReviewSchedulerDependencies) -> None:
     """Run the point-in-time midday/close review scheduler forever."""
     completed: set[tuple[date, str]] = set()
+    attempts: dict[tuple[date, str], datetime] = {}
     while True:
-        await strategy_review_scheduler_step(completed, dependencies)
+        await strategy_review_scheduler_step(completed, dependencies, attempts=attempts)
         await dependencies.sleep(15)
 
 

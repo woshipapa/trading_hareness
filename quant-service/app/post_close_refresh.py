@@ -72,6 +72,10 @@ async def record_stage_with_receipt(
         raise
 
     status = result.get("status") if isinstance(result, dict) else "completed"
+    if status == "skipped" and result.get("receipt") == "open":
+        # A stage that was switched off for now, not finished: the next pass asks it again, so turning the
+        # switch on later the same evening still runs it.  Its caller keeps seeing ``skipped``.
+        status = "blocked"
     if status not in {"completed", "partial", "blocked", "failed"}:
         status = "completed"
     await run_database_blocking(

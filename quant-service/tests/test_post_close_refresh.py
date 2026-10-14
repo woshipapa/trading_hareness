@@ -388,6 +388,42 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(called)
         self.assertTrue(result["resumed_from_receipt"])
 
+    async def test_a_skipped_stage_keeps_its_receipt_open_only_when_it_asks_to(self):
+        from unittest.mock import patch
+
+        class Result:
+            def fetchone(self):
+                return {"run_id": "receipt-2", "status": "running", "output_summary": {}}
+
+        class Connection:
+            def execute(self, *_args, **_kwargs):
+                return Result()
+
+        class Database:
+            def transaction(self):
+                class Context:
+                    def __enter__(self): return Connection()
+                    def __exit__(self, *_args): return False
+                return Context()
+
+        async def run_db(action, *args, **_kwargs):
+            result = action(*args)
+            return await result if hasattr(result, "__await__") else result
+
+        for outcome, expected in (({"status": "skipped", "reason": "disabled"}, "completed"),
+                                  ({"status": "skipped", "reason": "disabled", "receipt": "open"}, "blocked")):
+            finished = []
+            with self.subTest(outcome=outcome), patch(
+                "app.post_close_refresh._finish_stage_receipt",
+                side_effect=lambda _db, _run_id, status, _result: finished.append(status),
+            ):
+                result = await record_stage_with_receipt(
+                    "teacher_review_roll", date(2026, 8, 21), lambda outcome=outcome: dict(outcome), db=Database(),
+                    run_database_blocking=run_db, safe_error_detail=lambda value, _limit: value,
+                )
+                self.assertEqual(result["status"], "skipped", "the caller still sees the stage's own word")
+                self.assertEqual(finished, [expected])
+
     async def test_a_stage_cancelled_by_its_budget_leaves_a_failed_receipt_not_a_running_one(self):
         import asyncio
         from unittest.mock import patch

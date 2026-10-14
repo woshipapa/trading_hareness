@@ -318,6 +318,17 @@ class _Series:
         }
 
 
+#: A ``supports`` or ``against`` needs the Benjamini-Hochberg q of the primary result under this: with dozens of
+#: registered tactics a bare ``|t| >= 2`` turns up by chance in one or two of them.
+LABEL_MAX_Q = 0.10
+
+
+def _gate_label(label: str, q_value: float | None) -> str:
+    if label in ("supports", "against") and (q_value is None or q_value > LABEL_MAX_Q):
+        return "undecided"
+    return label
+
+
 def _label(record: Mapping[str, Any], expects: int) -> str:
     if record["days_with_picks"] < 20 or record["picks"] < 60:
         return "collecting"
@@ -489,7 +500,7 @@ class History:
         q_values = bh_q_values(p_values)
         for tactic in self.tactics:
             primary = records[tactic.key]["outcomes"][tactic.primary]["forward"]
-            records[tactic.key]["label"] = _label(primary, tactic.expects)
+            records[tactic.key]["label"] = _gate_label(_label(primary, tactic.expects), q_values[tactic.key])
             records[tactic.key]["q"] = q_values[tactic.key]
         return json_safe(records)
 

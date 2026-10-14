@@ -121,7 +121,9 @@ def open_stages(result: Mapping[str, Any]) -> str:
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-TEACHER_DISABLED = {"status": "skipped", "reason": "teacher review disabled", "research_only": True}
+#: ``receipt: open``: the switch can be turned on later the same evening, so the stage's receipt stays open.
+TEACHER_DISABLED = {"status": "skipped", "reason": "teacher review disabled", "research_only": True,
+                    "receipt": "open"}
 
 
 @dataclass(frozen=True)

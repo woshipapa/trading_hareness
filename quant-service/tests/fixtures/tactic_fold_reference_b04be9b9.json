@@ -2054,7 +2054,7 @@
     "positive_share": 0.605263157895,
     "t": 2.172766169342
    },
-   "label": "supports",
+   "label": "undecided",
    "q": 0.527549028003,
    "recent": {
     "days_with_picks": 60,
@@ -2116,7 +2116,7 @@
     "positive_share": 0.605263157895,
     "t": 2.203092211314
    },
-   "label": "against",
+   "label": "undecided",
    "q": 0.527549028003,
    "recent": {
     "days_with_picks": 60,
@@ -2240,7 +2240,7 @@
     "positive_share": 0.373333333333,
     "t": -3.156496830039
    },
-   "label": "against",
+   "label": "undecided",
    "q": 0.100596272486,
    "recent": {
     "days_with_picks": 60,
@@ -2457,7 +2457,7 @@
     "positive_share": 0.407894736842,
     "t": -2.125240445334
    },
-   "label": "supports",
+   "label": "undecided",
    "q": 0.527549028003,
    "recent": {
     "days_with_picks": 60,

@@ -158,6 +158,17 @@ class TacticTrialTests(unittest.TestCase):
         expected_q = bh_q_values({"trial": math.erfc(abs(forward["t"]) / math.sqrt(2))})["trial"]
         self.assertAlmostEqual(records["trial"]["q"], expected_q)
 
+    def test_a_label_of_support_or_against_needs_a_q_below_the_gate(self):
+        from app.tactic_trials import LABEL_MAX_Q, _gate_label
+
+        for label, q_value, expected in (
+            ("supports", 0.01, "supports"), ("against", LABEL_MAX_Q, "against"),
+            ("supports", 0.35, "undecided"), ("against", 0.9, "undecided"), ("supports", None, "undecided"),
+            ("collecting", None, "collecting"), ("undecided", 0.9, "undecided"),
+        ):
+            with self.subTest(label=label, q=q_value):
+                self.assertEqual(_gate_label(label, q_value), expected)
+
     def test_switch_records_and_pair_minimum(self):
         days = []
         for index in range(20):
@@ -205,7 +216,11 @@ class TacticTrialTests(unittest.TestCase):
         json.dumps(result)
 
     def test_the_fold_gives_what_the_computation_over_the_full_history_gave(self):
-        """The reference was computed by the code before the fold (commit b04be9b9), on the same days."""
+        """The reference was computed by the code before the fold (commit b04be9b9), on the same days.
+
+        Its four ``supports``/``against`` labels (q 0.10 to 0.53) were set to ``undecided`` when the label began to
+        need a q under ``LABEL_MAX_Q`` (B066); nothing else in the file was touched.
+        """
         reference = json.loads(REFERENCE.read_text(encoding="utf-8"))
         days = settled_days()
         self.assertEqual(len(days), reference["days"])
