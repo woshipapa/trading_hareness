@@ -4,7 +4,7 @@
 > in that file (owner component and host). Tests (`test_*.py`, `*.test.mjs`) and the probe data under
 > `scripts/data/` are not listed.
 
-## release (20)
+## release (22)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -22,6 +22,8 @@
 | `shared-peer/classify-owner-paths.sh` | quant-research | workstation | Classify what changed between two commits for the 47owner peer runtime. |
 | `shared-peer/deploy-code-only.sh` | quant-research | workstation | The operator's checkout of the release tooling, resolved before any cd. |
 | `shared-peer/deploy-full-release.sh` | quant-research | workstation | Full owner release: new checkout, new image, then the main service before the scheduler. |
+| `shared-peer/owner-host-switch.sh` | quant-research | workstation | Move the owner relay host: what the new host must have before the switch, and the copy that gets it there |
+| `shared-peer/owner-host.sh` | quant-research | workstation | The owner relay host, in one place. Sourced by every tool that reaches it: |
 | `shared-peer/package-peer-release.sh` | quant-research | workstation | Build the peer source archive from the checkout tree, not a short allow-list |
 | `shared-peer/schema-gate.sh` | quant-research | workstation | The schema gate of an owner release. |
 | `verify-release-provenance.mjs` | platform | workstation |  |

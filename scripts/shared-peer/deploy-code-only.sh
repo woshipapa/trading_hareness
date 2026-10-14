@@ -75,9 +75,10 @@ fi
 # The switch recreates quant-research and its scheduler (config/release-windows.json).
 python3 "$tool_root/scripts/release_window.py" check owner-quant-research owner-scheduler || exit $?
 
-owner_host="${OWNER_PEER_HOST:-stockpeer@118.178.133.37}"
-owner_port="${OWNER_PEER_PORT:-22}"
-owner_key="${OWNER_PEER_SSH_KEY:-$HOME/.ssh/stockpeer_ed25519}"
+. "$tool_root/scripts/shared-peer/owner-host.sh"
+owner_host="$OWNER_PEER_HOST"
+owner_port="$OWNER_PEER_PORT"
+owner_key="$OWNER_PEER_SSH_KEY"
 compose_dir="${OWNER_COMPOSE_DIR:-/home/stockpeer/trading_hareness/deploy/shared-peer}"
 archive="$(mktemp "/tmp/trading-hareness-code-${target_sha}.XXXXXX.tar.gz")"
 stage="$(mktemp -d)"

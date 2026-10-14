@@ -66,6 +66,42 @@ class OwnerPathClassTests(unittest.TestCase):
         self.assertEqual({self.classes["quant-service/alembic.ini"], self.classes["quant-service/migrations/env.py"]}, {"migration"})
 
 
+class OwnerHostAddressTests(unittest.TestCase):
+    """The owner relay host changes (2026-10-13, and again): its address is written once."""
+
+    def test_only_the_shared_file_carries_the_owner_address(self) -> None:
+        shared = (ROOT / "scripts/shared-peer/owner-host.sh").read_text(encoding="utf-8")
+        address = re.search(r'OWNER_PEER_HOST:=[a-z]+@([0-9.]+)\}', shared).group(1)
+        tracked = subprocess.run(["git", "grep", "-l", "-F", address, "--", "scripts", "quant-service/app", "feishu-relay/adapter",
+                                  "feishu-relay/scripts", "xhs-intel", "deploy", "config"], cwd=ROOT, capture_output=True, text=True).stdout.split()
+        # The teacher review's default predates the shared file and the isolation test names the address on purpose.
+        allowed = {"scripts/shared-peer/owner-host.sh", "scripts/teacher_review_daily.py", "scripts/test_release_unit_isolation.py"}
+        self.assertEqual(sorted(set(tracked) - allowed), [], "read the address from scripts/shared-peer/owner-host.sh")
+
+    def test_every_owner_tool_reads_the_shared_file(self) -> None:
+        for tool in ("scripts/release-sync-status.sh", "scripts/shared-peer/deploy-code-only.sh", "scripts/shared-peer/deploy-full-release.sh",
+                     "scripts/shared-peer/schema-gate.sh", "scripts/shared-peer/owner-host-switch.sh", "scripts/sync-xiaojie-message-features.sh"):
+            with self.subTest(tool=tool):
+                self.assertIn("owner-host.sh", (ROOT / tool).read_text(encoding="utf-8"))
+        env = {**os.environ, "OWNER_PEER_HOST": "someone@elsewhere"}
+        shown = subprocess.run(["bash", "-c", ". scripts/shared-peer/owner-host.sh; echo $OWNER_PEER_HOST $OWNER_PEER_PORT"], cwd=ROOT, env=env,
+                               capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual(shown, ["someone@elsewhere", "22"], "the environment still overrides for one run")
+
+    def test_the_switch_tool_never_writes_to_the_current_host_and_builds_nothing(self) -> None:
+        tool = (ROOT / "scripts/shared-peer/owner-host-switch.sh").read_text(encoding="utf-8")
+        self.assertNotRegex(tool, r"docker (compose )?build|docker pull")
+        on_the_current_host = [line.split("|", 1)[0] for line in tool.splitlines() if line.strip().startswith("old ")]
+        self.assertTrue(on_the_current_host)
+        for command in on_the_current_host:   # what runs there, before any pipe to the new host
+            self.assertNotRegex(command, r"(?<!--)\b(rm|mv|ln|tee|chmod|systemctl --user (enable|disable|start|stop)|docker (compose )?(up|stop|rm|load))\b")
+        current = re.search(r"OWNER_PEER_HOST:=([^}]+)\}", (ROOT / "scripts/shared-peer/owner-host.sh").read_text(encoding="utf-8")).group(1)
+        refused = subprocess.run(["bash", "scripts/shared-peer/owner-host-switch.sh", "copy", current, "--apply"],
+                                 cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("is the current owner host", refused.stderr)
+
+
 class PairOfCommitsTests(unittest.TestCase):
     """What depends on both commits: the catalog rows of each, moved and deleted files."""
 

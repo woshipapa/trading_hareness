@@ -58,9 +58,10 @@ edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
 edge_key="${RELAY_EDGE_SSH_KEY:-$HOME/.ssh/feishu_relay_edge_ed25519}"
 edge_dir="${RELAY_EDGE_DIR:-/opt/feishu-relay-edge}"
 edge_runtime_env="${RELAY_EDGE_RUNTIME_ENV:-/etc/feishu-relay-edge/runtime.env}"
-owner_host="${OWNER_PEER_HOST:-stockpeer@118.178.133.37}"
-owner_port="${OWNER_PEER_PORT:-22}"
-owner_key="${OWNER_PEER_SSH_KEY:-$HOME/.ssh/stockpeer_ed25519}"
+. "$repo_root/scripts/shared-peer/owner-host.sh"
+owner_host="$OWNER_PEER_HOST"
+owner_port="$OWNER_PEER_PORT"
+owner_key="$OWNER_PEER_SSH_KEY"
 ssh_options=(-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/release-sync-status.XXXXXX")"
