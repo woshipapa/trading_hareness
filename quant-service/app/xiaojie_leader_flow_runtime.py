@@ -158,6 +158,10 @@ class XiaojieLeaderFlowRuntime:
         stage so nothing on the decision path can mistake them for watchlist
         alerts, and the strategy stays at zero live weight in the promotion
         registry.
+
+        The rows carry no statement about their source.  The scan is the one
+        caller and does not call this for a snapshot whose source is not
+        decision eligible (``intraday_watchlist_scan_service._leader_flow``).
         """
         if not all_a_rows:
             return {"status": "skipped", "reason": "no all-A cross-section in this scan"}

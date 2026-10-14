@@ -137,15 +137,42 @@ def tdx_snapshot_metadata(*, completeness: Mapping[str, Any], fallback_reason: s
 def snapshot_decision_eligible(status: Any) -> bool:
     """Whether a row of the snapshot with this status may be acted on.
 
-    The answer is the snapshot's own ``decision_eligible`` and nothing else: the shared cache
-    puts its ``status`` and age over the supplier's, so a minute the fallback filled reads
-    ``fresh`` and its freshness says nothing about its source. A status that carries the flag
-    must carry ``True``. One without the key comes from a caller that predates the flag and is
-    treated as before; both sources of the chain always set it.
+    The one rule, for every consumer.  The answer is the snapshot's own ``decision_eligible``:
+    the shared cache puts its ``status`` and age over the supplier's, so a minute the fallback
+    filled reads ``fresh`` and its freshness says nothing about its source.  A status that
+    carries the flag must carry exactly ``True``.
+
+    A status without the flag comes from a caller that predates it (both sources of the chain
+    always set it) and is eligible only when it names no other source: ``provider_key`` absent
+    or the main source's, and no ``fallback_for``.  So a status that was rebuilt and kept
+    ``provider_key: tdx_public`` but lost the flag is not eligible.  No status at all (``None``)
+    names nothing and reads as before; anything else that is not a mapping is not eligible.
     """
-    if not isinstance(status, Mapping) or "decision_eligible" not in status:
+    if status is None:
         return True
-    return status["decision_eligible"] is True
+    if not isinstance(status, Mapping):
+        return False
+    if "decision_eligible" in status:
+        return status["decision_eligible"] is True
+    return (status.get("provider_key") in (None, FUYAO_PROVIDER_KEY)
+            and status.get("fallback_for") is None)
+
+
+def scan_snapshot_decision_eligible(scan_status: Any) -> bool:
+    """``snapshot_decision_eligible`` for the all-A status a watch scan keeps.
+
+    The scan materializes the status under its evidence contract, whose ``decision_eligible``
+    says that the snapshot's price is no decision quote (``False`` for the main source too) and
+    replaces the snapshot's own flag.  What the snapshot said about its source is kept as
+    ``flow_decision_eligible`` on a filled minute; the contract's ``provider_key`` and the
+    snapshot's ``fallback_for`` stay.  The rule is applied to those.
+    """
+    if not isinstance(scan_status, Mapping):
+        return snapshot_decision_eligible(scan_status)
+    own = {key: scan_status[key] for key in ("provider_key", "fallback_for") if key in scan_status}
+    if "flow_decision_eligible" in scan_status:
+        own["decision_eligible"] = scan_status["flow_decision_eligible"]
+    return snapshot_decision_eligible(own)
 
 
 def fallback_provenance(status: Any) -> dict[str, Any]:
@@ -324,6 +351,7 @@ __all__ = [
     "AllASnapshotFallbackError", "FALLBACK_REASON_MAX_CHARS", "TDX_PROVIDER_KEY", "TDX_READ_TIMEOUT_SECONDS",
     "TDX_SHARED_READ_TTL_SECONDS", "TDX_SNAPSHOT_MIN_COMPLETE_SHARE", "TDX_SNAPSHOT_ROSTER_FLOOR",
     "TDX_SNAPSHOT_SOURCE", "compare", "fallback_provenance", "main_source_reference", "project_tdx_snapshot_rows",
-    "read", "shared_tdx_snapshot", "snapshot_decision_eligible", "tdx_snapshot_completeness",
+    "read", "scan_snapshot_decision_eligible", "shared_tdx_snapshot", "snapshot_decision_eligible",
+    "tdx_snapshot_completeness",
     "tdx_snapshot_decision_eligible", "tdx_snapshot_metadata",
 ]
