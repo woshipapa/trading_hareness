@@ -301,7 +301,7 @@ brew services list | rg '^colima\\s'
 
 ## peer 盘中抓取的每日保障
 
-owner 量化主机（2026-10-13 起是 118.178.133.37，此前是 47.110.79.189）上每天开盘前必须可用的三个容器（`db-tunnel`、`quant-research`、
+owner 量化主机（2026-10-14 17:08 起是 116.62.30.225，此前是 118.178.133.37、47.110.79.189）上每天开盘前必须可用的三个容器（`db-tunnel`、`quant-research`、
 `quant-research-scheduler`）由 `scripts/peer-session-guard.sh` 看守，通过
 `systemd --user` 定时器运行：
 

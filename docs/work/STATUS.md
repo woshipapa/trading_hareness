@@ -16,7 +16,7 @@
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在编辑框里改了备注名并保存后，核对飞书里的备注名和会员表（这是经线上 bridge 接口的第一次写入）；其余见 Open questions 和待办 B056 的 (2)、(4)。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
 | [W011](streams/W011-peer-evening-stages.md) | 每晚该跑的阶段由我们这一侧自己触发 | released | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | 10 月 14 日 16:50 核对第一次真正的当晚自动运行（见 Due）：用 `docs/work/probes/2026-10-14-peer-evening-receipts.py` 的做法查 10 月 14 日五个 `peer_` 回执和读数（把脚本里的日期改成 10 月 13、14 日另存一份），再看调度容器日志有没有“left open”。通过后把本记录改成 `verified`；连续两晚通过后删掉手工脚本 `state/lists13.sh` 那条 Due。 | 2026-10-14 |
 | [W012](streams/W012-owner-hot-releases.md) | owner 只用一套镜像，其余改动全部热部署 | building | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | A 段已合进本地 main（86831925），随 W006 的发布一起到 owner（见 W006 的 Waiting on the user）。接着：(1) owner 主机恢复后（BACKLOG B058），发布之前只读核对主机上 `scripts/backfill-full-market-daily.sh` 和 `scripts/fill-longhu-sector-membership.py` 与目标提交的是否相同（`sha256sum ~/trading_hareness/scripts/<名字>` 对 `git show <sha>:scripts/<名字> \| shasum -a 256`）：这两个脚本的目录登记在本线改成了 `47owner`，分类会把它们报成 `full` 而拒绝纯代码发布。相同就照 `state/rel07.sh` 里已写好的 `RELEASE_RELABELLED_CURRENT` 放行；不同就告诉用户（要么手工把这两个文件拷上主机，要么做一次全量发布，后者要在 894 MB 的主机上构建镜像），并把 `rel07.sh` 里那一行去掉。(2) 第一次用新规则的发布之后，把检查模式和发布的输出存进 `docs/work/probes/`，状态才改 `released`。(3) 回收工作区 `/Users/papa/codebase/.codex-wt/n8n-owner-hot-a`。(4) 之后才是 B 段（Steps 里的 1–4），先为它建分支。 | 2026-10-14 |
-| [W014](streams/W014-owner-host-switch.md) | owner 中转主机再换一台：做好切换的准备 | building | Claude Code 会话 4a420907，2026-10-14 | 等用户给出新主机的地址、SSH 端口和主机指纹，以及谁来装它的底子（Waiting on the user）。拿到之后按 `docs/OWNER_HOST_SWITCH.md` 走：先 `scripts/shared-peer/owner-host-switch.sh preflight stockpeer@<新主机>`（只读，会话可以跑；第一次连接要先把指纹加进 `~/.ssh/known_hosts`，这一步由用户做），把输出存进 `docs/work/probes/`；`copy --apply`、新主机上的两件事、切换、三处地址，都是用户执行、会话核对。`copy --apply` 还没有对真实的新主机跑过，第一次跑先看不带 `--apply` 的输出。 | 2026-10-14 |
+| [W014](streams/W014-owner-host-switch.md) | owner 中转主机再换一台：做好切换的准备 | released | Claude Code 会话 d39e7e11（接手 4a420907），2026-10-14 | 核对一个完整交易日：10 月 15 日 09:25 的竞价处置表、两条分钟快照每分钟一份（`docs/work/probes/2026-10-14-session-capture-gaps.py` 改日期）、16:15 之后晚间阶段回执；跑 `docs/OWNER_HOST_SWITCH.md` 7.0（盘中每 10 分钟一次 `docker stats`，存进 `docs/work/probes/`）。通过后状态改 `verified`。旧主机 118.178.133.37 保持停止、Docker 屏蔽，不要解除。 | 2026-10-14 |
 
 ## 等用户处理
 
@@ -24,9 +24,7 @@
 - W010 2026-10-13 在看板上试用七项功能并反馈；特别是会员期限：对真实目标群第一次“同步成员”后，老成员的开始日期是各自的入群日期、期限是默认的 1 个月，
 - W010 2026-10-13 擒龙群现在可以发到期提醒了：是否打开“每天自动审查”由用户决定（预览现在是 0 人；10-17、10-19 各有一人到期）。为什么等：打开后机器人会在客户群里 @ 人。
 - W010 2026-10-14 在看板上给一位续费的会员改日期并改写备注名、保存，然后看一眼飞书里这个人的备注名是否变了。为什么等：这是经线上接口的第一次真实写入，本会话不能代做。
-- W014 2026-10-14 12:12 新主机的地址、SSH 端口、主机指纹；大概什么时候换；它的底子（用户 `stockpeer`、linger、rootless Docker、内存不少于 3 GB、三类公钥）由对方装还是我们装。为什么等：这些只有用户或对方知道；第一次连接新主机和往上面写都要用户执行。之后：会话跑只读预检并把缺的列出来。
 - W014 2026-10-14 13:06 对方工作站上的库能承受多少并发连接（第 7.3 步要用）。为什么等：只有对方知道。之后：按这个数定两个容器的数据库线程和连接池上限。
-- W014 2026-10-14 16:55 新主机的地址、SSH 端口、主机指纹，以及它的底子是否已经装好（用户 `stockpeer`、`loginctl` linger、rootless Docker 与 compose 插件、三类公钥进 `authorized_keys`）。规格已知：4 核 8 GB、70 GB 盘、200 Mbps，比预检的下限（3 GB 内存）宽。为什么等：只有用户或对方知道；第一次连接新主机要用户先把指纹加进 `known_hosts`。之后：会话跑只读预检，存进 `docs/work/probes/`，把缺的列出来。
 
 ## 到点要做
 
@@ -44,7 +42,7 @@
 
 ## 待办清单
 
-open 34, ready 17, doing 3, waiting-user 1, done 25, dropped 2
+open 34, ready 17, doing 3, done 27, dropped 2
 
 在做的、可以开工的、等用户处理的:
 
@@ -56,7 +54,6 @@ open 34, ready 17, doing 3, waiting-user 1, done 25, dropped 2
 - B033 (ready) 通达信并行快照和比对行没有列入冷热分层
 - B023 (ready) 全市场分钟快照 09:16 才开始
 - B024 (ready) 竞价处置表缺的那 1 只没查明
-- B041 (waiting-user) owner 量化服务迁到新服务器：本机的连接、隧道和发布目标要切过去
 - B042 (doing) 我们这一侧新加的盘后阶段没有任何东西定时触发
 - B046 (ready) W010 的探测 P0-8：富文本和卡片转发读回的样子
 - B048 (ready) 目标群功能里查群主失败时不带飞书的原因
@@ -66,6 +63,6 @@ open 34, ready 17, doing 3, waiting-user 1, done 25, dropped 2
 - B050 (doing) owner 上只用一套镜像，以后的发布都是代码覆盖
 - B055 (ready) 补取 2026-10-13 当天的指数和 ETF 分钟线
 - B059 (doing) 采集循环在 09:25 之后才启动时：不补竞价定格，却把当时的盘口记成 09:30 的
-- B060 (ready) edge 到 owner 的隧道在对端挂死时会永远停在握手里
 - B076 (ready) 试验台的收益拆成“隔夜”和“盘中”，并给买入类加上“一字记 0 不删”的账
 - B077 (ready) 每晚把当天龙头选股和候选的分钟线落本机
+- B083 (ready) 新主机的 7.0：先量一个完整交易日

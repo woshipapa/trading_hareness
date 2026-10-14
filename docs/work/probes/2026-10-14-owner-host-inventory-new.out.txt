@@ -1,0 +1,22 @@
+host: iZbp18q2iw933apjogrb4wZ 172.26.62.126 172.17.0.1 
+Mem:            7270        1048        3135           3        3395        6221
+/dev/vda3        69G  6.8G   59G  11% /
+release tree: /home/stockpeer/.local/share/trading-hareness/releases/owner-full-20261012-20/trading_hareness
+overlay: owner-code-20261014-11
+env file: /home/stockpeer/.secrets/owner/.env.owner
+image trading-hareness-peer-db-batch-tunnel:latest d7a028380b81 18.8MB
+image trading-hareness-peer-db-tunnel:latest af13185f3ec3 18.8MB
+image trading-hareness-peer-quant-research:latest 58da6ff8766c 1.12GB
+container trading-hareness-peer-quant-research-1 Up 34 minutes (healthy)
+container trading-hareness-peer-quant-research-scheduler-1 Up 29 minutes (healthy)
+container trading-hareness-peer-db-tunnel-1 Up 41 minutes (healthy)
+container trading-hareness-peer-db-batch-tunnel-1 Up 41 minutes (healthy)
+volume trading-hareness-peer_peer_quant_data
+volume trading-hareness-peer_peer_quant_research_data
+unit peer-daily-backfill.service                                                   static    -
+unit peer-session-guard@.service                                                   static    -
+unit peer-daily-backfill.timer                                                     enabled   enabled
+unit peer-session-guard-heal.timer                                                 enabled   enabled
+unit peer-session-guard-preopen.timer                                              enabled   enabled
+authorized keys: ULTRATOUF-quant-cloud-peer-tunnel-20261013 stockpeer@ultratouf stockpeer@ultratouf stockpeer-self-tunnel quant-edge-to-owner 
+loopback listeners: 127.0.0.1:15432 127.0.0.1:15433 127.0.0.1:15680 127.0.0.1:15681 127.0.0.1:15682 127.0.0.1:15683 

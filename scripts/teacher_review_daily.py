@@ -40,8 +40,8 @@ from datetime import date, datetime, timedelta, timezone
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import teacher_harness as harness  # noqa: E402 - sibling module, after the path is set
 
-PEER_HOST = os.environ.get("PEER_SSH_HOST", "stockpeer@47.110.79.189")
-PEER_PORT = os.environ.get("PEER_SSH_PORT", "3535")
+PEER_HOST = os.environ.get("PEER_SSH_HOST", "stockpeer@116.62.30.225")
+PEER_PORT = os.environ.get("PEER_SSH_PORT", "22")
 PEER_KEY = os.path.expanduser(os.environ.get("PEER_SSH_KEY", "~/.ssh/stockpeer_ed25519"))
 PEER_CONTAINER = os.environ.get("PEER_API_CONTAINER", "trading-hareness-peer-quant-research-1")
 # Where the peer container serves its source from depends on the last release: a

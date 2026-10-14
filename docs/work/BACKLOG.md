@@ -369,19 +369,20 @@
 
 ### B041 owner 量化服务迁到新服务器：本机的连接、隧道和发布目标要切过去
 
-- state: waiting-user
+- state: done
 - kind: follow-up
 - why: 2026-10-13 对方把量化服务从 47.110.79.189（SSH 3535）迁到 118.178.133.37（SSH 22，用户 stockpeer，私钥不变；对方说明里给的主机指纹是 ED25519 `SHA256:JSgjaKCz873b9Na6b+DF6DBv1Ni+cToO0gY9O9bhZA8`）。旧主机上的量化容器 18:37:15 起停用，不要恢复、不要解除 Docker 的屏蔽。本机的 owner 读路径（`127.0.0.1:15682`）现在连的还是旧主机，所以不通：一切要读 owner 的事都停着（W003/W001 当晚盘后的核对、W007 的续取、W008 明早 09:16 的核对、任何发布）。以下都是对方说明里的话，agent 还没有连上新主机核实过：保留的版本 `owner-code-20261013-04`（26170231）；数据库仍在对方的工作站，经反向 SSH；新主机只有 1 GB 内存加 2 GB 交换区，不能在上面构建镜像，也不能再起一套生产写入服务；edge 的配置不随这次迁移改
 - how: 按对方说明的顺序。(1) 第一次连接新主机并核对主机指纹；(2) 改 `config/secrets/.env.local`：`LONGHU_SSH_HOST`、`LONGHU_SSH_PORT`（22），以及 `OWNER_PEER_SSH_HOST`（新主机内网 172.19.35.9）、`OWNER_PEER_SSH_PORT`（22）、`OWNER_PEER_SSH_USER`、`OWNER_PEER_SSH_KEY_PATH`、`OWNER_PEER_KNOWN_HOSTS_PATH`、`OWNER_PEER_SSH_HOST_KEY_ALIAS`（空）；只改本地，**不要跑 `sync-secrets.sh owner`**，下次同步前先核对生成的 `.env.owner` 与新主机现有配置的差别；(3) 重启本机服务管理器让 `owner-tunnel` 换目标（它的参数在管理器启动时就定了，只杀隧道进程不够：`launchctl kickstart -k gui/$(id -u)/com.papa.svc-supervisor`，本机所有后台任务会跟着重启几秒）；(4) 只读验收：新主机上 15682、15683 的 `/health`，本机隧道的 `/health` 里版本应是 `owner-code-20261013-04`，`scripts/release-sync-status.sh`（要带新的 `OWNER_PEER_HOST`、`OWNER_PEER_PORT`），再读当晚盘后各阶段的回执（`docs/work/probes/2026-10-13-post-close-stages.py`）；(5) 把仓库里仍指向旧地址的默认值改掉并过脚本测试，只改量化 owner 的目标：`scripts/release-sync-status.sh:61-62`、`scripts/release_plan.py:27`、`scripts/shared-peer/deploy-code-only.sh:62-63`、`scripts/shared-peer/deploy-full-release.sh:69-70`、`scripts/sync-xiaojie-message-features.sh:17-18`、`scripts/shared-peer/configure-peer-self-tunnel.sh:10`、`config/secrets/env-split.py:68`、`config/secrets/sync-secrets.sh:20`，测试 `scripts/test_release_unit_isolation.py:33`（owner 标记里加新地址）和 `scripts/release-sync-status.test.mjs:42`（现在靠端口 3535 区分 owner 和 edge，端口都成 22 后要换区分办法）；`scripts/teacher_review_daily.py:43-44` 有别的会话未提交的修改，留给那边；`deploy/shared-peer/compose.yaml:14,56` 的默认端口不要顺手改（改 compose 会让下一次发布变成全量）；文档里的旧地址（`AGENTS.md`、上一级的 `AGENTS.md`、`OPERATIONS.md`、`docs/RELEASE_SYNC_47.md`、`docs/SHARED_PEER_RUNTIME.md` 等，`git grep -n 47.110.79.189` 能列全）改说明、不改历史记录行
 - who: 第 (1)–(3) 步要用户做或明确放行：agent 2026-10-13 20:24 试着扫新主机的主机密钥并比对指纹，被自动模式的安全检查拦下（理由是“探查凭据”），随后读 `env-split.py` 的一条命令也被拦（理由是“改变流量去向”）；agent 没有绕过，`.env.local`、`known_hosts`、服务管理器都没有动。第 (4)(5) 步在连通之后由 agent 做
-- needs: 用户的决定
+- needs: 无
 - found: 2026-10-13，用户转来对方的迁移说明（原话：「当前对方owner服务器已更改为这个，然后你可以使用项目里有保存过的env就是他的ssh key。」）
 - note1: 2026-10-13 20:34 用户说改成手动模式由他来同意。第 (1) 步做完：扫到的主机指纹与对方说明一致，已写进 `~/.ssh/known_hosts`；用保存的私钥登录成功，只读检查见 FACTS F022。第 (2) 步（改 `.env.local`）的命令仍被自动模式的安全检查拦下（理由同前，“改变流量去向”），说明会话当时还在自动模式；没有绕过，等用户切换模式后重试，或用户自己改
 - note2: 2026-10-13 21:10 用户切到手动模式后的进度。第 (2) 步完成：`.env.local` 改了 4 个键、加了 4 个键，备份在同目录 `.env.local.bak-20261013`，没有同步到远端。第 (3) 步完成：20:38 重启本机服务管理器，`owner-tunnel` 连到新服务器。第 (4) 步：本机 `127.0.0.1:15682/health` 返回 200，版本 `owner-code-20261013-04`、提交 26170231，调度容器同版本；当晚的情况见 B042、B043 和 FACTS F023、F024。还差两件：(a) edge 主机上的 `quant-longhu-owner-tunnel` 服务仍指向旧服务器（3535），所以经 edge 读 owner 的路由返回 `fetch failed`、控制台看不到 owner 的数据；已验证 edge 用的那把密钥在新服务器上已授权（`docs/work/probes/2026-10-13-edge-owner-tunnel.out.txt`）；改这个服务的命令被会话的安全检查拒了两次（先是命令，后是装着命令的脚本），命令给了用户，由用户在 edge 上执行：备份服务文件到 `/root/quant-longhu-owner-tunnel.service.bak-20261013`；`ssh-keyscan -t ed25519 -p 22 118.178.133.37` 的结果追加到 `/etc/quant-intraday-edge/known_hosts` 并核对指纹；`sed -i 's/ -p 3535 / -p 22 /; s/stockpeer@47\.110\.79\.189/stockpeer@118.178.133.37/'` 改服务文件；`systemctl daemon-reload && systemctl restart quant-longhu-owner-tunnel`；`curl http://127.0.0.1:15682/health` 应为 200。(b) 第 (5) 步仓库里的旧默认地址还没改
 - note3: 2026-10-13 21:14 第 (5) 步做了：发布工具、两个凭据脚本和消息特征同步脚本的默认地址改到新服务器（提交 4bb8c7ff；`pytest scripts -q` 361 项通过加已知的 B035 一项失败，两个 node 测试通过）；用新默认值跑 `scripts/release-sync-status.sh --owner-source-sha 26170231… --edge-source-sha 764ca2b2…`：ALL CHECKS PASSED（`docs/work/probes/2026-10-13-release-status-newhost.out.txt`；edge 中继当晚 21:10 被另一条工作线发布到了 `hotfix-20261013T131021Z-764ca2b22292-2811`）；`scripts/release plan` 能读到新主机。`AGENTS.md`（本仓库和上一级目录）与 `docs/work/README.md` 里的地址已改。还没做的：(a) edge 主机上的隧道服务，等用户执行（note2）；(b) `scripts/teacher_review_daily.py:43-44` 的默认地址还是旧的，这个文件有别的会话未提交的修改，本会话没动；本机每 20 分钟一次的 `teacher.cycle` 如果靠这个默认值连 owner，现在是连不上的；(c) `OPERATIONS.md`、`docs/RELEASE_SYNC_47.md`、`docs/SHARED_PEER_RUNTIME.md`、`docs/OWNER_READ_API_FOR_HARNESS.md`、`docs/SHARED_STOCK_DATA_API.md`、`docs/TEACHER_REVIEW_DAILY.md`、`docs/DATA_SOURCE_LAYER.md`、`docs/COMPONENT_CONTRACTS.md`、`feishu-relay/AGENTS.md` 里的旧地址（改说明、不改历史记录行）；(d) 下一次 `sync-secrets.sh owner` 之前，先把 `env-split.py` 生成的 `.env.owner` 和新主机上现有的配置按键名对一遍，保留对方的生产角色和写入开关；在那之前不要同步；(e) `deploy/shared-peer/compose.yaml` 里隧道端口的默认值仍是 3535，靠主机上的环境变量覆盖，没有改（改 compose 会让下一次发布变成全量）
 - note4: 2026-10-13 21:16 用户说需要对方在他的服务器上做的事要写成提示词交给他转发。提示词写好了：`docs/work/probes/2026-10-13-prompt-to-owner.md`（回报五项；请对方确认或处理六件：我们后加的盘后阶段由谁跑、每日指标 5,138/5,560、新机内存规格与重任务放哪里、下次凭据同步前要保留的键名、迁移后是否暂停发布、启动时那阵连接失败供知晓）。对方回复后把答复记到 B042、B043、B044 和本项
 - note5: 2026-10-13 21:24 用户转述：对方让我们自己在他的服务器上执行（「当前对方让我们都来执行，因为我们可以ssh」），会话改为手动逐条同意。随后做了：edge 主机的 `quant-longhu-owner-tunnel` 改到新服务器（备份在 edge 的 `/root/quant-longhu-owner-tunnel.service.bak-20261013`，核对过的主机密钥加进了它的 known_hosts，服务 active，edge 上 `127.0.0.1:15682/health` 返回 200，从本机经 edge 中继读 `limit-up-risk/daily` 返回 200）。到此连接都切完了。剩 note3 里的 (b)(c)(d)(e)；给对方的提示词因此多半不用发了，里面的问题改由我们自己只读查（每日指标缺口见 B043，凭据键名的核对见 note3 的 (d)）
-- updated: 2026-10-13
+- result: 2026-10-14 对方 17:00–17:08 把 owner 迁到 116.62.30.225（另一个阿里云账号，内网 172.26.62.126）；工作站（`.env.local` 的两个键、`known_hosts`、监督进程重启）、仓库（`owner-host.sh` 等）、edge 的隧道单元都已切过去并核对，记录见 W014 Log 和 `docs/OWNER_HOST_SWITCH.md`
+- updated: 2026-10-14
 
 ### B042 我们这一侧新加的盘后阶段没有任何东西定时触发
 
@@ -589,13 +590,14 @@
 
 ### B060 edge 到 owner 的隧道在对端挂死时会永远停在握手里
 
-- state: ready
+- state: done
 - kind: defect
 - why: 2026-10-14 owner 主机挂死后，edge 上的 `quant-longhu-owner-tunnel.service` 10:35 重启进来的 ssh 停在握手里一个半小时，单元一直显示 active，owner 恢复后也不自愈，经中继的研究接口全是 503，直到 12:01 人工重启（FACTS F036）。本机 supervisor 的 `owner-tunnel` 没有这个问题（它反复以 255 退出并重连）
 - how: 给 edge 上这个单元的 ssh 加 `-o ConnectTimeout=15`（握手阶段也有期限），并确认 `Restart=always`；单元文件不在仓库里，改之前先把它的内容收进仓库（`feishu-relay/deploy/edge/` 或相应位置）并写进 `docs/RELEASE_SYNC_47.md`，否则下次还是没人知道它长什么样。再加一条探活：隧道 active 而 15682 没有监听或 `/health` 不通时重启它。改 edge 主机上的 systemd 配置要用户同意
 - who: agent 备改动，用户同意后执行
-- needs: none
+- needs: 无
 - found: 2026-10-14
+- result: 2026-10-14 edge 的 `quant-longhu-owner-tunnel.service` 在改地址时加了 `-o ConnectTimeout=15`（备份 `/root/quant-longhu-owner-tunnel.service.bak-20261014`）；这个单元文件仍不在仓库里，下次改它前先看 edge 上的现状
 - updated: 2026-10-14
 
 ### B061 短线来财 6.23.0 的北炒首板七闸 + 弹窗推送登记进试验台
@@ -915,5 +917,15 @@
 - who: 用户执行写库
 - needs: 无
 - result: 2026-10-14 用户 16:30–16:42 执行 `bash state/replay2023.sh --apply`（`docs/work/probes/2026-10-14-tactic-replay-2023-2024.apply.out.txt`）：收盘读数 322 天、19,826 行，竞价读数 321 天、19,760 行（2023 年跳过 1 天，第一个交易日没有前一日收盘读数，与上次相同）；封板判定与涨停榜的不一致率两年都是 0；**`history_raw_basis_share` 2023 年 0.99→0.0、2024 年 0.94→0.0，`raw_basis_share` 都是 0.0**；峰值内存 333 MB 和 218 MB。随后把龙头战法的提取与分析重跑（`docs/archive/2026-10-14-leader-tactic-analysis/analysis_after_factors.out.txt`）：各项与重放前相差都在 0.02 个点以内，结论不变
+- updated: 2026-10-14
+
+### B083 新主机的 7.0：先量一个完整交易日
+
+- state: ready
+- kind: follow-up
+- why: `docs/OWNER_HOST_SWITCH.md` 第 7 步的前提：新主机（4 核 7.3 GB、200 Mbps）跑满一个交易日后再一项一项放开（B062）。现主机清点：内存用了 1.0 GB、盘用 6.8 GB（69 GB）
+- how: 2026-10-15 盘中每 10 分钟一次 `docker stats --no-stream`（主服务、调度、两个隧道），存进 `docs/work/probes/2026-10-15-owner-load.out.txt`；db-tunnel 与网卡流量；两条分钟采集每轮耗时；晚间各阶段回执时间。对照 `docs/work/probes/2026-10-14-owner-load-1306.out.txt`（旧主机，2 核 3.5 GB：负载 0.82、主服务 CPU 44%、内存 325 MiB），写进 FACTS
+- who: agent（只读）
+- needs: 10 月 15 日交易日
 - updated: 2026-10-14
 

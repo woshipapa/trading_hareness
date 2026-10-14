@@ -19,12 +19,12 @@
 
 | 项 | 值 |
 |---|---|
-| 主机 / ssh 端口 / 用户 | `118.178.133.37` / `22` / `stockpeer`（2026-10-13 起；此前是 `47.110.79.189` / `3535`） |
+| 主机 / ssh 端口 / 用户 | `116.62.30.225` / `22` / `stockpeer`（2026-10-14 17:08 起；此前是 `118.178.133.37`，更早是 `47.110.79.189` / `3535`） |
 | 转发 | 本机 `127.0.0.1:15682` → owner `127.0.0.1:15682`（`-L 127.0.0.1:15682:127.0.0.1:15682`） |
 | 启动脚本（唯一允许的方式） | `/Users/papa/codebase/n8n/scripts/shared-peer/start-local-longhu-tunnel.sh` |
-| 脚本需要的环境变量 | `LONGHU_SSH_HOST=118.178.133.37`、`LONGHU_SSH_PORT=22`、`LONGHU_SSH_USER=stockpeer`、`LONGHU_SSH_KEY_PATH=<运维提供>`，以及可选的 `LONGHU_LOCAL_PORT=15682`、`LONGHU_REMOTE_PORT=15682` |
+| 脚本需要的环境变量 | `LONGHU_SSH_HOST=116.62.30.225`、`LONGHU_SSH_PORT=22`、`LONGHU_SSH_USER=stockpeer`、`LONGHU_SSH_KEY_PATH=<运维提供>`，以及可选的 `LONGHU_LOCAL_PORT=15682`、`LONGHU_REMOTE_PORT=15682` |
 | 密钥 | ED25519。按 AGENTS.md 规定，本文**不写私钥路径和内容**，由运维通过 `LONGHU_SSH_KEY_PATH` 提供。核对用的公钥指纹：`SHA256:BSQJGt3oMiaGB9BEYgant+gEM7tTttIbJfFDdS68RmE` |
-| 主机校验 | `StrictHostKeyChecking=yes`，本机 `known_hosts` 已有 `118.178.133.37` 的记录（ED25519 指纹 `SHA256:JSgjaKCz873b9Na6b+DF6DBv1Ni+cToO0gY9O9bhZA8`） |
+| 主机校验 | `StrictHostKeyChecking=yes`，本机 `known_hosts` 已有 `116.62.30.225` 的记录（ED25519 指纹 `SHA256:X4ptjLwHVcvUe/3nCFdr5HGPy++vvz3oGTi6jWmHGfY`，2026-10-14 与对方给的指纹核对一致） |
 | 当前状态（生成本文时） | 隧道在线：本机有 ssh 进程监听 `127.0.0.1:15682`，`/health` 返回 ok |
 
 **同一台机器上的 harness 不需要接触密钥**，直接请求 `http://127.0.0.1:15682`。每次开跑先做两项确认：
