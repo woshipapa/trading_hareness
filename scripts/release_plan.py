@@ -76,26 +76,9 @@ def owner_plan(target: str, active: str | None, db_revision: str | None) -> list
     rows = [line.split("\t", 1) for line in subprocess.run(
         ["bash", str(CLASSIFY), active, target], cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines() if line]
     paths = {kind: [path for row_kind, path in rows if row_kind == kind]
-             for kind in ("unclassified", "image", "full", "runtime", "migration")}
+             for kind in ("unclassified", "image", "tunnel-image", "full", "runtime", "migration")}
     label = "owner-<label>"
-    if paths["unclassified"]:
-        lines.append(f"owner: NOT RELEASABLE yet ({len(paths['unclassified'])} path(s) have no rule, e.g. "
-                     f"{', '.join(paths['unclassified'][:4])})")
-        lines.append("  add each to scripts/shared-peer/classify-owner-paths.sh (a script: its rule in "
-                     "scripts/generate_scripts_catalog.py), commit, plan again; nothing is built for an unknown path")
-    elif paths["image"] or paths["full"]:
-        needs = paths["image"] + paths["full"]
-        what = "builds the image on the host" if paths["image"] else "ships the host's tree; the image is rebuilt with it"
-        lines.append(f"owner: FULL release ({len(needs)} path(s) need it, e.g. {', '.join(needs[:4])}); it {what}")
-        lines.append(f"  release owner full {target} {label}            # check")
-        lines.append(f"  release owner full {target} {label} --apply    # release")
-    elif paths["runtime"] or paths["migration"]:
-        migrations = (f", {len(paths['migration'])} migration file(s): the owner database must be at their head first"
-                      if paths["migration"] else "")
-        lines.append(f"owner: code-only overlay ({len(paths['runtime'])} runtime file(s){migrations})")
-        lines.append(f"  release owner code {target} {label} --from-sha {active} --apply")
-    else:
-        lines.append("owner: nothing reaches the owner runtime; a code-only release would only record the SHA")
+    head, pending = None, None
     with tempfile.TemporaryDirectory() as directory:
         archive = subprocess.run(["git", "archive", target, "quant-service/migrations/versions"], cwd=ROOT,
                                  capture_output=True, check=False)
@@ -103,15 +86,43 @@ def owner_plan(target: str, active: str | None, db_revision: str | None) -> list
             subprocess.run(["tar", "-x", "-C", directory], input=archive.stdout, check=True)
             versions = str(Path(directory) / "quant-service" / "migrations" / "versions")
             head = subprocess.run([sys.executable, str(LINEAGE), versions, "--head"], capture_output=True, text=True).stdout.strip()
-            if not db_revision:
-                lines.append(f"  schema: owner database revision unknown; release head {head}")
-            elif db_revision == head:
-                lines.append(f"  schema: owner database at {head}, as the target needs")
-            else:
+            if db_revision and db_revision != head:
                 pending = subprocess.run([sys.executable, str(LINEAGE), versions, "--pending", db_revision],
                                          capture_output=True, text=True).stdout.split()
-                lines.append(f"  schema: owner database at {db_revision}, target needs {head}"
-                             + (f"; apply first on Windows (stage D): {', '.join(pending)}" if pending else " (not in lineage)"))
+    behind = head is not None and bool(db_revision) and db_revision != head
+    if paths["unclassified"]:
+        lines.append(f"owner: NOT RELEASABLE yet ({len(paths['unclassified'])} path(s) have no rule, e.g. "
+                     f"{', '.join(paths['unclassified'][:4])})")
+        lines.append("  add each to scripts/shared-peer/classify-owner-paths.sh (a script: its rule in "
+                     "scripts/generate_scripts_catalog.py), commit, plan again; nothing is built for an unknown path")
+    elif paths["image"] or paths["full"] or paths["tunnel-image"]:
+        needs = paths["image"] + paths["full"] + paths["tunnel-image"]
+        what = "builds the image on the host" if paths["image"] else "ships the host's tree; the image is rebuilt with it"
+        lines.append(f"owner: FULL release ({len(needs)} path(s) need it, e.g. {', '.join(needs[:4])}); it {what}")
+        lines.append(f"  release owner full {target} {label}            # check")
+        lines.append(f"  release owner full {target} {label} --apply    # release")
+        if paths["tunnel-image"]:
+            lines.append(f"  tunnel image: {', '.join(paths['tunnel-image'])} reach the host's tree with it, but no release "
+                         "rebuilds the tunnel image or recreates the tunnels; plan that with the owner")
+        if any("catalog row moved" in path for path in paths["full"]):
+            lines.append("  a script whose catalog row moved to or from 47owner: if the host's copy is checked to be the "
+                         "target's, name its path in RELEASE_RELABELLED_CURRENT and plan again")
+    elif paths["runtime"] or paths["migration"]:
+        migrations = (f", {len(paths['migration'])} migration file(s): the owner database must be at their head first"
+                      if paths["migration"] else "")
+        lines.append(f"owner: code-only overlay ({len(paths['runtime'])} runtime file(s){migrations})")
+        lines.append(f"  release owner code {target} {label} --from-sha {active} --apply"
+                     + ("    # refused until the schema line below is at the head" if behind else ""))
+    else:
+        lines.append("owner: nothing reaches the owner runtime; a code-only release would only record the SHA")
+    if head is not None:
+        if not db_revision:
+            lines.append(f"  schema: owner database revision unknown; release head {head}")
+        elif not behind:
+            lines.append(f"  schema: owner database at {head}, as the target needs")
+        else:
+            lines.append(f"  schema: owner database at {db_revision}, target needs {head}"
+                         + (f"; apply first on Windows (stage D): {', '.join(pending)}" if pending else " (not in lineage)"))
     lines.append(f"  window: {window('owner-quant-research', 'owner-scheduler')}")
     return lines
 

@@ -4,6 +4,9 @@ set -euo pipefail
 usage() {
   cat >&2 <<'EOF'
 usage: deploy-code-only.sh <target-sha> <release-label> --from-sha <active-sha> [--apply]
+
+Without --apply it changes nothing, but it does read the owner's /health over
+ssh (the schema gate; RELEASE_DB_REVISION replaces that read).
 EOF
   exit 2
 }
@@ -32,28 +35,30 @@ git cat-file -e "$target_sha^{commit}"
 git cat-file -e "$from_sha^{commit}"
 [[ -z "$(git status --porcelain)" ]] || { echo 'worktree is dirty' >&2; exit 1; }
 
-changed_files="$(git diff --name-only "$from_sha" "$target_sha")"
+changed_files="$(git diff --no-renames --name-only "$from_sha" "$target_sha")"
 [[ -n "$changed_files" ]] || { echo 'target SHA has no changes' >&2; exit 1; }
 # classify-owner-paths.sh owns the rules and says what each kind means.
 classification="$(bash "$tool_root/scripts/shared-peer/classify-owner-paths.sh" "$from_sha" "$target_sha")"
 of_kind() { awk -F'\t' -v kind="$1" '$1 == kind { print $2 }' <<<"$classification"; }
 refused=false
-while IFS= read -r path; do
-  [[ -z "$path" ]] || { echo "full release required for: $path" >&2; refused=true; }
-done <<<"$(of_kind full)"
-while IFS= read -r path; do
-  [[ -z "$path" ]] || { echo "image build required for: $path (the full release builds; nothing else does)" >&2; refused=true; }
-done <<<"$(of_kind image)"
-while IFS= read -r path; do
-  [[ -z "$path" ]] || { echo "unclassified path: $path (add its rule to scripts/shared-peer/classify-owner-paths.sh; a script gets its row from scripts/generate_scripts_catalog.py)" >&2; refused=true; }
-done <<<"$(of_kind unclassified)"
+refuse() {  # refuse <kind> <before the path> <after the path>
+  local path
+  while IFS= read -r path; do
+    [[ -z "$path" ]] || { echo "$2: $path$3" >&2; refused=true; }
+  done <<<"$(of_kind "$1")"
+}
+refuse full 'full release required for' ''
+refuse image 'image build required for' ' (the full release builds; nothing else does)'
+refuse tunnel-image 'tunnel image input' ' (no release rebuilds the tunnel image or recreates the tunnels: plan it with the owner)'
+refuse unclassified 'unclassified path' ' (add its rule to scripts/shared-peer/classify-owner-paths.sh; a script gets its row from scripts/generate_scripts_catalog.py)'
 [[ "$refused" == false ]] || exit 1
 runtime_files="$(of_kind runtime)"
 migration_files="$(of_kind migration)"
 skipped_files="$(of_kind skip)"
 # A migration ships in the overlay like the rest of quant-service/migrations (the peer never applies one); what
-# matters is that the owner's database is already at the release's head.
-[[ -z "$migration_files" ]] || bash "$tool_root/scripts/shared-peer/schema-gate.sh" "$target_sha" || exit $?
+# matters is that the owner's database is already at the release's head. Checked on every release, not only when
+# this diff carries a migration: the state decides, and a wrong --from-sha or an earlier override must not hide it.
+bash "$tool_root/scripts/shared-peer/schema-gate.sh" "$target_sha" || exit $?
 [[ -z "$runtime_files" ]] || runtime_files+=$'\n'
 [[ -z "$migration_files" ]] || migration_files+=$'\n'
 [[ -z "$skipped_files" ]] || skipped_files+=$'\n'
@@ -62,7 +67,7 @@ if [[ "$apply" != true ]]; then
   printf 'code-only release candidate: sha=%s label=%s from=%s\n' "$target_sha" "$release_label" "$from_sha"
   printf 'owner runtime files:\n%s' "${runtime_files:-  (none: this release only records the new SHA)
 }"
-  [[ -z "$migration_files" ]] || printf 'migrations in the overlay (the owner database is at their head):\n%s' "$migration_files"
+  [[ -z "$migration_files" ]] || printf 'migrations in the overlay (the schema gate passed: see the schema: line):\n%s' "$migration_files"
   printf 'not owner runtime (skipped; edge paths ship with the edge overlay):\n%s' "${skipped_files:-  (none)
 }"
   exit 0

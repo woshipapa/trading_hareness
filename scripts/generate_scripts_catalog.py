@@ -118,7 +118,8 @@ RULES: list[tuple[str, str, str, str]] = [
     ("audit-fuyao-capabilities.py", "research data", "quant-research", "workstation"),
     ("backfill-*", "research data", "quant-research", "workstation"),
     ("check-provider-health.py", "research data", "quant-research", "workstation"),
-    ("fill-*.py", "research data", "quant-research", "quant container"),
+    # Run on the peer: `docker cp` from the host's tree into the container (OPERATIONS.md), so the host needs it.
+    ("fill-*.py", "research data", "quant-research", "47owner (copied into the container)"),
     ("import-*.py", "research data", "quant-research", "workstation"),
     ("probe-public-sources.py", "research data", "quant-research", "workstation"),
     ("refresh-watchlist-from-proposals.py", "research data", "quant-research", "workstation"),

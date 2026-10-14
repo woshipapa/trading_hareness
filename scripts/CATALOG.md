@@ -124,7 +124,7 @@
 | `audit-fuyao-capabilities.py` | quant-research | workstation | Run bounded, data-free live checks for every allowlisted Fuyao REST route. |
 | `backfill-eastmoney-hot-rank-history.py` | quant-research | workstation | Backfill about a year of Eastmoney daily popularity rank per stock. |
 | `check-provider-health.py` | quant-research | workstation | Opt-in bounded provider smoke checks using the deployed app adapters. |
-| `fill-longhu-sector-membership.py` | quant-research | quant container | Refresh the sector map from Longhu, inside the quant-service container. |
+| `fill-longhu-sector-membership.py` | quant-research | 47owner (copied into the container) | Refresh the sector map from Longhu, inside the quant-service container. |
 | `generate-tdx-bj-codes.py` | quant-research | workstation | Generate the old-to-new BJ stock code table of the TDX server from its addedcode_bj.cfg. |
 | `generate-tdx-hosts.py` | quant-research | workstation | Generate the ranked, research-only TDX host pool from probe JSON. |
 | `import-adjusted-research-bars.py` | quant-research | workstation | Import the latest stock-brain qfq research panel into PostgreSQL. |

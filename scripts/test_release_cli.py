@@ -71,6 +71,12 @@ class ReleasePlanTests(unittest.TestCase):
         self.assertIn("owner: FULL release (2 path(s) need it, e.g. deploy/shared-peer/compose.yaml, scripts/peer-session-guard.sh); "
                       "it ships the host's tree", out)
 
+    def test_a_tunnel_image_input_is_shipped_but_said_not_to_take_effect(self) -> None:
+        target = self.commit({"deploy/shared-peer/ssh-tunnel-entrypoint.sh": "# edited\n"}, "tunnel")
+        out = self.plan(target, self.base, self.base)
+        self.assertIn("owner: FULL release (1 path(s) need it, e.g. deploy/shared-peer/ssh-tunnel-entrypoint.sh)", out)
+        self.assertIn("no release rebuilds the tunnel image or recreates the tunnels", out)
+
     def test_a_path_without_a_rule_is_not_releasable_and_asks_for_the_rule(self) -> None:
         target = self.commit({"newdir/thing.txt": "x\n", "scripts/not-in-the-catalog.py": "x\n",
                               "quant-service/requirements.txt": "x==1\n"}, "unknown")
@@ -90,6 +96,8 @@ class ReleasePlanTests(unittest.TestCase):
         self.assertIn("owner: code-only overlay (0 runtime file(s), 1 migration file(s): "
                       "the owner database must be at their head first)", out)
         self.assertIn("schema: owner database at a, target needs b; apply first on Windows (stage D): b", out)
+        self.assertIn("--apply    # refused until the schema line below is at the head", out)
+        self.assertNotIn("# refused", self.plan(target, self.base, self.base, db="b"))
 
     def test_edge_parts_and_the_windows_are_reported(self) -> None:
         target = self.commit({"feishu-relay/adapter/index.mjs": "changed\n", "workflows/edge-relay/workflows/x.json": "{}\n"},
