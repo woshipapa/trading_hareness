@@ -100,10 +100,10 @@ TASKS = [
       if all(_load_env_secret(name) for name in
              ("LONGHU_SSH_KEY_PATH", "LONGHU_SSH_USER", "LONGHU_SSH_HOST")) else []),
     dict(name="feishu-tunnel", kind="daemon",
-         args=["ssh","-i",os.path.join(HOME,".ssh/feishu_relay_edge_ed25519"),
+         args=["ssh","-i",os.path.join(HOME,".ssh/stockpeer_ed25519"),
                "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
                "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
-               "-N","-L","127.0.0.1:18300:127.0.0.1:18300","root@47.114.113.152"],
+               "-N","-L","127.0.0.1:18300:127.0.0.1:18300","stockpeer@116.62.30.225"],
          cwd=HOME, out=os.path.join(N8N,"logs/feishu-tunnel.log"),
          err=os.path.join(N8N,"logs/feishu-tunnel.log"), env={}),
     # Semantic Scholar 唯一出口：key、限流与冷却都在 edge 的 s2_gateway（127.0.0.1:18791）。
@@ -118,10 +118,10 @@ TASKS = [
     # 小红书 edge API 的 loopback forward。采集器一直运行在 edge，本地只
     # 领取摘要任务并调用 Paper-KB 的 codex-teleai provider。
     dict(name="xhs-edge-tunnel", kind="daemon",
-         args=["ssh","-i",os.path.join(HOME,".ssh/feishu_relay_edge_ed25519"),
+         args=["ssh","-i",os.path.join(HOME,".ssh/stockpeer_ed25519"),
                "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
                "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
-               "-N","-L","127.0.0.1:18790:127.0.0.1:18790","root@47.114.113.152"],
+               "-N","-L","127.0.0.1:18790:127.0.0.1:18790","stockpeer@116.62.30.225"],
          cwd=HOME, out=os.path.join(N8N,"logs/xhs-edge-tunnel.log"),
          err=os.path.join(N8N,"logs/xhs-edge-tunnel.log"), env={}),
     dict(name="xhs-ai-worker", kind="daemon",
@@ -142,10 +142,10 @@ TASKS = [
     # runs on edge.  Keep its command webhooks on a loopback-only reverse SSH
     # forward so 收录/查询/反馈 do not depend on an edge n8n workflow copy.
     dict(name="paper-kb-webhook-tunnel", kind="daemon",
-         args=["ssh","-i",os.path.join(HOME,".ssh/feishu_relay_edge_ed25519"),
+         args=["ssh","-i",os.path.join(HOME,".ssh/stockpeer_ed25519"),
                "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
                "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
-               "-N","-R","127.0.0.1:15678:127.0.0.1:5678","root@47.114.113.152"],
+               "-N","-R","127.0.0.1:25678:127.0.0.1:5678","stockpeer@116.62.30.225"],
          cwd=HOME, out=os.path.join(N8N,"logs/paper-kb-webhook-tunnel.log"),
          err=os.path.join(N8N,"logs/paper-kb-webhook-tunnel.log"), env={},
          # A remote listener collision can persist across several SSH retries;
