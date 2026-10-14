@@ -32,6 +32,9 @@ DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
 SESSION_GATE_TIMEOUT_SECONDS = 10
 PERSIST_TIMEOUT_SECONDS = 60
 FUYAO_REQUEST_TIMEOUT_SECONDS = 4
+# The order book is evidence of the open. Taken later than this after 09:30 it is some other moment's book, and
+# storing it under 09:30 would say otherwise (2026-10-14: a restart at 11:04 stored 93 books of 11:08 that way).
+BID_LATE_AFTER_SECONDS = 300
 
 
 def _database_busy(error: BaseException) -> dict[str, Any]:
@@ -60,6 +63,8 @@ class AuctionPoolCaptureDependencies:
     storage_allowed: Callable[[], Awaitable[tuple[bool, dict[str, Any]]]]
     read_pool: Callable[[Any, date], list[str]]
     read_scored_rows: Callable[[Any, date], list[dict[str, Any]]] = lambda _database, _day: []
+    # Unwired, a late start stores nothing: the table is taken to exist.
+    read_table_stored: Callable[[Any, date], bool] = lambda _database, _day: True
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
     session_gate: Callable[[Any, datetime], tuple[bool, str]] = market_observation_session
@@ -120,6 +125,46 @@ class AuctionPoolCaptureRuntime:
             return _database_busy(caught)
         return {"status": status, "stored": int(stored), "final": status == "final", "rows": len(rows), "rows_data": rows}
 
+    async def _late_table(self, trade_date: date, pool: list[str], scored_pool: list[dict[str, Any]]) -> str:
+        """The 09:25 result for a session whose every tick was missed (the service started after them).
+
+        The provider keeps answering with the day's final auction after 09:25. One read is stored as the tick of
+        09:25:05, marked as fetched late (``available_at`` is the fetch time), and the table is built from it.
+        Nothing is stored unless the provider says final for the whole scored pool, or when the table exists.
+        """
+        try:
+            if await self.deps.run_database(self.deps.read_table_stored, self.deps.database, trade_date,
+                                            timeout_seconds=SESSION_GATE_TIMEOUT_SECONDS):
+                return "already_stored"
+        except DATABASE_UNAVAILABLE:
+            return "database_busy"
+        scheduled_at = datetime.combine(trade_date, time(9, 25, 5), tzinfo=CN_TZ)
+        events: list[dict[str, Any]] = []
+        for offset in range(0, len(pool), 100):
+            try:
+                payload = await asyncio.wait_for(self.deps.fetch_fuyao(
+                    "a_share_auction_snapshot", {"thscodes": ",".join(pool[offset:offset + 100])}, slot_wait_seconds=2,
+                ), timeout=FUYAO_REQUEST_TIMEOUT_SECONDS)
+            except (FuyaoProviderError, asyncio.TimeoutError):
+                return "failed"
+            events.extend(normalize_fuyao_auction(payload, scheduled_at))
+        if not _all_final(events, [str(row["symbol"]) for row in scored_pool]):
+            return "not_final"
+        rows = [event["raw"] for event in events]
+        fetched_at = self.deps.now().astimezone(timezone.utc).isoformat()
+        late = {"fetched_at": fetched_at, "reason": "the capture started after the session's auction ticks",
+                "note": "auction_* and open_price are the session's final auction; last_price is of the fetch time"}
+        try:
+            await self._persist(AUCTION_PROVIDER, AUCTION_CAPABILITY, {
+                "scheduled_at": scheduled_at.isoformat(), "pool_size": len(pool), "rows": rows, "status": "final",
+                "research_only": True, "live_effect": "none", "backfilled": late,
+                "effective_at": scheduled_at.isoformat(), "available_at": fetched_at,
+            })
+            await self._persist_table({**build_auction_table(scored_pool, rows, trade_date=trade_date), "backfilled": late})
+        except DATABASE_UNAVAILABLE:
+            return "database_busy"
+        return "stored"
+
     async def _capture_curves(self, session_date: date, pool: list[str]) -> dict[str, int]:
         counts = {"stored": 0, "failed": 0}
         effective_at = datetime.combine(session_date, time(9, 26), tzinfo=CN_TZ).isoformat()
@@ -148,6 +193,8 @@ class AuctionPoolCaptureRuntime:
         if now < start:
             await self.deps.sleep((start - now).total_seconds())
         counts = {"stored": 0, "rate_limited": 0, "failed": 0}
+        if (self.deps.now().astimezone(CN_TZ) - start).total_seconds() > BID_LATE_AFTER_SECONDS:
+            return {**counts, "skipped_late": len(pool)}
         effective_at = start.isoformat()
         next_call = start
         for symbol in pool:
@@ -232,6 +279,8 @@ class AuctionPoolCaptureRuntime:
                 break
         if scored_pool and ran_tick and ran_table_tick and not table_stored:
             await self._persist_table(build_auction_table(scored_pool, last_rows, trade_date=trade_date))
+        if scored_pool and not ran_tick and self.deps.now().astimezone(CN_TZ).time() >= time(9, 25, 5):
+            summary["late_table"] = await self._late_table(trade_date, pool, scored_pool)
         summary["curves"] = await self._capture_curves(trade_date, pool)
         summary["bids"] = await self._capture_bids(trade_date, pool)
         return {"status": "completed", **summary, "table_stored": bool(scored_pool)}
@@ -251,7 +300,7 @@ async def run_auction_pool_capture_loop(
                 await runtime.deps.sleep(5)
                 result = await runtime.capture_session(retry_at.date())
             log("auction_pool_capture " + " ".join(f"{key}={result.get(key, 0)}" for key in (
-                "scheduled", "stored", "rate_limited", "failed", "curves", "bids",
+                "scheduled", "stored", "rate_limited", "failed", "curves", "bids", "late_table",
             )))
             after = runtime.deps.now().astimezone(CN_TZ)
             target = datetime.combine(after.date() + timedelta(days=1), time(9, 14), tzinfo=CN_TZ)

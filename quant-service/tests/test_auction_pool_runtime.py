@@ -33,7 +33,7 @@ class FakeClock:
 
 
 class AuctionPoolRuntimeTests(unittest.TestCase):
-    def dependencies(self, *, current=time(9, 14), pool=None, allowed=True, fetch=None):
+    def dependencies(self, *, current=time(9, 14), pool=None, allowed=True, fetch=None, scored=None, table_stored=True):
         clock = FakeClock(datetime.combine(DAY, current, tzinfo=CN))
         persisted: list[tuple[str, str, list[dict]]] = []
         fuyao_calls: list[str] = []
@@ -82,6 +82,8 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
             run_database=run_database, database=object(), storage_allowed=storage_allowed,
             read_pool=read_pool, now=lambda: clock.current, sleep=clock.sleep,
             session_gate=session_gate,
+            read_scored_rows=lambda _database, _day: list(scored or []),
+            read_table_stored=lambda _database, _day: table_stored,
         )
         return AuctionPoolCaptureRuntime(deps), clock, persisted, fuyao_calls, curve_calls, bid_calls
 
@@ -168,6 +170,42 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
         stored.assert_not_awaited()
         self.assertEqual(curves, ["000001.SZ"])
         self.assertEqual(len(bids), 1)
+
+    def test_a_start_after_the_ticks_stores_the_final_auction_once_marked_late(self):
+        scored = [{"symbol": "000001.SZ", "name": "A", "boards": 2, "risk_rank": 10.0, "sealed_from_open": False, "previous_close": 10.0}]
+
+        async def final(symbols, _wait):
+            return {"auction_phase": "closed", "data_status": "final", "item": [
+                {"thscode": symbol, "open_price": 10.5, "auction_price": 10.5, "auction_amount": 5e6, "auction_volume": 4762,
+                 "auction_unmatched": 100, "pre_close_price": 10.0, "last_price": 10.9} for symbol in symbols.split(",")]}
+
+        runtime, _clock, persisted, calls, curves, bids = self.dependencies(current=time(11, 4), scored=scored, table_stored=False, fetch=final)
+        stored = AsyncMock()
+        runtime._persist_table = stored
+        result = asyncio.run(runtime.capture_session())
+        self.assertEqual((result["scheduled"], result["late_table"]), (0, "stored"))
+        self.assertEqual(len(calls), 1)
+        snapshot = next(rows[0] for _provider, capability, rows in persisted if capability == AUCTION_CAPABILITY)
+        self.assertEqual((snapshot["status"], snapshot["scheduled_at"]), ("final", "2026-10-12T09:25:05+08:00"))
+        self.assertEqual(snapshot["available_at"], snapshot["backfilled"]["fetched_at"])
+        self.assertTrue(snapshot["available_at"].startswith("2026-10-12T03:04"), "the fetch time, in UTC: not 09:25")
+        table = stored.await_args.args[0]
+        self.assertEqual((len(table["rows"]), table["rows"][0]["open"], table["backfilled"]["fetched_at"]),
+                         (1, 10.5, snapshot["available_at"]))
+        self.assertEqual(curves, ["000001.SZ"], "the day's auction curve can still be read late")
+        self.assertEqual((bids, result["bids"]["skipped_late"]), ([], 1), "a book taken at 11:04 is not the 09:30 book")
+
+    def test_a_late_start_stores_nothing_when_the_table_exists_or_the_provider_is_not_final(self):
+        scored = [{"symbol": "000001.SZ", "name": "A", "boards": 2, "risk_rank": 10.0, "sealed_from_open": False, "previous_close": 10.0}]
+        for table_stored, expected, fetches in ((True, "already_stored", 0), (False, "not_final", 1)):
+            runtime, _clock, persisted, calls, _curves, _bids = self.dependencies(current=time(10, 0), scored=scored, table_stored=table_stored)
+            stored = AsyncMock()
+            runtime._persist_table = stored
+            result = asyncio.run(runtime.capture_session())
+            with self.subTest(expected=expected):
+                self.assertEqual((result["late_table"], len(calls)), (expected, fetches))
+                stored.assert_not_awaited()
+                self.assertNotIn(AUCTION_CAPABILITY, [capability for _provider, capability, _rows in persisted])
 
     def test_duplicate_final_row_does_not_hide_a_missing_pool_symbol(self):
         async def fetch(_symbols, _slot_wait_seconds):
