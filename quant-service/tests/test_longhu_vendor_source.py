@@ -26,6 +26,21 @@ from app.longhu_vendor_source import (
 
 
 class LonghuVendorSourceTests(unittest.TestCase):
+    def test_the_direct_minute_batch_never_has_more_than_the_licensed_read_ceiling_in_flight(self):
+        from app.longhu_vendor_source import LICENSED_READ_MAX_IN_FLIGHT
+
+        config = LonghuVendorConfig(token="t", user_id="u", device_id="d", version="5.20.0.2", workers=12)
+        source = LonghuVendorSource(config)
+        for configured_workers, expected in ((12, LICENSED_READ_MAX_IN_FLIGHT), (64, LICENSED_READ_MAX_IN_FLIGHT), (3, 4)):
+            seen = []
+            source.config = LonghuVendorConfig(token="t", user_id="u", device_id="d", version="5.20.0.2",
+                                               workers=configured_workers)
+            with self.subTest(workers=configured_workers), patch.dict(os.environ, {}, clear=False), patch(
+                "app.longhu_vendor_source._minutes_batch", side_effect=lambda _f, _s, workers, _d: seen.append(workers) or {},
+            ):
+                source.stock_minutes_batch(["000001.SZ"])
+                self.assertEqual(seen, [expected])
+
     def test_local_runtime_does_not_fall_back_to_direct_vendor_credentials(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(
             LonghuVendorConfig,

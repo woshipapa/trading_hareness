@@ -444,7 +444,7 @@ def analyst_market_evaluation(database: Any, start_date: date | None = None, end
         observations = [dict(row) for row in connection.execute(
             """SELECT analyst_id,source_kind,strategy_available_at,scope,action,direction,status,subject_key,subject_label
                  FROM quant.analyst_observations
-                WHERE strategy_available_at >= %s::date AND strategy_available_at < (%s::date + interval '1 day')
+                WHERE (strategy_available_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN %s AND %s
                   AND (%s::text IS NULL OR analyst_id=%s)""", (start, end, analyst_id, analyst_id)).fetchall()]
         opinions = [dict(row) for row in connection.execute(
             """SELECT remote_analyst_id,opinion_date,scope,subject_key,direction,strength,factor_status

@@ -415,6 +415,11 @@ _BATCH_MINUTE_ROUTE_MISSING_UNTIL: dict[str, float] = {}
 BATCH_MINUTE_ROUTE_RECHECK_SECONDS = 600.0
 
 
+#: The licensed interface's read ceiling (docs/work/FACTS.md F027): throughput tops out near 8 calls in flight and the
+#: owner's gateway refuses 16, so a configured pool larger than this gains nothing and risks the refusal.
+LICENSED_READ_MAX_IN_FLIGHT = 8
+
+
 def minute_batch_workers() -> int:
     """In-flight single-symbol minute calls when a basket must be fanned out here.
 
@@ -933,7 +938,8 @@ class LonghuVendorSource:
         self, symbols: Iterable[str], *, deadline_seconds: float | None = None,
     ) -> dict[str, list[dict[str, Any]] | str]:
         return _minutes_batch(
-            self.stock_minutes, symbols, max(self.config.workers, minute_batch_workers()), deadline_seconds,
+            self.stock_minutes, symbols, min(max(self.config.workers, minute_batch_workers()), LICENSED_READ_MAX_IN_FLIGHT),
+            deadline_seconds,
         )
 
     def stock_period_bars(self, symbol: str, period: str, count: int = 120) -> list[dict[str, Any]]:

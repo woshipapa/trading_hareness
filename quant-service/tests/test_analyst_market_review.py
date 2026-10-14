@@ -45,6 +45,9 @@ class AnalystMarketReviewTests(unittest.TestCase):
         outcome_sql = next(sql for sql, _params in connection.calls if "FROM quant.analyst_opinion_outcomes" in sql)
         flow_sql = [sql for sql, _params in connection.calls if "FROM quant.market_flow_feature_snapshots" in sql]
         sector_sql = next(sql for sql, _params in connection.calls if "FROM quant.sector_flow_daily_features" in sql)
+        observation_sql = next(sql for sql, _params in connection.calls if "FROM quant.analyst_observations" in sql)
+        self.assertIn("AT TIME ZONE 'Asia/Shanghai')::date BETWEEN", observation_sql,
+                      "the day of an observation is its Shanghai day, whatever the session's time zone")
         self.assertIn("available_at<=%s", opinion_sql)
         self.assertIn("p.available_at<=%s", outcome_sql)
         self.assertGreaterEqual(len(flow_sql), 2)
