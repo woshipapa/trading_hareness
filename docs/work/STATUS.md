@@ -29,7 +29,6 @@
 - W015 2026-10-14 17:5x 数据库方案：n8n_relay 库 2.4 GB 搬法。选项：只搬业务表（不含 `execution_data` 1.5 GB 的历史执行）进新主机上的 Postgres 容器（镜像从 edge `docker save` 过去）。为什么等：丢不丢执行历史、要不要保留 baidu 归档队列 878 MB 是用户的取舍。
 - W015 2026-10-14 22:5x 在新主机上装 PostgreSQL 16 并启动系统级 Docker（`bash state/edge-move-A1.sh`，或给我这类命令的权限）。为什么等：自动模式拦截了生产主机上装包和起守护进程。 → 用户 22:3x 自己跑了 `state/edge-move-A1.sh`（2026-10-14）
 - W014 2026-10-14 13:06 对方工作站上的库能承受多少并发连接（第 7.3 步要用）。为什么等：只有对方知道。之后：按这个数定两个容器的数据库线程和连接池上限。
-- W015 2026-10-15 00:4x 飞书看板的前门：(a) 给 `quant-edge-to-owner` 加 `permitopen="127.0.0.1:18300"`，edge 的 nginx 18301 继续做前门（`bash state/edge-move/F1-frontend-front-door.sh`）；(b) 在新主机上装 tailscale 并让 nginx 监听 18301（要你在 tailscale 控制台授权，也要对方同意动 nginx）；(c) 只用工作站的隧道（127.0.0.1:18300）。为什么等：(a) 扩大受限钥匙的权限，被自动模式拦截。我倾向 (a)。
 
 ## 到点要做
 
