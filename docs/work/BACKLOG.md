@@ -838,6 +838,68 @@
 - how: 根因是导入没有量级校验，B019 的校验（提交 `3d2e6a8b`，随 `owner-code-20261014-07` 在 11:42 生效）此后新导入的包会被拒绝；这两条是 10 月 13 日晚在校验之前导入的，今天（session_date 10-14）过期。没有再改代码。要注意：库里老的计划（`status=expired`）里如果还有 `amount` 参数以亿写的，只影响复盘统计，不影响今后
 - who: agent
 - needs: 无；明天起观察：今晚新导入的 10 月 14 日复盘包是否被校验放行，金额是否以元写
+- note: 2026-10-14 参数来源核对（`docs/work/probes/` 本条的只读查询）：不止 10 月 13 日——9 月 28 日的 `000678`、`600802`（relay_fast_seal：`fail_amount` 3.69、6.0，`seal_amount_max` 1.8、4.0）和 9 月 29 日的 `603949`（relay_acceleration：`seal_amount_max` 4.0、`entry_amount_range` [3,4]）也是以亿写的。这些计划已过期，只影响当时的盘中提醒和事后复盘统计。老师计划参数的来源（T 口述/D 数据核对/I 系统默认）：龙头类 `sympathy_follow` 的 18 个数字参数里 T=0、D=2、I=16，`trend_continuation` T=0（20 个 D、29 个 I），`relay_race` 的 3 个参数里 T=2
 - result: 2026-10-14 当日模拟确认，没有写库。今天上午这两条计划的盘中提醒（若有）不可信
+- updated: 2026-10-14
+
+### B076 试验台的收益拆成“隔夜”和“盘中”，并给买入类加上“一字记 0 不删”的账
+
+- state: ready
+- kind: follow-up
+- why: 2026-10-14 龙头战法分析（`docs/archive/2026-10-14-leader-tactic-analysis/README.md`）：龙头持有选股的次日隔夜 +6.83% 对其余 +2.35%，盘中 −1.06% 对 −0.36%；次日开盘就在涨停价的占 48%（一字 27.0%、开板 20.9%），账本里 `buy_open` 只统计能买的那一半，结论比全部选股乐观
+- how: 在每个战法的日摘要里多存隔夜和盘中两段（`held` 的 S1 开盘/今收、S1 收盘/S1 开盘），`buy_open` 类另给“一字记 0 不删”的均值；给总结接口和看板各加一列。会改日摘要的键，参考指纹文件要同步更新，历史摘要要用 `rebuild_digests` 重建
+- who: agent
+- needs: 无
+- updated: 2026-10-14
+
+### B077 每晚把当天龙头选股和候选的分钟线落本机
+
+- state: ready
+- kind: data-backfill
+- why: 老师用开盘后几分钟的卡位确认龙头，我们的龙头是收盘后按首封时间和板数定的，两者是不是同一只只有分钟线才能比；接口只给最近一个交易日的分钟线
+- how: 脚本已写好：`state/capture_leader_minutes.py [日期] [--dry-run]`（本机，不进仓库）。每晚 16:50 之后（收盘读数存下之后）读看板接口里的 hold/focus/avoid 名单，约 40 只，6 并发，写 `state/research/leader_minutes/<日期>.jsonl`。要定时：加进监督进程的任务表（`scripts/svc_supervisor.py` 的 TASKS，目前该文件有别的会话未提交的改动，没有碰）。要扩到全部涨停股，改取读数而不是看板
+- who: agent 备好；定时任务由用户或确认没有冲突后加
+- needs: 用户确认定时和范围
+- updated: 2026-10-14
+
+### B078 2023 年复权因子补写（B002 的写库一步）
+
+- state: waiting-user
+- kind: data-backfill
+- why: 只读干跑 2026-10-14（`state/factors_plan_2023.py`，副本 `docs/archive/2026-10-14-leader-tactic-analysis/`）：2023-08 到 2023-11 缺因子的 254k 行里 253,316 行可以从昨收链推出，7 个无锚点的全是指数；已存的 238,831 个因子里 238,307 个与推算一致（99.78%，差的是供应商的小数位取整）；2023-11/12 里已存的 177,825 个因子被昨收链 100% 复现（63 个除权日全部一致）
+- how: 写入脚本 `state/factors_fill_2023.py`（默认干跑，`--apply` 才写；一个交易日一个事务，走服务自己的 `adj_factor` 入口，来源 `longhu_qfq_derived`，方法 `pre_close_chain_v1`，不动已存的行）。在 owner 容器里跑：`python - --apply < factors_fill_2023.py`。约 25 万行，要看每个事务的耗时（owner 写库的已知教训：逐行语句每次约 52ms 往返），先拿一个月试
+- who: 写库由用户执行或明确说“做”
+- needs: 用户同意写 25 万行；写前先做 B001 的话一起推
+- updated: 2026-10-14
+
+### B079 结算里的涨跌停回退把主板 ST 当 10% 板（2026-07-06 之前应是 5%）
+
+- state: open
+- kind: defect
+- why: `t1_settlement._limits` 在日线没有涨跌停价时调 `a_share_limit_ratio(symbol, False, 日期)`，`is_st` 固定为 False，2026-07-06 之前的主板 ST 股按 10% 板判断；2023 年约 8.6% 的日线没有涨跌停价（F003），这部分里的 ST 股封板、一字会被误判
+- how: 回退里取 ST 状态（名称含 ST 或库里的 ST 标记），按当日规则算；先查回退一共影响多少行再定，涉及 B009、F034 的矛盾
+- who: agent
+- needs: 无
+- updated: 2026-10-14
+
+### B080 龙头类里两个条件的取舍
+
+- state: open
+- kind: follow-up
+- why: 750 天重放里 `全市场最高板`（日均差 +0.22%，t 0.57）和 `龙头切换`（+0.11%，t 0.36）看不出优势；`梯队环境接力` 按日 t=3.20，按题材日分簇后 t=1.10。样本内
+- how: 前向样本没有满 20 个选股日之前不动；满了以后按标签（现在 `q` 门已经加了）定。想提前处理就要用户定
+- who: 用户定
+- needs: 用户决定要不要提前下掉
+- updated: 2026-10-14
+
+### B081 跟随票的计划里报告“龙头一字买不到”（只报告，不改动作）
+
+- state: done
+- kind: follow-up
+- why: 2026-10-14 当日模拟里 6 条计划依附 `000530`，它全天一字（开高低收都是 6.3）买不到；`sympathy_follow` 的“龙头强”把封板当成前提，看不出它是替代买点
+- how: `teacher_review_rules.py`：龙头的 `open`、`low`、`limit_up_price` 写进 tape 的最新摘要；`sympathy_follow` 的清单多一行“龙头一字（至今全天买不到，跟随票是替代买点）”，不参与门控，动作不变。理由：老师的跟随打法本来就是龙头买不到时买跟风，是否跟随是老师的判断，不是这条规则的；结果统计时可以按这一行分账
+- who: agent
+- needs: 无；发布要随下一次 owner 纯代码发布
+- result: 2026-10-14 提交 420273d0；新用例 `test_follower_report_names_a_leader_that_cannot_be_bought_without_gating_on_it`（一字与非一字两种龙头，动作都是 entry）；全套 3,249 条通过，输出 `docs/work/probes/2026-10-14-follower-leader-line-release-path.out.txt`
 - updated: 2026-10-14
 

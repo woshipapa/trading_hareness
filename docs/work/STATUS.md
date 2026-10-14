@@ -43,7 +43,7 @@
 
 ## 待办清单
 
-open 33, ready 16, doing 3, waiting-user 1, done 21, dropped 1
+open 35, ready 18, doing 3, waiting-user 2, done 22, dropped 1
 
 在做的、可以开工的、等用户处理的:
 
@@ -67,3 +67,6 @@ open 33, ready 16, doing 3, waiting-user 1, done 21, dropped 1
 - B055 (ready) 补取 2026-10-13 当天的指数和 ETF 分钟线
 - B059 (doing) 采集循环在 09:25 之后才启动时：不补竞价定格，却把当时的盘口记成 09:30 的
 - B060 (ready) edge 到 owner 的隧道在对端挂死时会永远停在握手里
+- B076 (ready) 试验台的收益拆成“隔夜”和“盘中”，并给买入类加上“一字记 0 不删”的账
+- B077 (ready) 每晚把当天龙头选股和候选的分钟线落本机
+- B078 (waiting-user) 2023 年复权因子补写（B002 的写库一步）
