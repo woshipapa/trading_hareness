@@ -14,7 +14,18 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .all_a_snapshot_sources import fallback_provenance, snapshot_decision_eligible
 from .paper_order_bridge import STAGE as PAPER_AUTO_STAGE
+
+#: Why no order is planned on a snapshot whose source is not decision eligible.
+SNAPSHOT_NOT_ELIGIBLE_REASON = "the all-A snapshot's source is not decision eligible"
+
+
+def snapshot_not_eligible(status: Any) -> dict[str, Any] | None:
+    """The blocked result for a snapshot no order may be planned on; None when it may."""
+    if snapshot_decision_eligible(status):
+        return None
+    return {"status": "blocked", "reason": SNAPSHOT_NOT_ELIGIBLE_REASON, **fallback_provenance(status)}
 
 
 @dataclass(frozen=True)
@@ -37,6 +48,11 @@ async def run_paper_auto_execution(
     Large-order confirmation runs only on what delivery selection kept, because
     it costs one gateway call per name. Everything below it - sizing, exits,
     tradability - already belongs to the strategy and the ledger.
+
+    Whoever reads the all-A snapshot answers for its source: the quotes read here are used
+    only when the snapshot says it is decision eligible, and a caller that hands ``quotes`` in
+    has made the same check on the snapshot it read (``snapshot_not_eligible``). On a minute
+    the fallback filled while its binding is not eligible, no order is planned, a buy or a stop.
     """
     if not deps.enabled():
         return {"status": "disabled", "reason": "QUANT_PAPER_AUTO_EXECUTION_ENABLED is not set"}
@@ -100,7 +116,10 @@ async def run_paper_auto_execution(
         return {"status": "idle", "reason": "no new candidates and no open paper positions",
                 "suppressed_repeat": suppressed_repeat}
     if quotes is None:
-        rows, _status = await deps.all_a_snapshot()
+        rows, snapshot_status = await deps.all_a_snapshot()
+        blocked = snapshot_not_eligible(snapshot_status)
+        if blocked is not None:
+            return {**blocked, "suppressed_repeat": suppressed_repeat}
         quotes = {str(row["symbol"]): row for row in rows if row.get("symbol")}
     cash = float(account["cash"])
     plan = plan_paper_orders(confirmed, positions, quotes,
@@ -124,4 +143,5 @@ async def run_paper_auto_execution(
             "placed": placed, "cash_before": cash}
 
 
-__all__ = ["PaperAutoExecutionDependencies", "run_paper_auto_execution"]
+__all__ = ["PaperAutoExecutionDependencies", "SNAPSHOT_NOT_ELIGIBLE_REASON", "run_paper_auto_execution",
+           "snapshot_not_eligible"]

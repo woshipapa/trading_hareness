@@ -10,10 +10,18 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import unittest
-from datetime import datetime, timezone
+import uuid
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
+from app import all_a_snapshot_sources as snapshot_sources
+from app import board_flow_drill_runtime as drill_runtime
 from app import intraday_signal_rules as rules_module
+from app.all_a_snapshot_sources import (
+    fallback_provenance, snapshot_decision_eligible, tdx_snapshot_completeness, tdx_snapshot_metadata,
+)
+from app.board_flow_drill_runtime import BoardDrillDependencies, drill_board_stock_candidates
 from app.datasources import catalog as catalog_module
 from app.datasources.catalog import (
     BINDINGS, EXCHANGE_TIMESTAMPED_QUOTE_LABELS, RULE_USABLE_FLOW_LABELS, SOURCE_LABELS, binding_decision_eligible,
@@ -24,10 +32,16 @@ from app.intraday_derived_flow_metrics import (
 )
 from app.intraday_features import annotate_flow_snapshot_provenance
 from app.intraday_quote_normalization import observation_source, quote_from_fuyao
+from app.intraday_scan_preparation import prepare_intraday_scan_inputs
+from app.intraday_scan_source_status import build_scan_source_status
 from app.intraday_watch_quote_capture import capture_watch_quotes
+from app.limit_up_anchor import anchor_source, live_limit_up_pool_rows, snapshot_anchor_source
 from app.live_policy import live_policy_gate
 from app.main import intraday_signal_rules
-from app.platform.evidence_contracts import materialize_evidence_status
+from app.paper_auto_execution_runtime import (
+    SNAPSHOT_NOT_ELIGIBLE_REASON, PaperAutoExecutionDependencies, run_paper_auto_execution,
+)
+from app.platform.evidence_contracts import all_a_snapshot_contract_keys, materialize_evidence_status
 
 import test_intraday_watch_quote_capture as capture_tests
 
@@ -305,6 +319,304 @@ class WatchQuoteCaptureProvenanceTests(unittest.TestCase):
         quotes = {"000001.SZ": {"main_net_inflow": 100}}
         annotate_flow_snapshot_provenance(quotes, given)
         self.assertFalse(quotes["000001.SZ"]["flow_snapshot"]["decision_eligible"])
+
+    def test_a_fallback_snapshot_is_materialized_under_its_own_contracts(self):
+        capture, _given = self.capture([TDX_ROW], tdx_status(False))
+        status = capture.all_a_snapshot_status
+        self.assertEqual((status["evidence_contract"], status["provider_key"], status["capability"]),
+                         ("tdx_public_all_a_snapshot", "tdx_public", "all_a_snapshot"))
+        self.assertEqual(status["fallback_for"], "fuyao_ths")
+        self.assertIs(status["flow_decision_eligible"], False)
+        self.assertEqual((capture.derived_flow_status["evidence_contract"], capture.derived_flow_status["provider_key"]),
+                         ("tdx_public_derived_watch_flow", "tdx_public"))
+        eligible, _given = self.capture([TDX_ROW], tdx_status(True))
+        self.assertIs(eligible.all_a_snapshot_status["flow_decision_eligible"], True)
+        main, _given = self.capture([FUYAO_ROW], FUYAO_STATUS)
+        self.assertNotIn("flow_decision_eligible", main.all_a_snapshot_status)
+        self.assertEqual((main.derived_flow_status["evidence_contract"], main.derived_flow_status["provider_key"]),
+                         ("fuyao_ths_derived_watch_flow", "fuyao_ths"))
+
+    def test_a_provider_without_a_contract_is_not_materialized_as_the_main_source(self):
+        with self.assertRaises(ValueError):
+            all_a_snapshot_contract_keys({"provider_key": "some_other_source"})
+        self.assertEqual(all_a_snapshot_contract_keys({"status": "unavailable"}),
+                         ("fuyao_all_a_snapshot", "fuyao_ths_derived_watch_flow"))
+        self.assertEqual(all_a_snapshot_contract_keys(None), all_a_snapshot_contract_keys(FUYAO_STATUS))
+
+
+def scan_status(quotes, rows, snapshot_status):
+    return build_scan_source_status(
+        selected_symbols=["000001.SZ", "000002.SZ"], quotes=quotes, all_a_rows=rows, fresh_watch_rows=[],
+        sina_watch_rows=[], licensed_watch_rows=[], licensed_watch_status={"status": "disabled"},
+        eastmoney_watch_flow_rows=[], eastmoney_watch_flow_status={"status": "unavailable"},
+        derived_flow_status={"status": "fresh"}, all_a_snapshot_status=snapshot_status, surge_source={},
+        priority_symbols=[], rotation_pool_size=0, rotation_start_offset=0, next_rotation_offset=0,
+        realtime_minutes={}, fast_confirmations={}, board_cache_evidence={}, quote_timestamp_slo_seconds=20.0,
+    )
+
+
+class ScanSourceStatusTests(unittest.TestCase):
+    def test_a_main_source_scan_is_reported_as_before(self):
+        snapshot = materialize_evidence_status("fuyao_all_a_snapshot", FUYAO_STATUS)
+        status = scan_status({"000001.SZ": {"price_source": "fuyao_ths_all_a_snapshot"},
+                              "000002.SZ": {"price_source": "tencent_batched_watch_quote"}}, [FUYAO_ROW], snapshot)
+        self.assertEqual(status["fuyao"], {"status": "completed", "rows": 1, "matched": 2, "all_a_snapshot": snapshot,
+                                           "all_a_only_watch_quote_symbols": 1})
+        self.assertNotIn("tdx_public", status)
+        self.assertEqual(list(status)[:2], ["fuyao", "tencent_watch"])
+
+    def test_a_fallback_scan_names_the_provider_that_served_it(self):
+        for eligible in (False, True):
+            snapshot = {**materialize_evidence_status("tdx_public_all_a_snapshot", tdx_status(eligible)),
+                        "fallback_reason": "Fuyao request failed", "flow_decision_eligible": eligible}
+            status = scan_status({"000001.SZ": {"price_source": "tdx_public_all_a_snapshot"},
+                                  "000002.SZ": {"price_source": "fuyao_ths_all_a_snapshot"}}, [TDX_ROW], snapshot)
+            # The main source's block is the block of a scan it did not answer.
+            self.assertEqual(status["fuyao"]["status"], "unavailable")
+            self.assertEqual((status["fuyao"]["rows"], status["fuyao"]["matched"],
+                              status["fuyao"]["all_a_only_watch_quote_symbols"]), (0, 0, 0))
+            self.assertEqual(status["fuyao"]["all_a_snapshot"]["status"], "unavailable")
+            self.assertEqual(status["fuyao"]["all_a_snapshot"]["error"], "Fuyao request failed")
+            self.assertEqual(status["fuyao"]["all_a_snapshot"]["served_by"], "tdx_public")
+            self.assertEqual(status["fuyao"]["all_a_snapshot"]["provider_key"], "fuyao_ths")
+            served = status["tdx_public"]
+            self.assertEqual((served["status"], served["rows"], served["matched"]), ("completed", 1, 2))
+            self.assertEqual(served["all_a_only_watch_quote_symbols"], 1)
+            self.assertEqual(served["all_a_snapshot"], snapshot)
+            self.assertEqual(served["fallback_for"], "fuyao_ths")
+            self.assertIs(served["flow_decision_eligible"], eligible)
+
+
+class ScanPreparationHealthTests(unittest.TestCase):
+    def recorded(self, rows, source_status):
+        calls = []
+        dependencies = mock.MagicMock()
+        dependencies.record_provider_success = lambda _connection, *args: calls.append(("success", *args))
+        dependencies.record_provider_failure = lambda _connection, *args: calls.append(("failure", *args))
+        prepare_intraday_scan_inputs(
+            mock.MagicMock(), scan_id=uuid.uuid4(), observed_at=datetime(2026, 10, 13, 2, tzinfo=timezone.utc),
+            selected_symbols=[], source_status=source_status, watches=[], quotes={}, all_a_rows=rows,
+            quote_latency_ms=7, realtime_minutes={}, surge_features={}, confirmation_window=timedelta(minutes=5),
+            dependencies=dependencies,
+        )
+        return calls
+
+    def test_a_main_source_scan_records_its_success_as_before(self):
+        for row in (FUYAO_ROW, {"symbol": "000001.SZ"}):
+            self.assertEqual(self.recorded([row], {}), [("success", "fuyao_ths", "realtime_quote", 1, 7)])
+        self.assertEqual(self.recorded([], {}), [
+            ("failure", "fuyao_ths", "realtime_quote", "all-A snapshot unavailable during watch scan", 7)])
+
+    def test_a_fallback_scan_records_the_main_failure_and_the_serving_provider_success(self):
+        source_status = {"tdx_public": {"all_a_snapshot": {"fallback_reason": "Fuyao request failed"}}}
+        self.assertEqual(self.recorded([TDX_ROW, TDX_ROW], source_status), [
+            ("failure", "fuyao_ths", "realtime_quote", "Fuyao request failed", 7),
+            ("success", "tdx_public", "realtime_quote", 2, 7),
+        ])
+        self.assertEqual(self.recorded([TDX_ROW], {})[0][3], "all-A snapshot unavailable during watch scan")
+
+
+class SnapshotEligibilityTests(unittest.TestCase):
+    def test_eligibility_is_the_flag_and_never_the_status(self):
+        self.assertTrue(snapshot_decision_eligible(FUYAO_STATUS))
+        self.assertFalse(snapshot_decision_eligible(tdx_status(False)))
+        self.assertTrue(snapshot_decision_eligible(tdx_status(True)))
+        self.assertEqual(tdx_status(False)["status"], "cached")
+        for not_true in (None, "true", 1, 0):
+            self.assertFalse(snapshot_decision_eligible(tdx_status(not_true)), not_true)
+        # A caller from before the flag hands no key at all.
+        for without_the_flag in ({}, None, {"status": "stale"}):
+            self.assertTrue(snapshot_decision_eligible(without_the_flag))
+
+    def test_only_a_filled_minute_reports_a_fallback(self):
+        self.assertEqual(fallback_provenance(FUYAO_STATUS), {})
+        self.assertEqual(fallback_provenance({}), {})
+        self.assertEqual(fallback_provenance(tdx_status(False)), {
+            "snapshot_source": "tdx_public_all_a_snapshot", "snapshot_provider": "tdx_public", "fallback_for": "fuyao_ths"})
+
+    def test_the_fallback_metadata_carries_the_flag_under_the_cache_status(self):
+        completeness = tdx_snapshot_completeness(5500, (), 5580)
+        metadata = tdx_snapshot_metadata(completeness=completeness, fallback_reason="x",
+                                         available_at=datetime(2026, 10, 13, 2, tzinfo=timezone.utc))
+        binding = next(item for item in BINDINGS if (item.source, item.capability) == SNAPSHOT_KEY)
+        self.assertIs(metadata["decision_eligible"], binding.decision_eligible)
+        # The service hands the metadata out under the cache's status: "unknown" is gone, the flag is not.
+        merged = {**metadata, "status": "fresh", "age_seconds": 0.0, "ttl_seconds": 30.0}
+        self.assertEqual(snapshot_decision_eligible(merged), binding.decision_eligible)
+        with mock.patch.object(snapshot_sources, "BINDINGS", bindings_with_tdx_snapshot_eligible()):
+            eligible = tdx_snapshot_metadata(completeness=completeness, fallback_reason="x",
+                                             available_at=datetime(2026, 10, 13, 2, tzinfo=timezone.utc))
+        self.assertTrue(snapshot_decision_eligible({**eligible, "status": "fresh"}))
+
+
+class _Result:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+    def fetchall(self):
+        return self.rows
+
+
+class _Database:
+    """A paper account with one held position, so a quiet minute still wants quotes."""
+
+    @contextmanager
+    def transaction(self):
+        connection = mock.MagicMock()
+        connection.execute = lambda sql, _params=None: _Result(
+            [{"cash": 100000}] if "paper_accounts" in sql
+            else [{"symbol": "000001.SZ", "quantity": 100}] if "paper_positions" in sql else [])
+        yield connection
+
+
+async def _run(action, *args, **_kwargs):
+    return action(*args)
+
+
+class PaperExecutionTests(unittest.TestCase):
+    def run_paper(self, status, quotes=None):
+        reads = []
+
+        async def snapshot():
+            reads.append(status)
+            return [dict(FUYAO_ROW)], status
+
+        deps = PaperAutoExecutionDependencies(
+            enabled=lambda: True, database=_Database(), run_database=_run, run_vendor_blocking=_run,
+            vendor_source=lambda: None, all_a_snapshot=snapshot, json_safe=lambda value: value,
+            account_equity=1_000_000.0)
+        with mock.patch("app.paper_auto_execution.plan_paper_orders",
+                        return_value={"buys": [], "sells": [{"symbol": "000001.SZ"}], "skipped": []}) as plan, \
+                mock.patch("app.paper_order_bridge.execute_plan", return_value={"orders": 1}) as place:
+            result = asyncio.run(run_paper_auto_execution([], quotes, deps))
+        return result, plan.call_count, place.call_count, len(reads)
+
+    def test_a_main_source_snapshot_is_acted_on_as_before(self):
+        for status in (FUYAO_STATUS, {}):
+            result, planned, placed, _reads = self.run_paper(status)
+            self.assertEqual((result["status"], planned, placed), ("executed", 1, 1))
+            self.assertEqual(result["placed"], {"orders": 1})
+
+    def test_no_order_is_planned_on_a_fallback_snapshot_while_its_binding_is_not_eligible(self):
+        result, planned, placed, reads = self.run_paper(tdx_status(False))
+        self.assertEqual((planned, placed, reads), (0, 0, 1))
+        self.assertEqual(result, {
+            "status": "blocked", "reason": SNAPSHOT_NOT_ELIGIBLE_REASON, "suppressed_repeat": 0,
+            "snapshot_source": "tdx_public_all_a_snapshot", "snapshot_provider": "tdx_public",
+            "fallback_for": "fuyao_ths"})
+
+    def test_a_fallback_snapshot_is_acted_on_once_its_binding_is_eligible(self):
+        result, planned, placed, _reads = self.run_paper(tdx_status(True))
+        self.assertEqual((result["status"], planned, placed), ("executed", 1, 1))
+
+
+class BoardDrillTests(unittest.TestCase):
+    def drill(self, status):
+        handed = []
+
+        async def snapshot():
+            return [dict(TDX_ROW if (status or {}).get("fallback_for") else FUYAO_ROW)], status
+
+        async def paper(candidates, quotes):
+            handed.append((candidates, quotes))
+            return {"status": "idle"}
+
+        deps = BoardDrillDependencies(database=_Database(), run_database=_run, all_a_snapshot=snapshot,
+                                      paper_execution=paper, now=lambda: datetime(2026, 10, 13, 2, tzinfo=timezone.utc))
+        with mock.patch.object(drill_runtime, "sector_membership", return_value={"881101": {"000001.SZ"}}), \
+                mock.patch.object(drill_runtime, "instrument_names", return_value={"000001.SZ": "平安银行"}), \
+                mock.patch.object(drill_runtime, "drill_board_events", return_value={
+                    "candidates": [{"symbol": "000001.SZ"}], "boards_drilled": 1, "boards_without_membership": 0}):
+            result = asyncio.run(drill_board_stock_candidates([{"taxonomy_key": "longhu_ths_industry"}], deps))
+        return result, handed
+
+    def test_a_main_source_drill_is_handed_to_paper_execution_as_before(self):
+        for status in (FUYAO_STATUS, {}):
+            result, handed = self.drill(status)
+            self.assertEqual(set(result), {"status", "boards", "boards_drilled", "boards_without_membership",
+                                           "candidates", "paper", "decision_eligible"})
+            self.assertEqual(result["paper"], {"status": "idle"})
+            self.assertEqual(handed[0][0][0]["symbol"], "000001.SZ")
+            self.assertEqual(handed[0][1]["000001.SZ"]["price_source"], "fuyao_ths_all_a_snapshot")
+
+    def test_a_fallback_drill_names_its_source_and_is_not_handed_on_while_not_eligible(self):
+        result, handed = self.drill(tdx_status(False))
+        self.assertEqual(handed, [])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["candidates"][0]["symbol"], "000001.SZ")
+        self.assertEqual(result["paper"], {
+            "status": "blocked", "reason": SNAPSHOT_NOT_ELIGIBLE_REASON,
+            "snapshot_source": "tdx_public_all_a_snapshot", "snapshot_provider": "tdx_public",
+            "fallback_for": "fuyao_ths"})
+        self.assertEqual((result["snapshot_provider"], result["fallback_for"]), ("tdx_public", "fuyao_ths"))
+        self.assertFalse(result["decision_eligible"])
+
+    def test_a_fallback_drill_is_handed_on_once_its_binding_is_eligible(self):
+        result, handed = self.drill(tdx_status(True))
+        self.assertEqual(result["paper"], {"status": "idle"})
+        self.assertEqual(handed[0][1]["000001.SZ"]["price_source"], "tdx_public_all_a_snapshot")
+        self.assertEqual(result["snapshot_source"], "tdx_public_all_a_snapshot")
+
+
+class LimitUpAnchorTests(unittest.TestCase):
+    observed = datetime(2026, 10, 13, 2, tzinfo=timezone.utc)
+    limits = {"000001.SZ": 10.0}
+
+    def anchors(self, row):
+        return live_limit_up_pool_rows([row], self.limits, {"000001.SZ": "平安银行"}, self.observed)
+
+    def test_a_main_source_anchor_is_stored_as_before(self):
+        expected = {
+            "ts_code": "000001.SZ", "event_type": "limit_up_pool", "published_at": self.observed.isoformat(),
+            "title": "limit_up_pool：平安银行", "url": None, "upstream_site": "fuyao_derived",
+            "raw": {"price": 10.0, "limit_up": 10.0, "pct_change": 1.2, "high": None, "sealed": True,
+                    "source": "fuyao_all_a_plus_stk_limit"},
+        }
+        unlabelled = {key: value for key, value in FUYAO_ROW.items() if key != "price_source"}
+        for row in (FUYAO_ROW, unlabelled):
+            self.assertEqual(self.anchors(row), [expected])
+            self.assertEqual(snapshot_anchor_source([row]), ("fuyao_derived", "fuyao_all_a_plus_stk_limit"))
+        self.assertEqual(snapshot_anchor_source([]), ("fuyao_derived", "fuyao_all_a_plus_stk_limit"))
+
+    def test_a_fallback_anchor_carries_its_own_source(self):
+        anchor = self.anchors(TDX_ROW)[0]
+        self.assertEqual(anchor["upstream_site"], "tdx_public_derived")
+        self.assertEqual(anchor["raw"]["source"], "tdx_public_all_a_plus_stk_limit")
+        self.assertEqual(snapshot_anchor_source([TDX_ROW]), ("tdx_public_derived", "tdx_public_all_a_plus_stk_limit"))
+        self.assertEqual(anchor_source({"price_source": "some_other_snapshot"}),
+                         ("unknown_snapshot_derived", "some_other_snapshot_plus_stk_limit"))
+
+    def refresh(self, row):
+        from app import main
+
+        async def context(_day):
+            return {"limits": self.limits, "names": {}}
+
+        async def snapshot():
+            return [row], {}
+
+        stored = []
+
+        async def blocking(function, *args, **_kwargs):
+            stored.append((function.__name__, *args[1:]))
+            return 1
+
+        with mock.patch.object(main, "_xiaojie_session_context", context), \
+                mock.patch.object(main, "intraday_all_a_snapshot", snapshot), \
+                mock.patch.object(main, "run_database_blocking", blocking):
+            return asyncio.run(main.refresh_intraday_limit_up_anchors(self.observed)), stored
+
+    def test_the_refresh_stores_and_reports_the_source_the_anchors_came_from(self):
+        result, stored = self.refresh(dict(FUYAO_ROW))
+        self.assertEqual(result, {"status": "completed", "received": 1, "stored": 1,
+                                  "source": "fuyao_all_a_plus_stk_limit"})
+        self.assertEqual(stored, [("_persist_local_limit_pool", "fuyao_derived")])
+        result, stored = self.refresh(dict(TDX_ROW))
+        self.assertEqual(result["source"], "tdx_public_all_a_plus_stk_limit")
+        self.assertEqual(stored, [("_persist_local_limit_pool", "tdx_public_derived")])
 
 
 if __name__ == "__main__":

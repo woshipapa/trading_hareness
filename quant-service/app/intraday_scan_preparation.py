@@ -9,7 +9,7 @@ import uuid
 
 from psycopg.types.json import Json
 
-from .datasources.catalog import primary_source
+from .datasources.catalog import SOURCE_LABELS, primary_source
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,12 @@ class IntradayScanPreparationDependencies:
     number: Callable[[Any], float | None]
 
 
+def _serving_source(all_a_rows: list[dict[str, Any]], primary: str) -> str:
+    """The catalog source of the label the snapshot rows carry; the primary when they carry none."""
+    label = SOURCE_LABELS.get(str(all_a_rows[0].get("price_source") or "")) if all_a_rows else None
+    return label.source if label is not None else primary
+
+
 def prepare_intraday_scan_inputs(
     connection: Any,
     *,
@@ -79,7 +85,20 @@ def prepare_intraday_scan_inputs(
     # The all-A snapshot's health belongs to whichever source the catalog
     # names for the capability, not to a vendor spelled out here.
     all_a_source = primary_source("quote.all_a_snapshot")
-    if all_a_rows:
+    # The rows name the source that served them.  When that is not the primary source, the
+    # primary failed this scan and another source filled the minute: the failure is the
+    # primary's, with its error, and the success is recorded under the source that served.
+    served_by = _serving_source(all_a_rows, all_a_source)
+    if all_a_rows and served_by != all_a_source:
+        served_status = source_status.get(served_by) if isinstance(source_status.get(served_by), dict) else {}
+        snapshot_status = served_status.get("all_a_snapshot") if isinstance(served_status.get("all_a_snapshot"), dict) else {}
+        dependencies.record_provider_failure(
+            connection, all_a_source, "realtime_quote",
+            str(snapshot_status.get("fallback_reason") or "all-A snapshot unavailable during watch scan"),
+            quote_latency_ms,
+        )
+        dependencies.record_provider_success(connection, served_by, "realtime_quote", len(all_a_rows), quote_latency_ms)
+    elif all_a_rows:
         dependencies.record_provider_success(connection, all_a_source, "realtime_quote", len(all_a_rows), quote_latency_ms)
     else:
         dependencies.record_provider_failure(

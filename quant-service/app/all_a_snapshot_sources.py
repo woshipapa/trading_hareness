@@ -134,6 +134,31 @@ def tdx_snapshot_metadata(*, completeness: Mapping[str, Any], fallback_reason: s
     }
 
 
+def snapshot_decision_eligible(status: Any) -> bool:
+    """Whether a row of the snapshot with this status may be acted on.
+
+    The answer is the snapshot's own ``decision_eligible`` and nothing else: the shared cache
+    puts its ``status`` and age over the supplier's, so a minute the fallback filled reads
+    ``fresh`` and its freshness says nothing about its source. A status that carries the flag
+    must carry ``True``. One without the key comes from a caller that predates the flag and is
+    treated as before; both sources of the chain always set it.
+    """
+    if not isinstance(status, Mapping) or "decision_eligible" not in status:
+        return True
+    return status["decision_eligible"] is True
+
+
+def fallback_provenance(status: Any) -> dict[str, Any]:
+    """What a consumer reports beside its result when another source filled the minute.
+
+    Nothing for a minute the main source served, so its results are what they were.
+    """
+    if not isinstance(status, Mapping) or not status.get("fallback_for"):
+        return {}
+    return {"snapshot_source": status.get("source"), "snapshot_provider": status.get("provider_key"),
+            "fallback_for": status["fallback_for"]}
+
+
 def main_source_reference(
     remembered: tuple[datetime, list[dict[str, Any]]] | None,
 ) -> tuple[datetime, list[dict[str, Any]]] | None:
@@ -298,7 +323,7 @@ def compare(fuyao_rows: Iterable[Mapping[str, Any]], tdx_rows: Iterable[Mapping[
 __all__ = [
     "AllASnapshotFallbackError", "FALLBACK_REASON_MAX_CHARS", "TDX_PROVIDER_KEY", "TDX_READ_TIMEOUT_SECONDS",
     "TDX_SHARED_READ_TTL_SECONDS", "TDX_SNAPSHOT_MIN_COMPLETE_SHARE", "TDX_SNAPSHOT_ROSTER_FLOOR",
-    "TDX_SNAPSHOT_SOURCE", "compare", "main_source_reference", "project_tdx_snapshot_rows", "read",
-    "shared_tdx_snapshot", "tdx_snapshot_completeness", "tdx_snapshot_decision_eligible",
-    "tdx_snapshot_metadata",
+    "TDX_SNAPSHOT_SOURCE", "compare", "fallback_provenance", "main_source_reference", "project_tdx_snapshot_rows",
+    "read", "shared_tdx_snapshot", "snapshot_decision_eligible", "tdx_snapshot_completeness",
+    "tdx_snapshot_decision_eligible", "tdx_snapshot_metadata",
 ]

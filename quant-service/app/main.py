@@ -53,7 +53,7 @@ from .akshare_provider import (
 from .all_a_snapshot_sources import main_source_reference, read as read_all_a_snapshot, shared_tdx_snapshot
 from .fuyao_provider import FuyaoProviderError, all_a_snapshot_rows as fuyao_all_a_snapshot_rows
 from .fuyao_provider import fetch as fetch_fuyao_data
-from .limit_up_anchor import live_limit_up_pool_rows
+from .limit_up_anchor import live_limit_up_pool_rows, snapshot_anchor_source
 from .market_history_backfill import append_limit_performance as append_limit_performance_isolated
 from .launch_radar import MODEL_VERSION as LAUNCH_RADAR_MODEL_VERSION
 from .analysis import as_utc
@@ -3309,11 +3309,11 @@ def _persist_local_limit_pool_failure(error: str) -> None:
         record_provider_failure(connection, "fuyao_derived", "limit_pool", error, None)
 
 
-def _persist_local_limit_pool(rows: list[dict[str, Any]]) -> int:
-    """Store locally derived anchors and their provider health in a DB worker."""
-    stored = persist_market_events("fuyao_derived", rows)
+def _persist_local_limit_pool(rows: list[dict[str, Any]], provider: str = "fuyao_derived") -> int:
+    """Store locally derived anchors and their provider health in a DB worker, under the source they were derived from."""
+    stored = persist_market_events(provider, rows)
     with db.transaction() as connection:
-        record_provider_success(connection, "fuyao_derived", "limit_pool", stored, None)
+        record_provider_success(connection, provider, "limit_pool", stored, None)
     return stored
 
 
@@ -3336,9 +3336,10 @@ async def refresh_intraday_limit_up_anchors(observed_at: datetime) -> dict[str, 
             return {"status": "blocked", "reason": "session trade limits unavailable"}
         snapshot_rows, _meta = await intraday_all_a_snapshot()
         rows = live_limit_up_pool_rows(snapshot_rows, limits, reference.get("names"), observed_at)
-        stored = await run_database_blocking(_persist_local_limit_pool, rows, timeout_seconds=30)
+        provider, source = snapshot_anchor_source(snapshot_rows)
+        stored = await run_database_blocking(_persist_local_limit_pool, rows, provider, timeout_seconds=30)
         return {"status": "completed" if rows else "empty", "received": len(rows), "stored": stored,
-                "source": "fuyao_all_a_plus_stk_limit"}
+                "source": source}
     except ExecutorSaturatedError as error:
         return {"status": "blocked", "reason": safe_error_detail(str(error), 300)}
     # LimitCrossSectionUnavailable: Tencent gave no complete, session-dated limit cross-section.

@@ -25,6 +25,30 @@ from .xiaojie_indicators import LIMIT_TOLERANCE, snapshot_fields
 
 #: Same bound the Eastmoney pool path applied before persisting.
 MAX_ANCHOR_ROWS = 300
+#: (market-events source, evidence source) of an anchor derived from the main all-A snapshot.
+MAIN_ANCHOR_SOURCE = ("fuyao_derived", "fuyao_all_a_plus_stk_limit")
+#: The same pair by the label a snapshot row carries, for a minute another source filled.
+_ANCHOR_SOURCE_BY_LABEL = {
+    "fuyao_ths_all_a_snapshot": MAIN_ANCHOR_SOURCE,
+    "tdx_public_all_a_snapshot": ("tdx_public_derived", "tdx_public_all_a_plus_stk_limit"),
+}
+
+
+def anchor_source(row: Mapping[str, Any] | None) -> tuple[str, str]:
+    """(market-events source, evidence source) for the snapshot a row came from.
+
+    A row that names no source is the main snapshot's, as before rows named one. A source
+    that is named and not known here is stored under its own name, never as the main one.
+    """
+    label = str((row or {}).get("price_source") or "")
+    if not label:
+        return MAIN_ANCHOR_SOURCE
+    return _ANCHOR_SOURCE_BY_LABEL.get(label, ("unknown_snapshot_derived", f"{label}_plus_stk_limit"))
+
+
+def snapshot_anchor_source(snapshot_rows: list[dict[str, Any]]) -> tuple[str, str]:
+    """The pair for a whole snapshot: every row of one snapshot comes from one source."""
+    return anchor_source(snapshot_rows[0] if snapshot_rows else None)
 
 
 def live_limit_up_pool_rows(
@@ -53,20 +77,21 @@ def live_limit_up_pool_rows(
         if price is None or price < limit_up - LIMIT_TOLERANCE:
             continue
         name = (names or {}).get(symbol) or symbol
+        upstream_site, source = anchor_source(row)
         events.append({
             "ts_code": symbol,
             "event_type": "limit_up_pool",
             "published_at": published_at,
             "title": f"limit_up_pool：{name}",
             "url": None,
-            "upstream_site": "fuyao_derived",
+            "upstream_site": upstream_site,
             "raw": {"price": price, "limit_up": limit_up,
                     "pct_change": row.get("pct_change"), "high": fields.get("high"),
-                    "sealed": True, "source": "fuyao_all_a_plus_stk_limit"},
+                    "sealed": True, "source": source},
         })
         if len(events) >= MAX_ANCHOR_ROWS:
             break
     return events
 
 
-__all__ = ["MAX_ANCHOR_ROWS", "live_limit_up_pool_rows"]
+__all__ = ["MAIN_ANCHOR_SOURCE", "MAX_ANCHOR_ROWS", "anchor_source", "live_limit_up_pool_rows", "snapshot_anchor_source"]

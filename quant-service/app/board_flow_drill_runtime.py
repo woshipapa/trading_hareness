@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .all_a_snapshot_sources import fallback_provenance
 from .board_flow_drill import attach_names, drill_board_events
+from .paper_auto_execution_runtime import snapshot_not_eligible
 from .xiaojie_reference_repository import instrument_names, sector_membership
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -35,6 +37,10 @@ async def drill_board_stock_candidates(
     Membership is read for the session being scanned, so it obeys the same
     point-in-time rule as every other reference: a map learned after the open
     cannot inform the session it opened into.
+
+    The shortlist is computed from whichever source served the snapshot and says so when it
+    was not the main one. It is handed to paper execution only when the snapshot says its
+    source is decision eligible; otherwise paper execution is not called for this minute.
     """
 
     events = [event for event in rotation_events
@@ -53,11 +59,13 @@ async def drill_board_stock_candidates(
     if not membership:
         return {"status": "blocked", "reason": "no sector membership is known for this session",
                 "boards": len(events), "candidates": [], "paper": await deps.paper_execution([], None)}
-    rows, _status = await deps.all_a_snapshot()
+    rows, snapshot_status = await deps.all_a_snapshot()
     quotes = {str(row["symbol"]): row for row in rows if row.get("symbol")}
     drilled = drill_board_events(events, membership, quotes)
     candidates = attach_names(drilled["candidates"], names)
-    paper = await deps.paper_execution(candidates, quotes)
+    paper = snapshot_not_eligible(snapshot_status)
+    if paper is None:
+        paper = await deps.paper_execution(candidates, quotes)
     return {
         "status": "completed",
         "boards": len(events),
@@ -66,6 +74,7 @@ async def drill_board_stock_candidates(
         "candidates": candidates,
         "paper": paper,
         "decision_eligible": False,
+        **fallback_provenance(snapshot_status),
     }
 
 
