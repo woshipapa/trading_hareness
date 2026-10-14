@@ -384,13 +384,16 @@ def _seal_counts(day: Mapping[str, Any]) -> dict[str, list[int]]:
 
 
 def registry_fingerprint(tactics: Sequence[Tactic] = TACTICS) -> str:
-    """What a stored digest was computed with: the tactics' definitions, the outcomes kept for each, the sell rules.
+    """What a stored digest or pair document was computed with: the tactics' definitions, the outcomes kept for
+    each, the keys of the sell rules and of the conditions.
 
-    A condition's own rule is code and is not in it: changing a threshold needs a new reading version.
+    Only keys and definitions are in it. What a condition tests or a sell rule does is code: changing a threshold
+    inside one needs a new ``VERSION`` of the readings, which makes every stored document stale as well.
     """
     definition = [(tactic.key, tactic.slot, tactic.all_of, tactic.none_of, tactic.at_least, tactic.day_conditions,
                    tactic.cell, tactic.entry, tactic.exit, tactic.primary, _record_outcomes(tactic)) for tactic in tactics]
-    return sha256(json.dumps([definition, [exit_.key for exit_ in EXITS]], sort_keys=True).encode()).hexdigest()[:12]
+    conditions = [(condition.key, condition.level, condition.slot) for condition in CONDITIONS]
+    return sha256(json.dumps([definition, [exit_.key for exit_ in EXITS], conditions], sort_keys=True).encode()).hexdigest()[:12]
 
 
 def _resolved(outcome: Mapping[str, Any]) -> bool:
@@ -587,15 +590,20 @@ def day_pairs(day: Mapping[str, Any]) -> dict[str, Any]:
         comparison = _mean(bucket["comparison"])
         if comparison is not None:
             state["differences"].extend(value - comparison for value in bucket["pick"] if value is not None)
-    return json_safe({"trade_date": _date(day["trade_date"]), "slot": slot, "pairs": {
+    return json_safe({"trade_date": _date(day["trade_date"]), "slot": slot, "registry": registry_fingerprint(), "pairs": {
         "|".join(pair): [state["picks"], _mean(state["pick_values"]), _mean(state["differences"])]
         for pair, state in states.items()}})
 
 
 def _condition_name(key: str) -> str:
-    """A condition's name; one read from the session before (``prev.``) says so."""
+    """A condition's name; one read from the session before (``prev.``) says so.
+
+    A stored reading may carry a flag whose condition has since left the registry: it is shown by its key.
+    """
     names = {condition.key: condition.name for condition in CONDITIONS}
-    return f"昨日{names[key[5:]]}" if key.startswith("prev.") else names[key]
+    own = key[5:] if key.startswith("prev.") else key
+    name = names.get(own, f"{own}（已不在登记表）")
+    return f"昨日{name}" if key.startswith("prev.") else name
 
 
 class PairHistory:

@@ -76,15 +76,27 @@ class TacticTrialRuntimeTests(unittest.TestCase):
             "symbol": "000001.SZ", "name": "A", "open": 10.5, "gap": 0.05,
             "opens_at_limit": False, "bucket": "3-5", "boards": 2, "amount": 100,
         }]}
-        with mock.patch.object(runtime.tactic_trial_repository, "read_capability", return_value=[]), \
+        before = date(2026, 10, 12)
+        close = {"trade_date": before.isoformat(), "slot": "close", "version": runtime.VERSION, "complete": True,
+                 "day": {"flags": [], "unknown": []},
+                 "rows": [{"symbol": "000001.SZ", "name": "A", "reference_close": 10, "boards": 2, "board_bucket": "2", "sector": "x",
+                           "sealed_from_open": False, "flags": [], "unknown": []}]}
+        with mock.patch.object(runtime.tactic_trial_repository, "read_capability", side_effect=[[], [close]]), \
              mock.patch.object(runtime.tactic_trial_repository, "read_auction_table", return_value=table), \
-             mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=[]), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=[before]), \
              mock.patch.object(runtime.derived_daily_readings, "store", return_value={"stored": 1, "unchanged": 0}) as store:
             result = runtime.refresh_auction(database, day)
         self.assertEqual((result["status"], result["rows"]), ("completed", 1))
         stored = store.call_args.args[2][0]
         self.assertEqual(stored["decided_at"], table["stored_at"])
-        self.assertIsNone(stored["rows"][0]["reference_close"], "no close reading of the session before: nothing to measure from")
+        self.assertEqual(stored["rows"][0]["reference_close"], 10)
+        with mock.patch.object(runtime.tactic_trial_repository, "read_capability", return_value=[]), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_auction_table", return_value=table), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=[before]), \
+             mock.patch.object(runtime.derived_daily_readings, "store") as store:
+            self.assertEqual(runtime.refresh_auction(database, day)["status"], "waiting_for_close",
+                             "without the close reading of the session before, nothing is stored: a stored reading is never replaced")
+        store.assert_not_called()
         with mock.patch.object(runtime.tactic_trial_repository, "read_capability", return_value=[]), \
              mock.patch.object(runtime.tactic_trial_repository, "read_auction_table", return_value=None):
             self.assertEqual(runtime.refresh_auction(database, day)["status"], "not_ready")
@@ -214,8 +226,9 @@ class TacticTrialRuntimeTests(unittest.TestCase):
         auction_list = [{"trade_date": day2, "rows": [{"symbol": "000001.SZ", "amount": 900, "position": 0}]}]
         bars = [self._bar(day2, "000001.SZ", close=11, limit_up=11), self._bar(day2, "000002.SZ", close=10, limit_up=11)]
         exit_bars = [dict(bar, pick_day=day2) for bar in bars]
-        exit_bars += [dict(self._bar(day2 + timedelta(days=1), "000001.SZ", close=11, limit_up=12), pick_day=day2),
-                      dict(self._bar(day2 + timedelta(days=1), "000002.SZ", close=10, limit_up=12), pick_day=day2)]
+        for later in range(1, runtime.ROOM_SESSIONS + 1):   # a day is final only with the sessions its room measures look at
+            exit_bars += [dict(self._bar(day2 + timedelta(days=later), "000001.SZ", close=11, limit_up=12), pick_day=day2),
+                          dict(self._bar(day2 + timedelta(days=later), "000002.SZ", close=10, limit_up=12), pick_day=day2)]
         complete = {"entries": {"held": {"close": {"status": "settled", "raw_return": 0.1}},
                                  "buy_open": {"close": {"status": "no_trade"}}}}
         with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", side_effect=[[day1, day2], [day1], [day1, day2]]), \
@@ -248,6 +261,7 @@ class TacticTrialRuntimeTests(unittest.TestCase):
 
         with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=sessions), \
              mock.patch.object(runtime.tactic_trial_repository, "read_capability", side_effect=readings), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_capability_days", return_value=[]), \
              mock.patch.object(runtime.tactic_trial_repository, "read_newest", return_value=None), \
              mock.patch.object(runtime.derived_daily_readings, "store", return_value={"stored": 1, "unchanged": 0}) as store:
             result = runtime.summarise(Database(), last)
@@ -276,11 +290,14 @@ class EveningTests(unittest.TestCase):
                 return result
             return run
 
-        known = [{"trade_date": day.isoformat()} for day in known_days]
+        def close(_database, day, **_kwargs):
+            calls.append(("close", day))
+            return {"status": close_status(day) if callable(close_status) else close_status}
+
         with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=self.SESSIONS), \
-             mock.patch.object(runtime.tactic_trial_repository, "read_capability", return_value=known), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_capability_days", return_value=list(known_days)), \
              mock.patch.object(runtime, "refresh_auction", step("auction", {"status": "not_ready"})), \
-             mock.patch.object(runtime, "refresh_close", step("close", {"status": close_status})), \
+             mock.patch.object(runtime, "refresh_close", close), \
              mock.patch.object(runtime, "summarise", step("summarise", {"summary": {"lines": 80}})):
             return runtime.evening(Database(), self.SESSIONS[-1]), calls
 
@@ -301,6 +318,12 @@ class EveningTests(unittest.TestCase):
         result, calls = self._run(self.SESSIONS[:1])
         self.assertEqual(calls, [("auction", missed), ("close", missed), ("auction", today), ("close", today), ("summarise", today)])
         self.assertEqual(result["repaired"], {"auction": "not_ready", "close": "completed"})
+
+    def test_a_missed_evening_that_cannot_be_built_blocks_today(self):
+        today, missed = self.SESSIONS[-1], self.SESSIONS[-2]
+        result, calls = self._run(self.SESSIONS[:1], close_status=lambda day: "blocked" if day == missed else "completed")
+        self.assertEqual(calls, [("auction", missed), ("close", missed)], "today is not built on a hole")
+        self.assertEqual((result["status"], result["repaired"]["close"]), ("blocked", "blocked"))
 
     def test_a_day_without_its_lists_or_risk_reading_is_blocked_and_not_summarised(self):
         result, calls = self._run(self.SESSIONS[:2], close_status="blocked")

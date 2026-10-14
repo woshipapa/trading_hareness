@@ -161,7 +161,7 @@ class ProductStageTests(unittest.TestCase):
 
     def test_the_tactic_ledger_runs_after_the_risk_reading_and_only_when_it_completed(self):
         self.assertEqual(peer.STAGE_DEPENDENCIES["peer_tactic_trials"], "peer_limit_up_risk")
-        self.assertLess(STAGES.index("peer_limit_up_risk"), STAGES.index("peer_tactic_trials"))
+        self.assertEqual(STAGES[-1], "peer_tactic_trials", "last: it must not delay the other products of the evening")
         ran = []
 
         def stage(name, status):

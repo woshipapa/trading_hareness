@@ -8,7 +8,7 @@ from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
 from .datasources.http import ashare_symbol
-from .derived_daily_readings import latest, newest, session_close
+from .derived_daily_readings import latest, newest, session_close, stored_days
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
 CHUNK_SESSIONS = 60
@@ -100,6 +100,11 @@ def read_exit_bars(connection: Any, symbol_days: Sequence[tuple[str, date]]) -> 
 
 def read_capability(connection: Any, capability: str, start: date, end: date) -> list[dict[str, Any]]:
     return newest(connection, capability, start, end)
+
+
+def read_capability_days(connection: Any, capability: str, start: date, end: date) -> list[date]:
+    """Which sessions of a range have a reading, without reading any."""
+    return stored_days(connection, capability, start, end)
 
 
 def read_newest(connection: Any, capability: str, last: date) -> dict[str, Any] | None:

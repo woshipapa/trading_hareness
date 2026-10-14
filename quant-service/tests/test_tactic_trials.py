@@ -1,6 +1,7 @@
 import json
 import math
 import unittest
+import unittest.mock
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -31,6 +32,15 @@ def summary(days, previous=None):
 
 
 class TacticTrialTests(unittest.TestCase):
+    def test_a_flag_whose_condition_left_the_registry_is_shown_by_its_key(self):
+        from app.tactic_trials import _condition_name, registry_fingerprint
+        from app.tactic_conditions import CONDITIONS
+        self.assertIn("gone_condition", _condition_name("gone_condition"))
+        self.assertTrue(_condition_name("prev.gone_condition").startswith("昨日"))
+        with unittest.mock.patch("app.tactic_trials.CONDITIONS", CONDITIONS[:-1]):
+            changed = registry_fingerprint()
+        self.assertNotEqual(changed, registry_fingerprint(), "a removed condition makes the stored digests and pairs stale")
+
     def _day(self, day, *, slot="close", true=True, two_rows=True, day_flag=None):
         rows = [
             {"symbol": "P", "name": "Pick", "boards": 2, "board_bucket": "2", "gap_bucket": "0-5",

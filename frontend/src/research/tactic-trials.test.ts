@@ -42,10 +42,11 @@ describe('tactic trial helpers', () => {
   });
   it('says whose outcomes the summary shows and what is not final', () => {
     const size = (pick_day: string | null, today_rows: number | null) => ({ pick_day, rows: 60, cumulative_rows: 900, today_rows });
-    const summary = { day: { sample_sizes: { close: size('2026-10-13', 67), auction: size(null, null) } }, open_days: 3, stale_digest_days: 0 };
+    const summary = { day: { sample_sizes: { close: size('2026-10-13', 67), auction: size(null, null) } }, open_days: 3, stale_digest_days: 0, missing_digest_days: 0 };
     expect(summaryCaption(summary as unknown as TacticSummaryReading))
       .toBe('收盘选股日 2026-10-13（今日样本 67 行） · 竞价选股日 无数据（今日样本 — 行） · 未定稿 3 天');
-    expect(summaryCaption({ ...summary, open_days: 0, stale_digest_days: 2 } as unknown as TacticSummaryReading)).toContain('待重建 2 天');
+    expect(summaryCaption({ ...summary, open_days: 0, stale_digest_days: 2, missing_digest_days: 4 } as unknown as TacticSummaryReading))
+      .toContain('待重建 2 天 · 漏定稿待补 4 天');
   });
   it('keeps only the newest of overlapping requests', () => {
     const begin = latestOnly();

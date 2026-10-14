@@ -47,6 +47,16 @@ def newest(connection: Any, capability: str, first: date, last: date) -> list[di
     return [_reading(row) for row in rows]
 
 
+def stored_days(connection: Any, capability: str, first: date, last: date) -> list[date]:
+    """The sessions from ``first`` to ``last`` that have a reading of this capability: the dates only."""
+    rows = connection.execute(
+        """SELECT DISTINCT effective_at FROM quant.raw_market_observations
+            WHERE provider_key=%s AND capability=%s AND symbol IS NULL AND effective_at >= %s AND effective_at <= %s
+            ORDER BY effective_at""",
+        (PROVIDER_KEY, capability, session_close(first), session_close(last))).fetchall()
+    return [dict(row)["effective_at"].astimezone(CN_TZ).date() for row in rows]
+
+
 def latest(connection: Any, capability: str, last: date) -> tuple[datetime, dict[str, Any]] | None:
     """The newest reading of the newest session up to ``last``, with the time it was stored: one row, however long the history."""
     row = connection.execute(

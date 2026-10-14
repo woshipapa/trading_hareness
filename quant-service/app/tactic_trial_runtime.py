@@ -39,6 +39,8 @@ DIGEST_CAPABILITY = {"close": "tactic_trials_digest_close_daily", "auction": "ta
 PAIRS_CAPABILITY = {"close": "tactic_trials_pairs_close_daily", "auction": "tactic_trials_pairs_auction_daily"}
 PAIR_SESSIONS = 250    # the mined pairs look at this many sessions back: their day documents are the large ones
 WINDOW_SESSIONS = 12   # a pick day is settled again every evening until every sell rule has left it, at most this long
+LATE_DAYS_A_RUN = 10   # pick days that left the window without a digest (a missed evening): closed this many a run
+ROOM_SESSIONS = 3      # the room measures look this many sessions past the pick day: no day is final before
 SUMMARY_CAPABILITY = "tactic_trials_summary_daily"
 RISK_CAPABILITY = "limit_up_risk_daily"
 REPLAY_DISAGREEMENT_LIMIT = 0.005
@@ -176,8 +178,13 @@ def refresh_auction(database: Any, trade_date: date, *, apply: bool = True) -> d
             return _research({"status": "not_ready", "trade_date": trade_date.isoformat(), "stored": 0})
         previous = _prior_sessions(connection, trade_date, 1)
         previous_reading = _stored(connection, CLOSE_CAPABILITY, previous[0]) if previous else None
+        if previous_reading is None:
+            # Without the close reading of the session before, every look-back condition would be unknown and no row
+            # would have a reference price, and a stored reading is never replaced. The evening run builds this
+            # one after it has repaired that close reading (the table and its stored time stay as they are).
+            return _research({"status": "waiting_for_close", "trade_date": trade_date.isoformat(), "stored": 0})
         reading = _build_auction_reading(
-            trade_date, table["rows"], previous_reading if previous_reading and previous_reading["complete"] else None,
+            trade_date, table["rows"], previous_reading if previous_reading["complete"] else None,
             table["stored_at"], "auction_open_desk_daily",
         )
     stored = derived_daily_readings.store(database, AUCTION_CAPABILITY, [reading]) if apply else {"stored": 0, "unchanged": 0}
@@ -227,7 +234,10 @@ def day_outcomes(database: Any, reading: Mapping[str, Any], as_of: date) -> dict
         if bar["trading_date"] <= as_of:
             bars_by_symbol.setdefault(str(bar["symbol"]), []).append(bar)
     settled = _settle_reading(reading, bars_by_symbol)
-    return {**reading, "outcomes": {row["symbol"]: row["outcomes"] for row in settled["rows"]}, "settled": settled["complete"]}
+    # Sessions since the pick day, as the bars of its own stocks show them.
+    later = {bar["trading_date"] for bars in bars_by_symbol.values() for bar in bars if bar["trading_date"] > pick_day}
+    return {**reading, "outcomes": {row["symbol"]: row["outcomes"] for row in settled["rows"]},
+            "settled": settled["complete"] and (len(later) >= ROOM_SESSIONS or not reading["rows"])}
 
 
 def _digest_documents(day: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -250,7 +260,9 @@ def summarise(database: Any, as_of: date, *, apply: bool = True) -> dict[str, An
 
     Older pick days are read as stored digests, chunk by chunk. The pick days of the last ``WINDOW_SESSIONS``
     sessions without a final digest are settled now, one day at a time, from the stored bars; a day is closed
-    (its digest stored, once) when every sell rule has left it, or when it is about to leave the window. The day
+    (its digest stored, once) when every sell rule has left it, or when it is about to leave the window. A day
+    that left the window without a digest (the evening it was the window's oldest did not complete) is closed
+    here too, at most ``LATE_DAYS_A_RUN`` a run, newest first; what is left is counted in the summary. The day
     sections of the summary describe, for each slot, the newest pick day that has outcomes.
     """
     registry = registry_fingerprint()
@@ -258,18 +270,43 @@ def summarise(database: Any, as_of: date, *, apply: bool = True) -> dict[str, An
     window, older = sessions[-WINDOW_SESSIONS:], sessions[:-WINDOW_SESSIONS]
     pair_first = sessions[-PAIR_SESSIONS:][0]
     history, pairs, stale = History(), PairHistory(), 0
-    for offset in range(0, len(older), tactic_trial_repository.CHUNK_SESSIONS):
-        chunk = older[offset:offset + tactic_trial_repository.CHUNK_SESSIONS]
+    late: list[tuple[date, str]] = []
+    if older:
         with database.transaction() as connection:
             for slot in SLOTS:
-                for digest in tactic_trial_repository.read_capability(connection, DIGEST_CAPABILITY[slot], chunk[0], chunk[-1]):
-                    if _current(digest, registry):
-                        history.add(digest)
-                    else:
-                        stale += 1
-                if chunk[-1] >= pair_first:
-                    for item in tactic_trial_repository.read_capability(connection, PAIRS_CAPABILITY[slot], max(chunk[0], pair_first), chunk[-1]):
-                        pairs.add(item)
+                digested = set(tactic_trial_repository.read_capability_days(connection, DIGEST_CAPABILITY[slot], older[0], older[-1]))
+                late += [(day, slot) for day in tactic_trial_repository.read_capability_days(
+                    connection, READING_CAPABILITY[slot], older[0], older[-1]) if day not in digested]
+    late.sort(reverse=True)
+    late, missing = set(late[:LATE_DAYS_A_RUN]), len(late[LATE_DAYS_A_RUN:])
+    for offset in range(0, len(older), tactic_trial_repository.CHUNK_SESSIONS):
+        chunk = older[offset:offset + tactic_trial_repository.CHUNK_SESSIONS]
+        for slot in SLOTS:
+            with database.transaction() as connection:
+                digests = {item["trade_date"]: item for item in tactic_trial_repository.read_capability(
+                    connection, DIGEST_CAPABILITY[slot], chunk[0], chunk[-1])}
+                pair_documents = {} if chunk[-1] < pair_first else {
+                    item["trade_date"]: item for item in tactic_trial_repository.read_capability(
+                        connection, PAIRS_CAPABILITY[slot], max(chunk[0], pair_first), chunk[-1])}
+            for day in sorted(day for day, late_slot in late if late_slot == slot and chunk[0] <= day <= chunk[-1]):
+                reading = _read(database, _stored, READING_CAPABILITY[slot], day)
+                if reading.get("version") != VERSION:
+                    missing += 1
+                    continue
+                digest, pair_document = _digest_documents(day_outcomes(database, reading, as_of))
+                if apply:
+                    _store_final(database, slot, digest, pair_document)
+                digests[day.isoformat()] = digest
+                if day >= pair_first:
+                    pair_documents[day.isoformat()] = pair_document
+            for day_key in sorted(digests):
+                if _current(digests[day_key], registry):
+                    history.add(digests[day_key])
+                else:
+                    stale += 1
+            for day_key in sorted(pair_documents):
+                if _current(pair_documents[day_key], registry):
+                    pairs.add(pair_documents[day_key])
     folded: dict[tuple[str, str], tuple[Mapping[str, Any], Mapping[str, Any]]] = {}
     latest: dict[str, dict[str, Any]] = {}
     today_rows: dict[str, int] = {}
@@ -279,7 +316,7 @@ def summarise(database: Any, as_of: date, *, apply: bool = True) -> dict[str, An
             final = {item["trade_date"]: item for item in tactic_trial_repository.read_capability(
                 connection, DIGEST_CAPABILITY[slot], window[0], window[-1]) if _current(item, registry)}
             final_pairs = {item["trade_date"]: item for item in tactic_trial_repository.read_capability(
-                connection, PAIRS_CAPABILITY[slot], window[0], window[-1])}
+                connection, PAIRS_CAPABILITY[slot], window[0], window[-1]) if _current(item, registry)}
             readings = [reading for reading in tactic_trial_repository.read_capability(
                 connection, READING_CAPABILITY[slot], window[0], window[-1]) if reading.get("version") == VERSION]
         newest_resolved = None
@@ -312,11 +349,12 @@ def summarise(database: Any, as_of: date, *, apply: bool = True) -> dict[str, An
     previous = _read(database, _newest, SUMMARY_CAPABILITY, as_of - timedelta(days=1))
     summary = daily_summary(history, pairs, [latest[slot] for slot in SLOTS if slot in latest], previous, today_rows)
     summary = _research({**summary, "trade_date": as_of.isoformat(), "version": VERSION, "registry": registry,
-                         "pair_sessions": PAIR_SESSIONS, "open_days": open_days, "stale_digest_days": stale})
+                         "pair_sessions": PAIR_SESSIONS, "open_days": open_days, "stale_digest_days": stale,
+                         "missing_digest_days": missing})
     stored = derived_daily_readings.store(database, SUMMARY_CAPABILITY, [summary]) if apply else {"stored": 0, "unchanged": 0}
     return _research({"status": "completed", "trade_date": as_of.isoformat(), **stored,
                       "summary": {"records": len(summary["records"]), "lines": len(summary["lines"]), "open_days": open_days,
-                                  "stale_digest_days": stale,
+                                  "stale_digest_days": stale, "missing_digest_days": missing,
                                   "bytes": len(json.dumps(summary, ensure_ascii=False))}})
 
 
@@ -331,15 +369,19 @@ def evening(database: Any, trade_date: date) -> dict[str, Any]:
     """
     with database.transaction() as connection:
         sessions = tactic_trial_repository.read_open_sessions(connection, trade_date - timedelta(days=30), trade_date)[-WINDOW_SESSIONS:]
-        known = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, sessions[0], sessions[-1])
+        known = tactic_trial_repository.read_capability_days(connection, CLOSE_CAPABILITY, sessions[0], sessions[-1])
     if not known:
         return _research({"status": "blocked", "trade_date": trade_date.isoformat(),
                           "reason": "no close reading in the last sessions: apply the history replay first"})
     repaired = None
-    if len(sessions) > 1 and known[-1]["trade_date"] < sessions[-2].isoformat():
+    if len(sessions) > 1 and known[-1] < sessions[-2]:
         # The evening before was missed: its readings are built first, from the lists and the risk reading the
         # loop repairs for that session (decision 0021); older sessions are not repaired here.
         repaired = {"auction": refresh_auction(database, sessions[-2])["status"], "close": refresh_close(database, sessions[-2])["status"]}
+        if repaired["close"] == "blocked":
+            # Today's readings are not built on a hole: with yesterday's stored tomorrow, nothing would try it again.
+            return _research({"status": "blocked", "trade_date": trade_date.isoformat(), "repaired": repaired,
+                              "reason": "the lists or the risk reading of the session before are not stored"})
     auction = refresh_auction(database, trade_date)
     close = refresh_close(database, trade_date)
     if close["status"] == "blocked":
@@ -372,7 +414,9 @@ def read_board(database: Any, day: date | None = None) -> dict[str, Any]:
             day = following[0] if following else today
         auction = _stored(connection, AUCTION_CAPABILITY, day)
         previous = _prior_sessions(connection, day, 1)
-        close = _stored(connection, CLOSE_CAPABILITY, previous[0]) if previous else None
+        # A day past the next session has no board: its "session before" would be whatever session is newest.
+        ahead = day > today and bool(previous) and tactic_trial_repository.read_sessions_after(connection, previous[0], 1) != [day]
+        close = _stored(connection, CLOSE_CAPABILITY, previous[0]) if previous and not ahead else None
         summary = _newest(connection, SUMMARY_CAPABILITY, day - timedelta(days=1))
     records = summary["records"] if summary else {}
     return _research({
@@ -396,11 +440,12 @@ def read_cases(database: Any, tactic: Tactic, days: int = 10) -> dict[str, Any]:
     One session at a time, and the bars are read only for a day the tactic picked something on.
     """
     today = _today()
-    sessions = _read(database, tactic_trial_repository.read_open_sessions, today - timedelta(days=days * 2 + 14), today)[-days:]
+    with database.transaction() as connection:
+        sessions = tactic_trial_repository.read_open_sessions(connection, today - timedelta(days=days * 2 + 14), today)[-days:]
+        readings = tactic_trial_repository.read_capability(connection, READING_CAPABILITY[tactic.slot], sessions[0], sessions[-1]) if sessions else []
     result = []
-    for session in reversed(sessions):
-        reading = _read(database, _stored, READING_CAPABILITY[tactic.slot], session)
-        if reading is None or not tactic_day({**reading, "outcomes": {}}, tactic)["picks"]:
+    for reading in reversed(readings):
+        if not tactic_day({**reading, "outcomes": {}}, tactic)["picks"]:
             continue
         item = tactic_day(day_outcomes(database, reading, today), tactic)
         # Settled for this view: every pick has the tactic's own outcome (the day's other sell rules may still be open).
@@ -652,6 +697,11 @@ def main() -> None:  # pragma: no cover
     from .database import Database
     database = Database(); database.open()
     if args.summarise:
+        newest = _read(database, tactic_trial_repository.read_open_sessions, _today() - timedelta(days=30), _today())[-1]
+        if args.apply and args.summarise != newest:
+            # The window's stored digests were computed with every bar there is: a summary of an earlier day would
+            # be stored with what was not known that day, and the board shows a summary as "known that morning".
+            parser.error(f"--summarise --apply stores the summary of the newest session only ({newest}); without --apply any day is computed")
         result = summarise(database, args.summarise, apply=args.apply)
     else:
         result = (rebuild_digests if args.digests else replay)(database, args.slot, args.start, args.end, apply=args.apply)

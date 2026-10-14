@@ -109,6 +109,7 @@ export interface TacticSummaryReading {
   day: { sample_sizes: Record<TacticSlot, SampleSize> };
   open_days: number;
   stale_digest_days: number;
+  missing_digest_days: number;
   records: Record<string, SummaryRecord>;
   conditions: ConditionDay[];
   pairs: Record<TacticSlot, PairTable>;
@@ -209,6 +210,7 @@ export function summaryCaption(summary: TacticSummaryReading): string {
   });
   if (summary.open_days) parts.push(`未定稿 ${summary.open_days} 天`);
   if (summary.stale_digest_days) parts.push(`登记表变更后待重建 ${summary.stale_digest_days} 天`);
+  if (summary.missing_digest_days) parts.push(`漏定稿待补 ${summary.missing_digest_days} 天`);
   return parts.join(' · ');
 }
 

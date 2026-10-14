@@ -114,6 +114,10 @@ class TacticTrialIntegrationTests(unittest.TestCase):
         today = SESSIONS[17]
         with mock.patch.object(runtime, "_today", return_value=today):
             self.assertEqual(runtime.evening(db, SESSIONS[15])["status"], "blocked", "nothing is built before the history replay")
+            self._store_auction_table(15)
+            self.assertEqual(runtime.refresh_auction(db, SESSIONS[15])["status"], "waiting_for_close")
+            self.assertIsNone(self._stored(runtime.AUCTION_CAPABILITY, SESSIONS[15]),
+                              "no auction reading is stored without the close reading of the session before")
 
             close = runtime.replay(db, "close", SESSIONS[0], SESSIONS[14], apply=True)
             self.assertEqual((close["status"], close["days"]), ("completed", 15))
@@ -168,6 +172,17 @@ class TacticTrialIntegrationTests(unittest.TestCase):
             with mock.patch.object(runtime, "registry_fingerprint", return_value="another-registry"):
                 self.assertGreater(runtime.summarise(db, SESSIONS[17], apply=False)["summary"]["stale_digest_days"], 0,
                                    "digests of another registry are counted, not folded")
+            # A pick day that left the window without its digest (the evening that would have closed it never ran).
+            with db.transaction() as connection:
+                connection.execute("DELETE FROM quant.raw_market_observations WHERE capability=%s AND effective_at=%s",
+                                   (runtime.DIGEST_CAPABILITY["close"], session_close(SESSIONS[2])))
+            before = runtime.read_summary(db, SESSIONS[17])["reading"]["records"]
+            late = runtime.summarise(db, SESSIONS[17])
+            self.assertEqual(late["summary"]["missing_digest_days"], 0)
+            self.assertEqual(self._stored(runtime.DIGEST_CAPABILITY["close"], SESSIONS[2])["registry"], registry_fingerprint(),
+                             "the evening closes a day that left the window without a digest")
+            self.assertEqual(runtime.read_summary(db, SESSIONS[17])["reading"]["records"], before, "and folds it where it belongs")
+
             rebuilt = runtime.rebuild_digests(db, "close", SESSIONS[0], SESSIONS[5], apply=True)
             self.assertEqual((rebuilt["days"], rebuilt["stored"]), (6, 6))
 
