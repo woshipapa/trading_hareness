@@ -5,8 +5,8 @@
 - goal: 把每条短线规则登记成条件、组合成战法并配卖出规则，每天收盘和 09:25 在当天样本上试，自动出每日总结和竞价看板，全部只作研究证据
 - plan: docs/work/plans/tactic-trial-ledger.md
 - branch: main
-- head: 2a69145b
-- next: 已合进本地 main（2a69145b），还没推送。等两件事：用户推送并发布（见 Waiting on the user，命令 `bash ~/codebase/n8n/state/rel07.sh`），以及 owner 主机恢复（BACKLOG B058；10 月 14 日 10:59 本机到它的隧道仍连不上）。主机恢复后 agent 先做 W012 记录 next 第 2 点的只读核对（两个脚本在主机上的内容），再请用户执行发布；发布后按 Due 的顺序：干跑一个分块看内存 → 全量回放（用户执行）→ 当晚阶段自己出总结 → 次日 09:26 核对竞价读数。edge 的中继和控制台在 owner 发布之后再发（否则新页签只会报错）。回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`（先删里面的 `frontend/node_modules` 符号链接）放在发布核对之后。
+- head: fd476b0b
+- next: 等用户推送并发布（Waiting on the user；`bash ~/codebase/n8n/state/rel07.sh`，现在发的是 main fd476b0b，含本线、W012 的 A 段和 10 月 14 日的一批小修）。owner 主机 11:15 已恢复、内存 3,499 MB（FACTS F030），对着它的只读干跑通过（Log 11:17）。发布后 agent 按 Due 的顺序做：只读核对 → 在容器里干跑一个回放分块看 `peak_rss_mb` → 备全量回放命令给用户 → 当晚阶段自己出总结 → 次日 09:26 核对竞价读数。今天（10 月 14 日）没有 09:25 的竞价定格（主机故障，F031），所以今天这一天不会有竞价读数，回放也补不出来（历史竞价榜当晚还没有当天的数据），这是数据缺口不是代码问题。edge 的中继和控制台在 owner 之后发。回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`（先删里面的 `frontend/node_modules` 符号链接）放在发布核对之后。
 - updated: 2026-10-14
 
 ## Requirements
@@ -144,9 +144,10 @@
 - 2026-10-14 10:55 重读第二轮修正的 diff，发现自己引入的两处并改掉（910b171d）：补定稿时读到别的版本的读数会对 `None` 取值而抛错；案例接口改成一次读完后丢了“只看当前版本读数”的过滤。六个相关测试模块 → `Ran 51 tests in 6.670s OK`（全量没有再跑）。另外把 Due 里回放之后手工 `--summarise` 的一步去掉了（见那一条）。
 - 2026-10-14 10:59 合并。先把 main（已含 W012 的 A 段）合进分支（5255c896），在合并后的分支上复跑：发布路径测试 → `Ran 3127 tests in 44.025s OK (skipped=2)`；`python -m pytest scripts -q` → `1 failed, 379 passed, 3 skipped`（B035；其中包括“仓库里每个被跟踪的路径都有分类规则”）；前端类型检查退出 0、`Tests 61 passed (61)`、构建通过；组件边界检查通过。然后 `--no-ff` 合回 main（2a69145b）。合并的同意见 Requirements 2026-10-13 17:02 那条。用新分类规则看从 owner 现在跑的 0a57d7fb 到 2a69145b：15 个运行时文件、136 个跳过、2 个 `full`（W012 改了登记的两个脚本，不在本线范围，处理办法见 W012 的 next）。main 比 origin/main 多 44 个提交，推送由用户做。
 - 2026-10-14 10:59 correction: 本会话上面各条最初写的时刻（10:40 到 12:55）是估的，没有看钟，偏晚了一到两个小时；已按各提交的时间改正（`TZ=Asia/Shanghai git log --date=format-local:'%H:%M'`）。
+- 2026-10-14 11:17 owner 主机 11:15 恢复（F030：内存已是 3,499 MB）。main 上又合进了一批小修和构建前的内存检查（c5da5fa0、556a9a2c），发布目标改成 fd476b0b，`state/rel07.sh` 和干净的发布工作区（`/Users/papa/codebase/.codex-wt/n8n-release-07`）跟着换了。对着真实主机只读干跑了纯代码发布（不推送、不带 `--apply`；库版本闸门读了对方的 `/health`）：`schema: owner database 20261010_ow0121, release head 20261010_ow0121: at_head`，候选通过，21 个运行时文件；那两个脚本带着放行（F032）。竞价循环补上了连接池超时（3d2e6a8b），评审第 17 条至此全部关闭。
 
 ## Waiting on the user
-- [ ] 2026-10-14 10:59 推送并发布 owner（纯代码，`owner-code-20261014-07`，0a57d7fb → 2a69145b，15 个运行时文件）：`! bash ~/codebase/n8n/state/rel07.sh` 先推送并只做检查，看输出没问题再 `! bash ~/codebase/n8n/state/rel07.sh --apply`。为什么等：推送和生产发布只能用户执行。现在还不能发：owner 主机没有应答（B058），而且检查模式现在也要读对方的 `/health`。可发的时段：11:30–13:00、15:10–18:45、22:05 之后；16:15 前发布并回放完，当晚就自动跑。之后：agent 做发布后的只读核对，再备回放命令。
+- [ ] 2026-10-14 11:17 推送并发布 owner（纯代码，`owner-code-20261014-07`，0a57d7fb → fd476b0b，21 个运行时文件）：`! bash ~/codebase/n8n/state/rel07.sh` 先推送并只做检查，看输出没问题再 `! bash ~/codebase/n8n/state/rel07.sh --apply`。为什么等：推送和生产发布只能用户执行。可发的时段：11:30–13:00、15:10–18:45、22:05 之后；16:15 前发布并回放完，当晚就自动跑。脚本每次运行都会把主机上那两个改了登记的脚本与提交再比一遍，相同才放行。之后：agent 做发布后的只读核对，再备回放命令。
 
 ## Running
 
