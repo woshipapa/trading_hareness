@@ -1,13 +1,13 @@
 # W008 通达信补主行情快照的缺口并作备用
 
-- state: released
+- state: merged
 - holder: Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14
 - goal: 主数据源（同花顺）某一分钟缺了或出错时，用通达信的全市场快照补上并带来源标记；不把通达信变成主数据源
 - plan: docs/work/plans/tdx-live-snapshot-fallback.md
 - branch: main
-- head: e8cb8dbf
+- head: 86cbd62d
 - release: owner-code-20261013-05
-- next: 等独立评审返回（Running）。逐条对代码核实，修掉高和中的（尤其是“缺键按可用”那一条），复跑 `COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path` 和 `python -m pytest scripts -q`，把 main 合进分支再 `--no-ff` 合回 main，回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`（先删 `frontend/node_modules` 符号链接）。发布 B 不随合并立刻做：它要等发布 A 之后五个完整交易日的当日汇总（从 10 月 15 日数起，每天收盘后跑一次并把输出存进 `docs/work/probes/`）。
+- next: B1、B2 已合进 main（86cbd62d），等用户定发布 B 的时机（Waiting on the user）。同时从 10 月 15 日起每个交易日收盘后跑一次当日汇总并把输出存进 `docs/work/probes/`，数满五个通过的交易日（10 月 14 日因主机故障不算）。发布 B 之后的核对：`/health`、状态脚本、指标健康里的 `fallback_minutes`、一次真实的主源失败时补的那一分钟确实记在 `tdx_public` 名下。
 - updated: 2026-10-13
 
 ## Requirements
@@ -47,8 +47,8 @@
 - [x] 发布 A（owner 纯代码，用户执行） — `owner-code-20261013-04`，2026-10-13 17:41；下一个交易日的核对和五个交易日的汇总见 Due
 - [x] B3 目录部分：比对项的 `min_share`、本绑定对主源的比对声明、改写“通达信一律不可决策”的断言 — 派工 4 — 4889ff76；`Ran 3050 tests ... OK (skipped=2)`、`python -m app.datasources validate` → `{"problems": 0}`（主会话在分支末端复跑，2026-10-13）
 - [x] B3 工具部分：`scripts/tdx-promote.py` 认 `min_share`、加 `--decision-eligible`、升级本绑定必须带五份通过的当日汇总；发布分类规则登记这个脚本是工作站工具（用户 2026-10-13 同意） — 派工 5 — 88af7299、61f09555；`Ran 3050 tests ... OK (skipped=2)`；`pytest scripts -q` → `1 failed, 355 passed, 3 skipped`（失败的是 BACKLOG B035 那一项）；`node scripts/shared-peer/deploy-code-only.test.mjs` 通过；分支自己的分类器把 7 个文件判为 1 个运行时（`catalog.py`）、6 个跳过（主会话复跑，2026-10-13）
-- [ ] B1 读取链：主源报 `FuyaoProviderError` 时读一次通达信，过完整性门槛才用；影子循环和读取链共用一个读取器；影子比对的参照只认主源文档；快照元数据带 `provider_key`、`decision_eligible`、`fallback_for` — 派工 6、7
-- [ ] B2 约十处使用方按快照自带的来源判断（方案列了清单），两份文档 — 派工 8、9、10
+- [x] B1 读取链：主源报 `FuyaoProviderError` 时读一次通达信，过完整性门槛才用；影子循环和读取链共用一个读取器；影子比对的参照只认主源文档；快照元数据带 `provider_key`、`decision_eligible`、`fallback_for` — 派工 6、7
+- [x] B2 约十处使用方按快照自带的来源判断（方案列了清单），两份文档 — 派工 8、9、10 — B1：99f8d5de、ae3800aa；B2：af6f1321、30c055ec、fd0d30e2；评审修正：260b5814、731cccac、f40aa20b、1486f1a0、ad828546；合进 main 86cbd62d — 合并后的分支上：发布路径测试 `Ran 3226 tests in 41.535s OK (skipped=2)`，`python -m pytest scripts -q` → `385 passed, 3 skipped`，数据源目录校验 0 个问题，组件边界检查通过（主会话复跑）
 - [ ] 发布 B（owner 纯代码，用户执行）
 
 ## Log
@@ -95,8 +95,12 @@
 - 2026-10-14 11:17 主机 11:15 恢复后补做了 Due 里 09:16 那条核对（FACTS F031，探针 `docs/work/probes/2026-10-14-session-capture-gaps.py`）：存下的 17 分钟里主源都在第 50 秒、通达信在第 52 秒（一份在第 0 秒，没查是哪一分钟），节拍与发布 A 一致；但今天只有 09:15–09:20、10:45、11:06 之后有文档，中间是主机故障（B058），不是采集循环的问题。今天不能算五个交易日观察里的一天；观察从下一个完整交易日（10 月 15 日）重新数。
 - 2026-10-14 11:29 B1 交回（99f8d5de、ae3800aa）。实现者报告：发布路径测试 `Ran 3147 tests in 41.877s OK (skipped=2)`、`pytest scripts -q` → `380 passed, 3 skipped`、数据源目录校验 0 个问题；主会话还没有复跑，也没有读 diff（放到 B2 交回后与整条分支一起验收）。它指出的要点：**只有 B1 的分支不能合并**——主源失败时通达信补的那一分钟会交给所有使用方，而使用方还当它是主源（派生资金流标成 `fuyao_ths_derived`，是规则可用的；落库也记在 `fuyao_ths` 名下），要 B2 做完才安全。它与方案不同或自己定的地方：限时等待用 `asyncio.wait` 而不是 `wait_for(shield)`（后者在 Python 3.14 下会把迟到的失败报成警告；镜像是 3.12，行为相同）；名册读取加了按文档元数据过滤主源的条件；链抛出的是 `FuyaoProviderError` 的子类；主源的 `decision_eligible` 写死为真（目录里那条绑定的默认值是假，照读会改变主源的行为）；共享读取器在 TTL 过后仍留着最后一份快照（约 5,580 行常驻内存）。B2 已派给另一个子代理（同一工作区），派工里带上了这些要点。
 - 2026-10-14 12:00 B2 交回（af6f1321、30c055ec、fd0d30e2）。主会话在工作区复跑：发布路径测试 → `Ran 3201 tests in 42.718s OK (skipped=2)`；`python -m pytest scripts -q` → `380 passed, 3 skipped`；`git diff --check c5da5fa0 HEAD` 无输出；整条分支 28 个文件、+2,146 −135。主会话还没有逐段读 diff。实现者报告里要定的一点：状态里没有 `decision_eligible` 这个键时按“可用”处理（存在时必须恰为真），理由是现有的桩和测试不带这个键；这是往放行方向的默认，交给独立评审判断是否必须收紧。它列出的方案清单之外、没有改的读取方（情绪采集器把来源写死为主源标签、估值任务、龙头资金流、十日轮动影子、联动挖掘读任意来源的锚点等）也交给评审逐个判断。评审已起（见 Running）。
+- 2026-10-14 12:10 独立评审返回（`docs/work/probes/2026-10-14-tdx-fallback-review.md`）：1 高、4 中、8 低。高：方案清单之外的一个使用方——“龙头资金流”策略——会拿通达信补的那一分钟去记候选并发研究提醒，没有任何来源检查（分支之前主源失败时它拿到空行、整轮跳过）。中：情绪读数把来源写死成主源标签；补读失败不被记住，主源挂着而通达信又不可用时（每天 09:15–09:25 必然如此）每个调用方都重读一遍全 A；没有自己时限的调用方会多等约 30 秒；“状态里没有 `decision_eligible` 键就算可用”今天走不到，但以后谁重建状态就会悄悄放行。评审认为没问题的：读取链本身、派生资金流的标签与归零、通达信快照不算决策报价、纸面执行和板块下钻在用报价之前就拦住、影子比对和名册只读主源。
+- 2026-10-14 12:20 评审修正交回并合并（修正由另一个子代理做，主会话读了资格判断的那个函数和龙头资金流的拦截处，复跑了全部验收）。五条都修了：(1) 龙头资金流在扫描服务里按快照资格拦截，不可用时与主源失败时一样跳过并写明提供方；新测试把“读取链→真实的行情采集→扫描→真实的策略运行”串起来，补的那一分钟不出候选、不出提醒，主源照旧出 5 个候选 5 条提醒。(2) 资格规则收成一个函数：有键必须恰为真；没有键时只有“没写提供方或写的是主源、且没有 `fallback_for`”才算可用。(3) 情绪读数的来源取快照自己的。(4) 补读失败记 30 秒（与成功的快照被共享缓存复用的时间相同），期间直接返回串联的错误、不再读。(5) 通达信读取加名册读取合起来一个 20 秒的上限。低的修了两条（畸形行、同一时刻两份文档时主源优先），其余六条没做并写了理由（见子代理报告的要点：改键名会影响读方、联动挖掘是否可用通达信锚点要先定、`PRICED_QUOTE_SOURCES` 是政策选择等）。评审里说错的一处：指标健康的那条查询其实有测试对着测试库执行。没核实的：主源自己失败最长约 47 秒（读代码得出，没量），最坏情况下主采集那一分钟仍会超出自己的时段。
+- 2026-10-14 12:20 合进 main（86cbd62d），工作区已回收。**还没有发布**：相对线上的 `owner-code-20261014-07`，现在的 main 多 25 个运行时文件，仍是纯代码发布。这次发布（方案里的“发布 B”）之后，主源失败的那一分钟才会由通达信补上；补的分钟只进分钟文档、盘面雷达、盘中温度和健康统计，不进信号、纸面执行和策略候选，直到目录里那条绑定被标成可决策（那一步要五个交易日的当日汇总通过，由 `scripts/tdx-promote.py` 把关）。
 
 ## Waiting on the user
+- [ ] 2026-10-14 12:20 发布 B 什么时候发、由谁定：main 86cbd62d 已含读取链，下一次 owner 纯代码发布就会带上它。为什么等：这是会改变线上采集行为的发布（主源失败时多一次对公共通达信主机的全 A 读取），时机由用户定；会话建议放在今天收盘后（15:10–18:45），先让今天下午照现状跑完。之后：agent 备 `state/rel08.sh`，发布后核对 `/health`、状态脚本，并在下一个交易时段看分钟文档里补的分钟数（指标健康的 `fallback_minutes`）。
 
 - [x] 2026-10-13 执行第一个分支的发布（`! bash ~/codebase/n8n/state/rel04.sh --apply`） → 用户 17:41 执行，`owner-code-20261013-04` 生效（2026-10-13）；核对见 Log
 
@@ -122,7 +126,7 @@
 - [x] 2026-10-14 11:11 Claude 子代理实现 B1（派工 6、7），挂在会话 4a420907 上，会话结束它就停。工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`，分支 `codex/tdx-live-snapshot-fallback`。结束标志：主会话收到完成通知；分支在 c5da5fa0 之后有两个提交且 `git status --short` 只剩 `frontend/node_modules`。之后：主会话复跑 `COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path` 并读 diff。新会话接手而它没做完时：看分支上已有的提交，按方案 B1 一节补完剩下的。 → 11:24 交回，提交 99f8d5de、ae3800aa（2026-10-14）
 
 - [x] 2026-10-14 11:29 Claude 子代理实现 B2（派工 8、9、10），同一工作区和分支，挂在会话 4a420907 上。结束标志：主会话收到完成通知；分支在 ae3800aa 之后有三个提交。之后：主会话复跑验收命令、读 diff，再起一个独立评审看整条分支（`git diff main...codex/tdx-live-snapshot-fallback`），修完才合并。新会话接手而它没做完时：看分支已有的提交，按方案 B2 一节补完。 → 交回，提交 af6f1321、30c055ec、fd0d30e2（2026-10-14）
-- [ ] 2026-10-14 12:00 独立评审整条分支（只读 Claude 子代理，opus，挂在会话 4a420907 上）：范围 `git diff c5da5fa0 HEAD`，重点是通达信补的那一分钟有没有路径在绑定未放行时进到信号、纸面执行或决策报价。报告写到会话草稿目录的 `review_tdx_fallback.md`，返回后复制到 `docs/work/probes/2026-10-14-tdx-fallback-review.md`。结束标志：主会话收到完成通知。新会话接手而报告不在时，重新起一个，范围同上。
+- [x] 2026-10-14 12:00 独立评审整条分支（只读 Claude 子代理，opus，挂在会话 4a420907 上）：范围 `git diff c5da5fa0 HEAD`，重点是通达信补的那一分钟有没有路径在绑定未放行时进到信号、纸面执行或决策报价。报告写到会话草稿目录的 `review_tdx_fallback.md`，返回后复制到 `docs/work/probes/2026-10-14-tdx-fallback-review.md`。结束标志：主会话收到完成通知。新会话接手而报告不在时，重新起一个，范围同上。 → 返回，1 高 4 中 8 低，报告 `docs/work/probes/2026-10-14-tdx-fallback-review.md`（2026-10-14）
 
 ## Due
 
