@@ -6,8 +6,8 @@
 - plan: docs/work/plans/tactic-trial-ledger.md
 - branch: main
 - head: 861ecbfa
-- release: owner-code-20261014-07（owner 纯代码，2026-10-14 11:42）；edge 的中继和控制台未发
-- next: owner 已发布并核对（Log 11:45）。接着：(1) 整段历史的收盘干跑（后台，输出 `docs/work/probes/2026-10-14-tactic-replay.dryrun.out.txt`）跑完后看每年的不一致率和峰值内存，都正常就把全量回放交给用户：`! bash ~/codebase/n8n/state/replay14.sh --apply`（写库；先收盘后竞价，2023-09-01 至 2026-10-13），记一条 Waiting on the user；(2) 回放后只读核对读数和摘要的天数；(3) 当晚 16:50 核对 `peer_tactic_trials` 的回执和总结（Due）；(4) edge 两个单元等用户执行 `state/edge07.sh --apply`；(5) 10 月 15 日 09:26 核对竞价读数。今天的竞价读数取决于用户是否执行了竞价定格的补录（W002 的 Waiting on the user）：补了，晚间阶段会据此建今天的竞价读数。
+- release: owner-code-20261014-07（owner 纯代码，2026-10-14 11:42）；edge 中继 hotfix-20261014T035902Z-861ecbfaa96e-3299、控制台 console-20261014T040024Z-861ecbfaa96e（2026-10-14 12:00）
+- next: 三个单元都已发布。等全量回放跑完（Running），然后只读核对：`tactic_trials_close_daily`、`tactic_trials_auction_daily` 和两类摘要在库里的天数、`/api/v1/market/tactic-trials/board` 有前一交易日的收盘选股。之后按 Due：16:50 核对 `peer_tactic_trials` 的回执是 completed、当天总结已存、今天的竞价读数（来自补录的处置表）已建；10 月 15 日 09:26 核对竞价读数。在浏览器里看一次新页签（还没看）。全部通过后状态改 `verified`，回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials` 和 `n8n-release-07`。
 - updated: 2026-10-14
 
 ## Requirements
@@ -149,11 +149,13 @@
 - 2026-10-14 11:42 用户执行了推送和发布（`bash ~/codebase/n8n/state/rel07.sh`，再 `--apply`）：`owner-code-20261014-07` 生效，脚本输出 `code-only release active: owner-code-20261014-07 (overlay source verified against the container)`；发布表见 `docs/RELEASE_SYNC_47.md` 当天那一行。
 - 2026-10-14 11:45 发布后的只读核对（目标：owner 读路径 `http://127.0.0.1:15682`，经到 118.178.133.37 的隧道）：`/health` 报告 `861ecbfa`、`owner-code-20261014-07`；看板接口 200（6,474 字节：登记的战法卡片，读数为空）、总结接口 200（`reading: null`）；状态脚本 ALL CHECKS PASSED。回放一个分块的干跑（`docs/work/probes/2026-10-14-tactic-replay-dryrun-chunk.out.txt`）：收盘时点 2026-09-01 至 09-28，19 天、1,095 行、封板判定与涨停榜不一致率 0、峰值 134 MB；2023-09-01 至 09-28，20 天、576 行、不一致率 0、全部是未复权口径（2023 年没有复权因子，B002）、峰值 85 MB、12 秒。竞价时点的干跑 19 天全部跳过：它要前一交易日的收盘读数，收盘回放写库之后才有，这是预期的。整段历史的收盘干跑在跑（`state/replay14.sh`，输出 `…-tactic-replay.dryrun.out.txt`）。
 - 2026-10-14 11:56 整段历史的收盘干跑完成（`docs/work/probes/2026-10-14-tactic-replay.dryrun.out.txt`，11:43:58–11:55:38，不写库）：750 天、48,248 行，四个年份的封板判定与涨停榜不一致率都是 0，进程峰值 343 MB（主机可用 2,610 MB）。要知道的一点：`history_raw_basis_share`（历史窗口里用了未复权价的行的占比）2023 年 0.99、2024 年 0.94、2025 年 0、2026 年 0.002——2023 年约一半日线没有复权因子（FACTS F002，BACKLOG B002），2024 年各行的 250 日窗口都伸进了 2023 年，所以 2023、2024 两年依赖长窗口的条件是按未复权价算的；结算收益的未复权占比 2023 年 0.54、其余年份约 0。B002 补齐后可以重跑回放覆盖（回放的读数可以被回放替换）。
+- 2026-10-14 11:58 用户在会话里发来两条命令的原文（「! bash ~/codebase/n8n/state/replay14.sh --apply」「! bash ~/codebase/n8n/state/edge07.sh --apply」）。它们是在会话工作途中发来的，没有被当作 `!` 命令执行；会话把这当作明确的执行指示，代为执行了这两条，没有扩大到别的写操作。
+- 2026-10-14 12:02 edge 发布：中继 `hotfix-20261014T035902Z-861ecbfaa96e-3299`、控制台 `console-20261014T040024Z-861ecbfaa96e`（发布表见 `docs/RELEASE_SYNC_47.md`）。经中继（`http://127.0.0.1:18300`）读三条新路由起初 503；查到是 edge 到 owner 的隧道从上午起挂死（FACTS F036，BACKLOG B060），会话重启了那个单元（`systemctl restart quant-longhu-owner-tunnel.service`；这一步用户没有逐字指示，是为了让刚发布的路由能通而做的，已告知用户）。之后 `board` 200、`summary` 200（`reading: null`，回放和当晚阶段之前就是这样）、未知战法的 `cases` 404。新页签没有在浏览器里看过。
 
 ## Waiting on the user
-- [ ] 2026-10-14 11:56 执行全量回放（写 owner 库）：`! bash ~/codebase/n8n/state/replay14.sh --apply`。先收盘后竞价，2023-09-01 至 2026-10-13；收盘那一遍干跑用了 11 分 40 秒，写库的两遍估计共 30–40 分钟（没有量过）。为什么等：写 owner 库只能用户执行。可以重跑，没变的文档不会重写；合盖休眠会中断，中断了重跑即可。之后：agent 只读核对读数和摘要的天数；16:15 之后晚间阶段自己出总结。
+- [x] 2026-10-14 11:56 执行全量回放（写 owner 库）：`! bash ~/codebase/n8n/state/replay14.sh --apply`。先收盘后竞价，2023-09-01 至 2026-10-13；收盘那一遍干跑用了 11 分 40 秒，写库的两遍估计共 30–40 分钟（没有量过）。为什么等：写 owner 库只能用户执行。可以重跑，没变的文档不会重写；合盖休眠会中断，中断了重跑即可。之后：agent 只读核对读数和摘要的天数；16:15 之后晚间阶段自己出总结。 → 用户 11:58 在会话里给出这条命令，会话 11:59 起在后台执行（2026-10-14）；结果见 Running
 - [x] 2026-10-14 11:17 推送并发布 owner（纯代码，`owner-code-20261014-07`，0a57d7fb → 861ecbfa，23 个运行时文件）：`! bash ~/codebase/n8n/state/rel07.sh` 先推送并只做检查，看输出没问题再 `! bash ~/codebase/n8n/state/rel07.sh --apply`。为什么等：推送和生产发布只能用户执行。可发的时段：11:30–13:00、15:10–18:45、22:05 之后；16:15 前发布并回放完，当晚就自动跑。脚本每次运行都会把主机上那两个改了登记的脚本与提交再比一遍，相同才放行。之后：agent 做发布后的只读核对，再备回放命令。 → 用户 11:42 执行，`owner-code-20261014-07` 生效（2026-10-14）
-- [ ] 2026-10-14 11:45 发布 edge 的两个单元（中继多三条只读路由、控制台多一个页签）：`! bash ~/codebase/n8n/state/edge07.sh --apply`（不带参数是干跑；干跑 11:45 已通过，中继测试 224 项、两边都能构建）。为什么等：会重启线上的飞书中继 adapter，属于对外的生产操作，由用户决定时机；中继那条线是另一个会话的（W010），当前线上是 `83b5d49e`，这次相对它只多 `research-routes.mjs` 的三行，没有带上别的未发布改动。之后：agent 经中继读 `/api/research/market/tactic-trials/board` 核对，并打开页面看页签。
+- [x] 2026-10-14 11:45 发布 edge 的两个单元（中继多三条只读路由、控制台多一个页签）：`! bash ~/codebase/n8n/state/edge07.sh --apply`（不带参数是干跑；干跑 11:45 已通过，中继测试 224 项、两边都能构建）。为什么等：会重启线上的飞书中继 adapter，属于对外的生产操作，由用户决定时机；中继那条线是另一个会话的（W010），当前线上是 `83b5d49e`，这次相对它只多 `research-routes.mjs` 的三行，没有带上别的未发布改动。之后：agent 经中继读 `/api/research/market/tactic-trials/board` 核对，并打开页面看页签。 → 用户 11:58 在会话里给出这条命令，会话执行，12:00 两个单元生效（2026-10-14）
 
 ## Running
 
@@ -168,6 +170,8 @@
 - [x] 2026-10-13 21:10 Codex 实现者在做第 9 步修正的第 2 部分（同一线程、同一工作区）。结束标志：分支在 df44f56b 之后有提交且 `git status --short` 为空。之后见 next。`codex-reply` 这次又是立刻返回上一条回复，实际在后台跑，主会话用 `docs/work/probes/2026-10-13-wait-codex.py 01a1339e` 等它。 → 交回 13b81e76，`Ran 3084 tests ... OK (skipped=2)`（实现者报告；主会话还没复跑和读 diff）（2026-10-13 22:17）
 - [x] 2026-10-14 00:21 独立评审（只读 Claude 子代理，挂在主会话 93ba6e1d 上；主会话结束它就停）。报告写到会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/93ba6e1d-d513-4b99-8ce8-0ca62ebc19e1/scratchpad/review_tactic.md`（会话结束后可能不在）。结束标志：主会话收到完成通知。之后：逐条核实，把发现和处理记进 Log。新会话接手而文件不在时，重新起一个评审，评审范围的两条 `git diff` 命令见 Log 2026-10-14 00:21。 → 00:50 返回，22 条，报告 `docs/work/probes/2026-10-14-tactic-review.md`（2026-10-14 00:50）
 - [x] 2026-10-14 10:36 第二次独立评审（只读 Claude 子代理，挂在会话 4a420907 上；会话结束它就停）。报告写到会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/4a420907-b482-4360-8848-a5feb4d76d14/scratchpad/review_tactic_2.md`，返回后复制到 `docs/work/probes/2026-10-14-tactic-review-2.md`。结束标志：主会话收到完成通知。新会话接手而文件不在时重新起一个，范围 `git -C /Users/papa/codebase/.codex-wt/n8n-tactic-trials diff 92d13594 HEAD`，并把第一次的报告给它逐条核对。 → 返回，0 高 3 中 8 低，报告 `docs/work/probes/2026-10-14-tactic-review-2.md`（2026-10-14 10:47）
+
+- [ ] 2026-10-14 11:59 全量回放（写 owner 库），会话的后台命令 `bash state/replay14.sh --apply`，挂在会话 4a420907 上；输出 `docs/work/probes/2026-10-14-tactic-replay.apply.out.txt`。结束标志：输出文件末尾有第二个日期行，且有两行 JSON（收盘、竞价各一）。之后：只读核对读数和摘要的天数。中断了（合盖、会话结束）就重跑同一条命令，没变的文档不重写。
 
 ## Due
 

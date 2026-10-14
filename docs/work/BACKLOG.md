@@ -586,6 +586,17 @@
 - note1: 2026-10-14 11:28 代码改了（提交 0fbe21f2，合进 main 616c6438，还没发布）：循环启动时每一拍都已错过、已过 09:25:05、当天又没有处置表时，取一次供应商的最终竞价，全部 `final` 才存（快照记在 09:25:05 下、带 `backfilled`，`available_at` 是真实取数时间）并建处置表，结果记在日志行的 `late_table=`；盘口在 09:30 之后超过 5 分钟就不取，计入 `skipped_late`。发布路径测试 `Ran 3131 tests in 42.928s OK (skipped=2)`。发布后的验证只能等下一次真的晚启动，或在 09:25–11:30 之间重启一次服务时看日志行；验证之前不关
 - updated: 2026-10-14
 
+### B060 edge 到 owner 的隧道在对端挂死时会永远停在握手里
+
+- state: ready
+- kind: defect
+- why: 2026-10-14 owner 主机挂死后，edge 上的 `quant-longhu-owner-tunnel.service` 10:35 重启进来的 ssh 停在握手里一个半小时，单元一直显示 active，owner 恢复后也不自愈，经中继的研究接口全是 503，直到 12:01 人工重启（FACTS F036）。本机 supervisor 的 `owner-tunnel` 没有这个问题（它反复以 255 退出并重连）
+- how: 给 edge 上这个单元的 ssh 加 `-o ConnectTimeout=15`（握手阶段也有期限），并确认 `Restart=always`；单元文件不在仓库里，改之前先把它的内容收进仓库（`feishu-relay/deploy/edge/` 或相应位置）并写进 `docs/RELEASE_SYNC_47.md`，否则下次还是没人知道它长什么样。再加一条探活：隧道 active 而 15682 没有监听或 `/health` 不通时重启它。改 edge 主机上的 systemd 配置要用户同意
+- who: agent 备改动，用户同意后执行
+- needs: none
+- found: 2026-10-14
+- updated: 2026-10-14
+
 ## Closed
 
 ### B057 龙版传媒（605577）缺的复权日线

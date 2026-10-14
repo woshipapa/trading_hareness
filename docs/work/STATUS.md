@@ -10,7 +10,7 @@
 | [W002](streams/W002-auction-capture-and-desk.md) | 竞价池采集与 09:25 处置表 | verified | Claude Code 会话 4a420907，2026-10-14 | B059 的代码已随 `owner-code-20261014-07` 发布；它的验证要等下一次采集循环在 09:25 之后才启动（或在 09:25–11:30 之间重启一次服务）时看日志行里的 `late_table=`。此外：W006 的竞价看板上线后，决定处置表自己的页签和中继路由是否还要做（BACKLOG B017）；不做就关闭本记录。 | 2026-10-13 |
 | [W003](streams/W003-daily-close-completion.md) | 日线收盘补全 | released | Claude Code 会话 93ba6e1d，2026-10-13 | 把剩下的两件事定下来再改状态：(1) 28 只一直“缺日线”的股票（6 只北交所，其余多半停牌）应归到“未交易”，否则这个阶段永远是 partial；(2) 控制面现在卡在每日指标 5,138/5,560 上，对账循环每 5 分钟调一次补全，后 21 次都是空跑（BACKLOG B043）。先只读查清每日指标的缺口是不是常态，再写修正方案 | 2026-10-13 |
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
-| [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | released | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | owner 已发布并核对（Log 11:45）。接着：(1) 整段历史的收盘干跑（后台，输出 `docs/work/probes/2026-10-14-tactic-replay.dryrun.out.txt`）跑完后看每年的不一致率和峰值内存，都正常就把全量回放交给用户：`! bash ~/codebase/n8n/state/replay14.sh --apply`（写库；先收盘后竞价，2023-09-01 至 2026-10-13），记一条 Waiting on the user；(2) 回放后只读核对读数和摘要的天数；(3) 当晚 16:50 核对 `peer_tactic_trials` 的回执和总结（Due）；(4) edge 两个单元等用户执行 `state/edge07.sh --apply`；(5) 10 月 15 日 09:26 核对竞价读数。今天的竞价读数取决于用户是否执行了竞价定格的补录（W002 的 Waiting on the user）：补了，晚间阶段会据此建今天的竞价读数。 | 2026-10-14 |
+| [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | released | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | 三个单元都已发布。等全量回放跑完（Running），然后只读核对：`tactic_trials_close_daily`、`tactic_trials_auction_daily` 和两类摘要在库里的天数、`/api/v1/market/tactic-trials/board` 有前一交易日的收盘选股。之后按 Due：16:50 核对 `peer_tactic_trials` 的回执是 completed、当天总结已存、今天的竞价读数（来自补录的处置表）已建；10 月 15 日 09:26 核对竞价读数。在浏览器里看一次新页签（还没看）。全部通过后状态改 `verified`，回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials` 和 `n8n-release-07`。 | 2026-10-14 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | released | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | 等独立评审返回（Running）。逐条对代码核实，修掉高和中的（尤其是“缺键按可用”那一条），复跑 `COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path` 和 `python -m pytest scripts -q`，把 main 合进分支再 `--no-ff` 合回 main，回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`（先删 `frontend/node_modules` 符号链接）。发布 B 不随合并立刻做：它要等发布 A 之后五个完整交易日的当日汇总（从 10 月 15 日数起，每天收盘后跑一次并把输出存进 `docs/work/probes/`）。 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在编辑框里改了备注名并保存后，核对飞书里的备注名和会员表（这是经线上 bridge 接口的第一次写入）；其余见 Open questions 和待办 B056 的 (2)、(4)。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
@@ -23,8 +23,6 @@
 - W010 2026-10-13 在看板上试用七项功能并反馈；特别是会员期限：对真实目标群第一次“同步成员”后，老成员的开始日期是各自的入群日期、期限是默认的 1 个月，
 - W010 2026-10-13 擒龙群现在可以发到期提醒了：是否打开“每天自动审查”由用户决定（预览现在是 0 人；10-17、10-19 各有一人到期）。为什么等：打开后机器人会在客户群里 @ 人。
 - W010 2026-10-14 在看板上给一位续费的会员改日期并改写备注名、保存，然后看一眼飞书里这个人的备注名是否变了。为什么等：这是经线上接口的第一次真实写入，本会话不能代做。
-- W006 2026-10-14 11:45 发布 edge 的两个单元（中继多三条只读路由、控制台多一个页签）：`! bash ~/codebase/n8n/state/edge07.sh --apply`（不带参数是干跑；干跑 11:45 已通过，中继测试 224 项、两边都能构建）。为什么等：会重启线上的飞书中继 adapter，属于对外的生产操作，由用户决定时机；中继那条线是另一个会话的（W010），当前线上是 `83b5d49e`，这次相对它只多 `research-routes.mjs` 的三行，没有带上别的未发布改动。之后：agent 经中继读 `/api/research/market/tactic-trials/board` 核对，并打开页面看页签。
-- W006 2026-10-14 11:56 执行全量回放（写 owner 库）：`! bash ~/codebase/n8n/state/replay14.sh --apply`。先收盘后竞价，2023-09-01 至 2026-10-13；收盘那一遍干跑用了 11 分 40 秒，写库的两遍估计共 30–40 分钟（没有量过）。为什么等：写 owner 库只能用户执行。可以重跑，没变的文档不会重写；合盖休眠会中断，中断了重跑即可。之后：agent 只读核对读数和摘要的天数；16:15 之后晚间阶段自己出总结。
 
 ## 到点要做
 
@@ -38,11 +36,12 @@
 
 ## 正在运行
 
+- W006 2026-10-14 11:59 全量回放（写 owner 库），会话的后台命令 `bash state/replay14.sh --apply`，挂在会话 4a420907 上；输出 `docs/work/probes/2026-10-14-tactic-replay.apply.out.txt`。结束标志：输出文件末尾有第二个日期行，且有两行 JSON（收盘、竞价各一）。之后：只读核对读数和摘要的天数。中断了（合盖、会话结束）就重跑同一条命令，没变的文档不重写。
 - W008 2026-10-14 12:00 独立评审整条分支（只读 Claude 子代理，opus，挂在会话 4a420907 上）：范围 `git diff c5da5fa0 HEAD`，重点是通达信补的那一分钟有没有路径在绑定未放行时进到信号、纸面执行或决策报价。报告写到会话草稿目录的 `review_tdx_fallback.md`，返回后复制到 `docs/work/probes/2026-10-14-tdx-fallback-review.md`。结束标志：主会话收到完成通知。新会话接手而报告不在时，重新起一个，范围同上。
 
 ## 待办清单
 
-open 30, ready 15, doing 3, waiting-user 1, done 9, dropped 1
+open 30, ready 16, doing 3, waiting-user 1, done 9, dropped 1
 
 在做的、可以开工的、等用户处理的:
 
@@ -65,3 +64,4 @@ open 30, ready 15, doing 3, waiting-user 1, done 9, dropped 1
 - B050 (doing) owner 上只用一套镜像，以后的发布都是代码覆盖
 - B055 (ready) 补取 2026-10-13 当天的指数和 ETF 分钟线
 - B059 (doing) 采集循环在 09:25 之后才启动时：不补竞价定格，却把当时的盘口记成 09:30 的
+- B060 (ready) edge 到 owner 的隧道在对端挂死时会永远停在握手里
