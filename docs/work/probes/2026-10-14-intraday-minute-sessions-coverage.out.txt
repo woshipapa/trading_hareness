@@ -1,0 +1,6 @@
+{'n': 3082, 'symbols': 13, 'first': '2026-10-14 09:30:00+08', 'last': '2026-10-14 14:56:00+08', 'minutes': 238, 'first_available': datetime.datetime(2026, 10, 14, 14, 55, 14, 363757, tzinfo=zoneinfo.ZoneInfo(key='Asia/Shanghai')), 'last_available': datetime.datetime(2026, 10, 14, 14, 55, 17, 726794, tzinfo=zoneinfo.ZoneInfo(key='Asia/Shanghai')), 'sources': ['longhu_intraday_minutes', 'tencent_intraday_minutes']}
+{'symbol': '002156.SZ', 'n': 238, 'first': '2026-10-14 09:30:00+08', 'last': '2026-10-14 14:56:00+08', 'morning_rows': 0}
+{'symbol': '000823.SZ', 'n': 237, 'first': '2026-10-14 09:30:00+08', 'last': '2026-10-14 14:56:00+08', 'morning_rows': 0}
+{'symbol': '002639.SZ', 'n': 237, 'first': '2026-10-14 09:30:00+08', 'last': '2026-10-14 14:56:00+08', 'morning_rows': 0}
+{'symbol': '002696.SZ', 'n': 237, 'first': '2026-10-14 09:30:00+08', 'last': '2026-10-14 14:56:00+08', 'morning_rows': 0}
+{'symbol': '000530.SZ', 'n': 237, 'first': '2026-10-14 09:30:00+08', 'last': '2026-10-14 14:56:00+08', 'morning_rows': 0}

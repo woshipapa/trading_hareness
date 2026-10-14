@@ -1,0 +1,31 @@
+stream | market_wide | rows_day | rows_09:21-11:05 | distinct minutes 09:21-11:05 (of 105) | distinct minutes 13:00-14:59 (of 120)
+longhuvip/a_share_minute_cross_section | True | 95 | 95 | 95 | 0
+eastmoney_flash/news_flash | True | 878 | 287 | 47 | 66
+cls_telegraph/news_flash | True | 890 | 445 | 46 | 51
+ths_flash/news_flash | True | 621 | 174 | 46 | 39
+jin10_flash/news_flash | True | 782 | 141 | 19 | 77
+eastmoney_hot_rank/hot_rank_popularity | False | 2300 | 700 | 2 | 12
+quant_scan/watch_scan_tape | False | 573 | 2 | 2 | 120
+fuyao_ths/auction_pool_snapshot | True | 43 | 6 | 2 | 0
+quant_scan/storage_tiering_run | False | 36 | 2 | 2 | 4
+eastmoney_ztb/board_change_snapshot | True | 13 | 3 | 2 | 8
+eastmoney_hot_rank/hot_rank_surge | False | 1366 | 79 | 1 | 12
+fuyao_ths/a_share_hot_stock_list | False | 510 | 30 | 1 | 12
+fuyao_ths/a_share_skyrocket_list | False | 510 | 30 | 1 | 12
+local_derived/market_radar | True | 151 | 1 | 1 | 120
+tdx_public/a_share_minute_cross_section_shadow | True | 151 | 1 | 1 | 120
+fuyao_ths/a_share_minute_cross_section | True | 151 | 1 | 1 | 120
+local_derived/all_a_snapshot_source_agreement | True | 151 | 1 | 1 | 120
+longhuvip/opening_auction_pulse | True | 121 | 8 | 1 | 0
+tdx_public/auction_curve_daily | False | 95 | 95 | 1 | 0
+longhuvip/auction_bid_daily | False | 93 | 93 | 1 | 0
+derived_market_sentiment/market_sentiment_snapshot | True | 30 | 1 | 1 | 24
+fuyao_ths/realtime_quote | False | 33372 | 0 | 0 | 0
+eastmoney_ztb/limit_pool_strong | False | 391 | 0 | 0 | 0
+eastmoney_ztb/limit_pool_sub_new | False | 162 | 0 | 0 | 0
+eastmoney_ztb/limit_pool_limit_up | False | 78 | 0 | 0 | 0
+eastmoney_ztb/limit_pool_previous_limit_up | False | 69 | 0 | 0 | 0
+eastmoney_ztb/limit_pool_limit_down | False | 28 | 0 | 0 | 0
+eastmoney_ztb/limit_pool_broken | False | 24 | 0 | 0 | 0
+tencent_index_free/daily_bar | False | 5 | 0 | 0 | 0
+intraday_minute_sessions columns: ['symbol', 'trading_date', 'minute_bucket', 'bar_time', 'open', 'high', 'low', 'close', 'volume', 'amount', 'source_name', 'available_at', 'raw']

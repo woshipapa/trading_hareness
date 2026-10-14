@@ -817,6 +817,16 @@
 - how: 14:49–15:05 用 `state/fetch_today_minutes.py`（本机，不进仓库）经 owner 读路径取今天每只股票的分钟线（`GetStockTrendIncremental`），6 并发：沪深 5,141 只 + 补取 425 只（北交所 349 只和面板里没有的 76 只），共约 5,570 次，0 次失败，速度 5–8 次/秒，owner 没有拒绝；`state/build_minute_docs.py` 把每个缺的分钟重建成一份文档（价格、累计成交量、累计成交额、开高低收昨收；没有资金流，这与主源这一路“价量快照、无主力资金流”的口径一致）；与已存的真文档对比后（`docs/work/probes/2026-10-14-minute-reconstruction-validation.out.txt`，11:10、13:30、14:30 三分钟）：累计成交量中位误差 0.04%–0.07%，96% 的股票在 1% 以内；价格 50%–57% 在半个最小变动单位内（已存的是该分钟第 39–50 秒，重建的是分钟末）；最高价偏窄、最低价偏宽（分钟收盘价的滚动极值）。95 份写进 `a_share_minute_cross_section`，来源 `longhuvip`，`effective_at` 记在 HH:MM:59，`available_at` 是写入时间；元数据 `reconstructed: true`、`decision_eligible: false`、`fallback_for: fuyao_ths`
 - who: agent；写库由会话在用户同意后执行
 - needs: 无
-- result: 2026-10-14 15:13 写入 95 份（`docs/work/probes/2026-10-14-minute-reconstruction-write.out.txt`，6,405 万字节）；读取方认 `longhuvip` 的代码 `2e0affeb` 随 `owner-code-20261014-10` 发布（15:15）；读取方探针：当天 246 份分钟文档，09:30–11:29 没有缺分钟（`docs/work/probes/2026-10-14-minute-series-after-backfill.out.txt`）。指标健康的 `fallback_minutes` 当天会显示 95、WARN，符合它的定义（主源失败、别的来源补）。没做：09:21–09:29（集合竞价阶段，分钟线里没有）；W008 升级通达信要数满的 5 个通过日，今天不算
+- result: 2026-10-14 15:13 写入 95 份（`docs/work/probes/2026-10-14-minute-reconstruction-write.out.txt`，6,405 万字节）；读取方认 `longhuvip` 的代码 `2e0affeb` 随 `owner-code-20261014-10` 发布（15:15）；读取方探针：当天 246 份分钟文档，09:30–11:29 没有缺分钟（`docs/work/probes/2026-10-14-minute-series-after-backfill.out.txt`）。指标健康的 `fallback_minutes` 当天会显示 95、WARN，符合它的定义（主源失败、别的来源补）。没做：09:21–09:29（集合竞价阶段，分钟线里没有）；主分钟序列之外的流见 B074；W008 升级通达信要数满的 5 个通过日，今天不算
+- updated: 2026-10-14
+
+### B074 2026-10-14 上午主机故障期间，主分钟序列之外的流没有补
+
+- state: open
+- kind: data-backfill
+- why: B073 只补了主源的全 A 分钟价量快照。审计（`docs/work/probes/2026-10-14-morning-gap-audit.out.txt`，09:21–11:05 共 105 分钟）里，下面这些流在该窗口仍只有 0–2 个分钟：通达信并行快照（1）、`market_radar`（1）、`all_a_snapshot_source_agreement`（1）、`market_sentiment_snapshot`（1）、`board_change_snapshot`（2）、热榜和飙升榜（1）、东财热度榜（1–2）、自选盯盘 `watch_scan_tape`（2）、东财涨停池七个流（0）、`realtime_quote`（0）；另有潜龙出海的扫描和研究提醒（F037：10 月 14 日只有 11:06–11:29 跑了 112 次）
+- how: 分三类，先分清哪些能补：(1) 实时列表类（热榜、飙升榜、热度榜、东财涨停池、板块异动）：没有查到历史接口，从这边取不回来，只能在记录里标明那一段缺；涨停池当天的最终结果收盘后由 Longhu 榜单另存，所以日结论不受影响。(2) 派生类（`market_radar`、温度分时、情绪快照、源一致性）：输入是快照加涨停池，快照现在有了重建版，涨停池没有，要先定输入口径再决定能不能离线重算，且重算出来也要标事后重建。(3) 通达信并行快照是对主源的一致性检查，重建它没有意义，不补。潜龙出海和盯盘的扫描可以用重建的分钟离线回放，但回放不是当时的信号，只能进研究，不能进提醒
+- who: agent；回放不写库的部分可以直接做，写 owner 库要用户执行
+- needs: 用户决定哪几类值得做（(2) 和潜龙回放有成本，(1) 没有可做的）
 - updated: 2026-10-14
 
