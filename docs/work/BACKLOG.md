@@ -620,42 +620,46 @@
 
 ### B065 老师阶段被关掉时，当晚的回执就关闭了，之后打开不会补
 
-- state: open
+- state: done
 - kind: defect
 - why: 2026-10-14 Grok 只读审查，我核对过代码：`post_close_refresh.py:74-76` 把 `skipped` 改写成 `completed`；`peer_close_research.py` 里老师开关关着时两个阶段返回 `skipped`，回执（键含日期）当晚即关闭，开关晚上再打开也不会补滚。影响面很窄（只有开关当天翻转）
 - how: 没有直接做，因为两种改法都会改运行信号：(a) 把 `skipped` 记成 `blocked`，每个 10 分钟的轮次都会重跑这两个阶段，W011 用来验收的“left open”日志行会常驻；(b) 只给老师两阶段一个“开关关着不关回执”的标记，要在回执摘要里多存一个键。先问 W011 的验收是否要保留“left open”为零，再选
 - who: agent
-- needs: 用户决定要不要为这个窄场景改运行信号
+- needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
+- result: 2026-10-14 提交 e6363b8e（本地 main，未推送、未发布）：老师两阶段在开关关着时返回 `receipt: open`，回执记 `blocked`、下一轮再问；调用方仍看到 `skipped`，所以日志里不会多出“left open”（`open_stages` 读的是阶段自己返回的状态）。其他 `skipped` 阶段（配置关掉的）不变。读回执状态的只有探针脚本，运行代码里没有别处读。测试 `test_a_skipped_stage_keeps_its_receipt_open_only_when_it_asks_to`；全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
 - updated: 2026-10-14
 
 ### B066 战法标签不看 q 值
 
-- state: open
+- state: done
 - kind: defect
 - why: 2026-10-14 审查核对：`tactic_trials.py:321-328` 的 `supports`/`against` 只看前向 `t` 的绝对值 ≥2、20 个有选股日、60 笔；BH 的 `q`（`:489-493`）只附在记录上，不参与标签；`p` 是正态近似（`:488`，源码注释自己写了）。战法多时（约 20 条）总会有一两条单看 `t≥2`
 - how: 标签加一道 `q` 阈值，阈值由用户定（例如 0.1）；`p` 改 t 分布，样本 20 天时差别不大。改动在 `_label` 和调用处，测试是纯函数
 - who: agent
-- needs: 用户定 `q` 的阈值，和是否把已有的 `supports` 读数按新口径重算
+- needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
+- result: 2026-10-14 提交 e6363b8e（本地 main，未推送、未发布）：`supports`/`against` 要求主要结果的 BH `q` ≤ 0.10（`LABEL_MAX_Q`）；`p` 仍用正态近似，没有改（改会动 `records` 的键和固定的参考指纹）。在 66 个战法的参考数据上，原有的 4 个 `supports`/`against` 的 `q` 是 0.10 到 0.53，现在都是 `undecided`，参考文件 `tests/fixtures/tactic_fold_reference_b04be9b9.json` 只改了这 4 个标签。发布后的第一次每日总结，`label_changes` 里会出现这几条从 `supports`/`against` 到 `undecided` 的变化，是预期的。全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
 - updated: 2026-10-14
 
 ### B067 风险分的回执门禁和 `partial` 的含义
 
-- state: open
+- state: done
 - kind: defect
 - why: 2026-10-14 审查核对了机制，没追影响：(1) 风险分阶段在日线 ≥4,000 根（`peer_close_research.py:62`）且榜单非空时就回执 `completed`，之后当晚不重算；读数里带 `coverage.missing_bar` 和 `ranks_reliable`，所以缺口可见，但回执关了。(2) `post_close_scheduler.py:55` 与 `post_close_strategy_service.py:233` 把策略的 `partial` 算作当日完成；`partial` 在什么情况下返回没有追到
 - how: 先只读：查近 10 个交易日 `peer_limit_up_risk` 回执时的 `coverage.missing_bar`（`post_close_strategy_runs` 里 `partial` 的原因）；如果缺口里涨停股占比不可忽略，再把门禁改成补齐回执 `completed`，或覆盖率上升时允许同日重算
 - who: agent 只读查询；写库的重算由用户执行
-- needs: 无（先查询）
+- needs: 无
+- result: 2026-10-14 只读查询（`docs/work/probes/2026-10-14-risk-reading-coverage.py` → `.out.txt`，事实 F038）：最近 12 个有读数的交易日，风险分读数的 `missing_bar` 是 0 的 8 天、1 的 4 天（每天 33–100 行），日线每天 5,556–5,567 根，远高于 4,000 的门槛；没有看到缺口对结果有实质影响，所以没有改回执门禁。`partial`：策略自己只会返回 `completed` 或 `blocked`（`post_close_candidate_screen.py`），`partial` 来自上游补全阶段，算作当日完成不会让缺口漏过。若以后日线分批到达、4,000 根时缺口大，再看 B067 的做法
 - updated: 2026-10-14
 
 ### B068 复盘检查点只有 2 分钟窗口，窗口外启动当天不补
 
-- state: open
+- state: done
 - kind: defect
 - why: 2026-10-14 审查核对：`strategy_review_scheduler.py:19,56-57` 的 11:31 和 15:05 各只有 2 分钟；进程在窗口外启动或窗口内调用全失败，当天的日评、结算、周评都不补。15:05 的收盘复盘没有理由不能晚补
 - how: 无回执时在 15:10–22:00 补跑一次收盘检查点（先 `completed_for_checkpoint` 查回执，保持幂等）；11:31 的盘中检查点是时点快照，不补
 - who: agent
-- needs: 无
+- needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
+- result: 2026-10-14 提交 e6363b8e（本地 main，未推送、未发布）：收盘检查点 15:10–22:00 在没有回执时补跑，失败后至多每 10 分钟一次；只在带 `completed_for_checkpoint`（持久回执）时才补，避免重复结算；盘中检查点不补。4 条新用例，全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
 - updated: 2026-10-14
 
 ### B069 审查里推测的四处，要用运行证据确认
