@@ -123,5 +123,57 @@ class SeriesTests(unittest.TestCase):
         self.assertEqual(early, later[:100])
 
 
+class FrozenRulesTests(unittest.TestCase):
+    #: Written on 2026-10-14.  If this fails you changed something that decides a band (a component, its
+    #: direction, the window, a gate or a band edge).  Raise ``VERSION``, set a new ``FROZEN_ON`` and
+    #: ``FORWARD_FROM``, record the change in decision 0013, and only then replace this literal.
+    FROZEN_SHA256 = "922ef3cdc2956804a10600359f04b1f3cbf55a6dc03785593b35af9330ce4471"
+
+    def test_the_band_rules_are_the_frozen_ones(self):
+        self.assertEqual(mt.RULES_SHA256, self.FROZEN_SHA256)
+
+    def test_the_band_edges_in_the_fingerprint_are_the_ones_band_of_uses(self):
+        for temperature, band in ((20.0, "冰点"), (20.1, "冷"), (39.9, "冷"), (40.0, "中性"), (59.9, "中性"),
+                                  (60.0, "热"), (79.9, "热"), (80.0, "沸点")):
+            self.assertEqual(mt.band_of(temperature), band)
+        self.assertEqual(mt.RULES["band_edges"], [mt.FREEZING, mt.COLD_EDGE, mt.WARM_EDGE, mt.BOILING])
+
+    def _day(self, index: int, band: str, *, opening: float = 100.0, closing: float = 100.0, sha=None, start=date(2026, 10, 15)):
+        return {"trade_date": (start + timedelta(days=index)).isoformat(), "band": band, "index_open": opening,
+                "index_close": closing, "rules_sha256": sha or mt.RULES_SHA256}
+
+    def test_the_forward_sample_collects_until_both_groups_have_twenty_days(self):
+        readings = [self._day(index, "冰点" if index % 2 == 0 else "中性", closing=100.0 + index % 3)
+                    for index in range(30)]
+        result = mt.forward_test(readings)
+        self.assertEqual(result["status"], "collecting")
+        self.assertLess(result["freezing_days"], mt.FORWARD_MIN_DAYS)
+
+    def test_the_forward_sample_judges_the_written_direction_once_it_has_twenty_each(self):
+        # the session after a freezing day closes 1% above its open, after any other day 0.5% below
+        readings = []
+        for index in range(100):
+            band = "冰点" if index % 2 == 0 else "中性"
+            previous_band = "冰点" if (index - 1) % 2 == 0 else "中性"
+            readings.append(self._day(index, band, closing=101.0 + (index % 3) * 0.01 if previous_band == "冰点"
+                                      else 99.5 + (index % 3) * 0.01))
+        result = mt.forward_test(readings)
+        self.assertEqual(result["status"], "supports")
+        self.assertGreater(result["difference"], 0.0)
+        self.assertGreaterEqual(result["t"], 2)
+        reversed_readings = [{**reading, "index_close": 200.0 - reading["index_close"]} for reading in readings]
+        self.assertEqual(mt.forward_test(reversed_readings)["status"], "against")
+
+    def test_readings_before_the_freeze_or_under_other_rules_are_not_counted(self):
+        before = [self._day(index, "冰点", closing=102.0, start=date(2026, 9, 1)) for index in range(40)]
+        other_rules = [self._day(index, "冰点", closing=102.0, sha="0" * 64) for index in range(40)]
+        result = mt.forward_test(before + other_rules)
+        self.assertEqual((result["freezing_days"], result["other_days"], result["bands"]), (0, 0, {}))
+
+    def test_a_missing_open_or_a_long_gap_leaves_the_pair_out(self):
+        readings = [self._day(0, "冰点"), {**self._day(1, "中性"), "index_open": None}, self._day(30, "中性")]
+        self.assertEqual(mt.forward_test(readings)["bands"], {})
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

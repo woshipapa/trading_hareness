@@ -95,7 +95,8 @@ SELECT s.trading_date,
        count(*) FILTER (WHERE prev_sealed AND sealed) AS promoted,
        avg(ret) FILTER (WHERE prev_sealed) * 100 AS premium_pct,
        max(streak) AS max_streak,
-       (SELECT close FROM quant.canonical_bars_daily i WHERE i.symbol=%(index)s AND i.trading_date=s.trading_date) AS index_close
+       (SELECT close FROM quant.canonical_bars_daily i WHERE i.symbol=%(index)s AND i.trading_date=s.trading_date) AS index_close,
+       (SELECT open FROM quant.canonical_bars_daily i WHERE i.symbol=%(index)s AND i.trading_date=s.trading_date) AS index_open
   FROM streaks s
  WHERE s.trading_date BETWEEN %(start)s AND %(end)s
  GROUP BY s.trading_date

@@ -31,7 +31,9 @@ from typing import Any
 
 from . import broad_etf_flow, derived_daily_readings, market_timing
 from .derived_daily_readings import CN_TZ
-from .market_temperature import BOILING, COMPONENTS, FREEZING, VERSION, temperature_series
+from .market_temperature import (
+    BOILING, COMPONENTS, FREEZING, FROZEN_ON, RULES_SHA256, VERSION, forward_test, temperature_series,
+)
 from .market_temperature_repository import daily_rows
 
 CAPABILITY = "market_temperature_daily"
@@ -70,7 +72,8 @@ def refresh(database: Any, end: date, *, keep: int = KEEP_SESSIONS, apply: bool 
     """Recompute and store the last ``keep`` readings; ``completed`` only when ``end`` itself has one."""
     with database.transaction() as connection:
         readings = compute(connection, end, lookback_days=lookback_days)
-    scored = [{**reading, "version": VERSION, "research_only": True, "live_effect": "none"}
+    scored = [{**reading, "version": VERSION, "rules_sha256": RULES_SHA256, "research_only": True,
+               "live_effect": "none"}
               for reading in readings if reading["temperature"] is not None][-keep:]
     counts = derived_daily_readings.store(database, CAPABILITY, scored) if apply else {"stored": 0, "unchanged": 0}
     latest = scored[-1] if scored else None
@@ -122,6 +125,11 @@ def daily_series(connection: Any, *, days: int = 120, end: date | None = None) -
         })
     return {
         "version": VERSION, "readings": readings[-days:],
+        # The rules a band was read under, frozen on this date; a reading stamped with another fingerprint is not
+        # comparable and is left out of the forward sample.
+        "rules": {"version": VERSION, "sha256": RULES_SHA256, "frozen_on": FROZEN_ON.isoformat(),
+                  "readings_under_these_rules": sum(r.get("rules_sha256") == RULES_SHA256 for r in readings)},
+        "forward_test": forward_test(readings),
         "stale_versions": len(stored) - len(readings),
         "thresholds": {"freezing": FREEZING, "boiling": BOILING, "cold_ceiling": COLD_CEILING,
                        "etf_surge_ratio": broad_etf_flow.SURGE_RATIO},
