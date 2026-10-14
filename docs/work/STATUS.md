@@ -43,7 +43,7 @@
 
 ## 待办清单
 
-open 35, ready 17, doing 3, waiting-user 2, done 24, dropped 1
+open 35, ready 17, doing 3, waiting-user 1, done 25, dropped 1
 
 在做的、可以开工的、等用户处理的:
 
@@ -68,4 +68,3 @@ open 35, ready 17, doing 3, waiting-user 2, done 24, dropped 1
 - B060 (ready) edge 到 owner 的隧道在对端挂死时会永远停在握手里
 - B076 (ready) 试验台的收益拆成“隔夜”和“盘中”，并给买入类加上“一字记 0 不删”的账
 - B077 (ready) 每晚把当天龙头选股和候选的分钟线落本机
-- B082 (waiting-user) 补完 2023 年复权因子之后，重放试验台 2023–2024 的收盘和竞价读数

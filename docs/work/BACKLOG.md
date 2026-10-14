@@ -907,11 +907,12 @@
 
 ### B082 补完 2023 年复权因子之后，重放试验台 2023–2024 的收盘和竞价读数
 
-- state: waiting-user
+- state: done
 - kind: follow-up
 - why: B078 写入后，2023-08 到 2023-11 的日线有了复权因子，但试验台里 2023–2024 年已存的读数是用未复权价算的（`history_raw_basis_share` 2023 年 0.99、2024 年 0.94，W006 Log 11:56）；读数不会自己刷新
 - how: 回放命令同上次（`state/replay14.sh --apply`，先收盘后竞价，没变的文档不重写；同一个写库路径，上次全量约 35 分钟、峰值 344 MB）；只重放 2023-09-01 到 2024-12-31 即可。重放后跑一遍 `rebuild_digests`（日摘要）
 - who: 用户执行写库
-- needs: 用户决定时机（建议 22:05 之后或明早 08:30 前，避开晚间阶段）
+- needs: 无
+- result: 2026-10-14 用户 16:30–16:42 执行 `bash state/replay2023.sh --apply`（`docs/work/probes/2026-10-14-tactic-replay-2023-2024.apply.out.txt`）：收盘读数 322 天、19,826 行，竞价读数 321 天、19,760 行（2023 年跳过 1 天，第一个交易日没有前一日收盘读数，与上次相同）；封板判定与涨停榜的不一致率两年都是 0；**`history_raw_basis_share` 2023 年 0.99→0.0、2024 年 0.94→0.0，`raw_basis_share` 都是 0.0**；峰值内存 333 MB 和 218 MB。随后把龙头战法的提取与分析重跑（`docs/archive/2026-10-14-leader-tactic-analysis/analysis_after_factors.out.txt`）：各项与重放前相差都在 0.02 个点以内，结论不变
 - updated: 2026-10-14
 
