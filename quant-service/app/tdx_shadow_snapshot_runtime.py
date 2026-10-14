@@ -23,7 +23,7 @@ from .intraday_clock import continuous_auction_bounds
 from .market_session_repository import market_observation_session
 from .minute_cross_section import persist_document
 from .public_market_repository import persist_timed_observations
-from .public_provider_rate_limits import PublicProviderRateLimited, acquire_public_provider_slot
+from .public_provider_rate_limits import PublicProviderRateLimited
 from .runtime_executors import ExecutorSaturatedError
 from .intraday_schedule import seconds_until_slot
 
@@ -142,7 +142,6 @@ class TdxShadowSnapshotDependencies:
     recent_reference: Callable[[datetime], tuple[datetime, list[dict[str, Any]]] | None]
     storage_allowed: Callable[[], Awaitable[tuple[bool, dict[str, Any]]]]
     roster_total: Callable[[], Awaitable[int | None]]
-    acquire_slot: Callable[..., Awaitable[None]] = acquire_public_provider_slot
     session_gate: Callable[[Any, datetime], tuple[bool, str]] = market_observation_session
     persist_capture: Callable[[Any, datetime, list[dict[str, Any]], Mapping[str, Any], Mapping[str, Any]], dict[str, Any]] = persist_shadow_capture
 
@@ -162,17 +161,28 @@ class TdxShadowSnapshotRuntime:
         except BaseException:
             pass
 
-    async def _roster_total(self, observed_at: datetime) -> int | None:
+    async def _roster_total(self, observed_at: datetime,
+                            read: Callable[[], Awaitable[int | None]] | None = None) -> int | None:
         trade_date = observed_at.astimezone(CN_TZ).date()
         if trade_date in self._roster_totals:
             return self._roster_totals[trade_date]
         try:
-            total = await self.deps.roster_total()
+            total = await (read or self.deps.roster_total)()
         except DATABASE_UNAVAILABLE:
             return None
         if total is not None:
             self._roster_totals[trade_date] = total
         return total
+
+    async def remembered_roster_total(self, read: Callable[[], Awaitable[int | None]],
+                                      observed_at: datetime | None = None) -> int | None:
+        """The trade date's roster for the other reader of the TDX snapshot, the fallback chain.
+
+        The value a capture remembered is returned without a read. When none is remembered yet
+        the caller's own ``read`` is used once, on the caller's database runner, and its answer is
+        remembered for both.
+        """
+        return await self._roster_total(observed_at or datetime.now(timezone.utc), read)
 
     async def capture(self, observed_at: datetime | None = None) -> dict[str, Any]:
         observed = observed_at or datetime.now(timezone.utc)
@@ -194,10 +204,7 @@ class TdxShadowSnapshotRuntime:
             return _database_busy(error)
         if not allowed:
             return {"status": "storage_paused", "storage": storage, "stored": 0}
-        try:
-            await self.deps.acquire_slot(SHADOW_PROVIDER, max_wait_seconds=0)
-        except PublicProviderRateLimited as error:
-            return {"status": "rate_limited", "error": str(error), "stored": 0}
+        # The shared reader takes the ``tdx_public`` slot; the capture only reports its refusal.
         task = asyncio.create_task(self.deps.fetch_snapshot(), name="tdx-shadow-read")
         self._read_task = task
         task.add_done_callback(self._consume_late_exception)
@@ -206,6 +213,9 @@ class TdxShadowSnapshotRuntime:
             if not done:
                 return {"status": "timeout", "stored": 0}
             result = task.result()
+        except PublicProviderRateLimited as error:
+            self._read_task = None
+            return {"status": "rate_limited", "error": str(error), "stored": 0}
         except Exception as error:  # noqa: BLE001 - capture outcome is bounded and secret-free
             self._read_task = None
             return {"status": "failed", "error": safe_error_detail(str(error), 300), "stored": 0}

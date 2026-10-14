@@ -6,9 +6,14 @@ import unittest
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from app.all_a_snapshot_sources import (
+    TDX_SHARED_READ_TTL_SECONDS, read as read_all_a_snapshot, shared_tdx_snapshot,
+)
 from app.datasources.contracts import CapabilityEvidence
+from app.fuyao_provider import FuyaoProviderError
+from app.public_provider_rate_limits import PublicProviderRateLimited
 from app.runtime_executors import ExecutorSaturatedError, run_tdx_shadow_blocking
 from app.tdx_shadow_snapshot_runtime import (
     AGREEMENT_CAPABILITY,
@@ -35,6 +40,10 @@ FUYAO_ROW = {
 }
 
 
+async def read_shared(shared):
+    return (await shared.get())[0]
+
+
 def evidence():
     return CapabilityEvidence(rows=[TDX_ROW] * 5301, warnings=("tdx_host=test",),
                               available_at_max=NOW + timedelta(seconds=3))
@@ -42,7 +51,7 @@ def evidence():
 
 class TdxShadowCaptureTests(unittest.TestCase):
     def dependencies(self, *, fetch=None, session=True, recent=(NOW - timedelta(seconds=2), [FUYAO_ROW]),
-                     acquire=None, run_database=None, persisted=None, storage=True, roster_total=None):
+                     run_database=None, persisted=None, storage=True, roster_total=None):
         calls = []
 
         async def fetch_snapshot():
@@ -53,10 +62,6 @@ class TdxShadowCaptureTests(unittest.TestCase):
 
         async def storage_allowed():
             return storage, {"allow_nonessential_high_frequency": storage}
-
-        async def acquire_slot(_provider, *, max_wait_seconds):
-            if acquire:
-                return await acquire(_provider, max_wait_seconds=max_wait_seconds)
 
         async def run_db(action, *args, **kwargs):
             calls.append((action, args, kwargs))
@@ -72,7 +77,7 @@ class TdxShadowCaptureTests(unittest.TestCase):
         deps = TdxShadowSnapshotDependencies(
             fetch_snapshot=fetch_snapshot, session_gate=session_gate, run_database=run_db,
             database=object(), recent_reference=lambda _now: recent,
-            acquire_slot=acquire_slot, persist_capture=persist_capture, storage_allowed=storage_allowed,
+            persist_capture=persist_capture, storage_allowed=storage_allowed,
             roster_total=roster_total or (lambda: asyncio.sleep(0, result=5580)),
         )
         return TdxShadowSnapshotRuntime(deps), calls
@@ -126,6 +131,35 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertEqual([first["status"], second["status"], third["status"]], ["completed"] * 3)
         self.assertEqual(calls, ["read", "read"])
 
+    def test_the_chain_uses_the_remembered_roster_or_reads_it_once_itself(self):
+        shadow_reads = []
+        chain_reads = []
+
+        async def shadow_read():
+            shadow_reads.append("shadow")
+            return 5580
+
+        async def chain_read():
+            chain_reads.append("chain")
+            if len(chain_reads) == 1:
+                raise ExecutorSaturatedError("database busy")
+            return 5579
+
+        async def scenario(runtime, capture_first):
+            if capture_first:
+                await runtime.capture(NOW)
+            return [await runtime.remembered_roster_total(chain_read, NOW) for _ in range(3)]
+
+        runtime, _ = self.dependencies(roster_total=shadow_read)
+        self.assertEqual(asyncio.run(scenario(runtime, True)), [5580] * 3)
+        self.assertEqual((shadow_reads, chain_reads), (["shadow"], []))
+
+        runtime, _ = self.dependencies(roster_total=shadow_read)
+        self.assertEqual(asyncio.run(scenario(runtime, False)), [None, 5579, 5579])
+        self.assertEqual(chain_reads, ["chain", "chain"])
+        asyncio.run(runtime.capture(NOW))
+        self.assertEqual(shadow_reads, ["shadow"])
+
     def test_outside_session_does_not_read_or_write(self):
         runtime, calls = self.dependencies(session=False, fetch=lambda: (_ for _ in ()).throw(AssertionError()))
         result = asyncio.run(runtime.capture(NOW))
@@ -154,14 +188,75 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertEqual(result["status"], "storage_paused")
         self.assertEqual([call[0] for call in calls], [runtime.deps.session_gate])
 
-    def test_rate_limit_refusal_is_reported(self):
-        async def refuse(_provider, *, max_wait_seconds):
-            raise RuntimeError("rate_limited:tdx_public")
+    def test_a_slot_the_shared_reader_was_refused_is_reported(self):
+        fetched = []
+        slots = []
 
-        runtime, _ = self.dependencies(acquire=refuse)
-        with patch("app.tdx_shadow_snapshot_runtime.PublicProviderRateLimited", RuntimeError):
-            result = asyncio.run(runtime.capture(NOW))
-        self.assertEqual(result["status"], "rate_limited")
+        async def fetch():
+            fetched.append("fetch")
+            return evidence()
+
+        async def refuse(provider, *, max_wait_seconds):
+            slots.append((provider, max_wait_seconds))
+            raise PublicProviderRateLimited(provider)
+
+        async def scenario():
+            shared = shared_tdx_snapshot(fetch, clock=asyncio.get_running_loop().time, acquire_slot=refuse)
+            runtime, calls = self.dependencies(fetch=lambda: read_shared(shared))
+            return await runtime.capture(NOW), await runtime.capture(NOW), calls
+
+        first, second, calls = asyncio.run(scenario())
+        self.assertEqual(first, {"status": "rate_limited", "error": "rate_limited:tdx_public", "stored": 0})
+        self.assertEqual(second["status"], "rate_limited")
+        self.assertEqual(slots, [("tdx_public", 0)] * 2)
+        self.assertEqual(fetched, [])
+        self.assertEqual([call[0] for call in calls], [calls[0][0]] * 2)
+
+    def test_the_shadow_and_the_chain_together_cause_one_read(self):
+        fetched = []
+        slots = []
+        release = asyncio.Event()
+        clock = [100.0]
+
+        async def fetch():
+            fetched.append("fetch")
+            await release.wait()
+            return evidence()
+
+        async def acquire(provider, *, max_wait_seconds):
+            slots.append((provider, max_wait_seconds))
+
+        async def fuyao():
+            raise FuyaoProviderError("fuyao down")
+
+        async def scenario():
+            shared = shared_tdx_snapshot(fetch, clock=lambda: clock[0], acquire_slot=acquire)
+            runtime, _ = self.dependencies(fetch=lambda: read_shared(shared))
+
+            def chain():
+                return read_all_a_snapshot(fuyao, lambda: read_shared(shared), runtime.deps.roster_total)
+
+            capture = asyncio.create_task(runtime.capture(NOW))
+            filled = asyncio.create_task(chain())
+            for _ in range(5):
+                await asyncio.sleep(0)
+            in_flight = list(fetched)
+            release.set()
+            captured, (rows, metadata) = await asyncio.gather(capture, filled)
+            clock[0] += TDX_SHARED_READ_TTL_SECONDS
+            await chain()
+            within_ttl = list(fetched)
+            clock[0] += 0.5
+            await chain()
+            return in_flight, captured, rows, metadata, within_ttl
+
+        in_flight, captured, rows, metadata, within_ttl = asyncio.run(scenario())
+        self.assertEqual(in_flight, ["fetch"])
+        self.assertEqual(captured["status"], "completed")
+        self.assertEqual((len(rows), metadata["provider_key"]), (5301, "tdx_public"))
+        self.assertEqual(within_ttl, ["fetch"])
+        self.assertEqual(fetched, ["fetch", "fetch"])
+        self.assertEqual(slots, [("tdx_public", 0)] * 2)
 
     def test_provider_error_is_reported_without_storage(self):
         async def fail():
@@ -189,8 +284,50 @@ class TdxShadowCaptureTests(unittest.TestCase):
         from app import main
 
         self.assertIs(main.tdx_shadow_runtime.deps.run_database, run_tdx_shadow_blocking)
+        self.assertIs(main.tdx_shadow_runtime.deps.fetch_snapshot, main.tdx_all_a_snapshot)
         self.assertIs(main.tdx_shadow_runtime.deps.storage_allowed, main.tdx_shadow_storage_allowed)
         self.assertIs(main._tdx_shadow_storage_admission.run_database, run_tdx_shadow_blocking)
+
+    def test_the_service_reads_the_all_a_snapshot_through_the_chain(self):
+        from app import main, minute_cross_section
+
+        answer = ([{"symbol": "000001.SZ"}], {"provider_key": "fuyao_ths"})
+        tdx = AsyncMock(return_value=evidence())
+        roster = AsyncMock(return_value=5580)
+        with patch("app.main.tdx_all_a_snapshot", tdx), patch("app.main.tdx_fallback_roster_total", roster):
+            with patch("app.main.fuyao_all_a_snapshot_rows", AsyncMock(return_value=answer)):
+                self.assertIs(asyncio.run(main._fetch_intraday_all_a_snapshot_rows()), answer)
+            tdx.assert_not_awaited()
+            with patch("app.main.fuyao_all_a_snapshot_rows", AsyncMock(side_effect=FuyaoProviderError("down"))):
+                rows, metadata = asyncio.run(main._fetch_intraday_all_a_snapshot_rows())
+            with patch("app.main.fuyao_all_a_snapshot_rows", AsyncMock(side_effect=ValueError("bad page"))):
+                with self.assertRaises(ValueError):
+                    asyncio.run(main._fetch_intraday_all_a_snapshot_rows())
+        tdx.assert_awaited_once()
+        self.assertEqual(len(rows), 5301)
+        self.assertEqual((metadata["provider_key"], metadata["decision_eligible"], metadata["fallback_for"]),
+                         ("tdx_public", False, "fuyao_ths"))
+
+        self.addCleanup(minute_cross_section._LATEST.update, observed_at=None, rows=None)
+        minute_cross_section.remember(NOW, [{"symbol": "000001.SZ", "snapshot_metadata": metadata}])
+        self.assertIsNone(main.tdx_shadow_runtime.deps.recent_reference(NOW))
+        minute_cross_section.remember(NOW, [{"symbol": "000001.SZ", "snapshot_metadata": answer[1]}])
+        self.assertEqual(main.tdx_shadow_runtime.deps.recent_reference(NOW)[0], NOW)
+
+    def test_the_service_cancels_both_shared_reads_at_shutdown(self):
+        from app import main
+
+        cancelled = []
+
+        async def scenario():
+            with patch.object(main._intraday_all_a_snapshots, "cancel_inflight",
+                              AsyncMock(side_effect=lambda: cancelled.append("main"))), \
+                 patch.object(main._tdx_all_a_snapshots, "cancel_inflight",
+                              AsyncMock(side_effect=lambda: cancelled.append("tdx"))):
+                await main.cancel_shared_snapshots()
+
+        asyncio.run(scenario())
+        self.assertEqual(cancelled, ["main", "tdx"])
 
     def test_real_session_gate_and_persistence_run_on_the_shadow_worker(self):
         threads = []
@@ -208,13 +345,10 @@ class TdxShadowCaptureTests(unittest.TestCase):
         async def allowed():
             return True, {}
 
-        async def no_wait(_provider, *, max_wait_seconds):
-            return None
-
         runtime = TdxShadowSnapshotRuntime(TdxShadowSnapshotDependencies(
             fetch_snapshot=lambda: asyncio.sleep(0, result=evidence()), run_database=run_tdx_shadow_blocking,
             database=OpenCalendar(), recent_reference=lambda _now: None, storage_allowed=allowed,
-            acquire_slot=no_wait, persist_capture=persist_capture,
+            persist_capture=persist_capture,
             roster_total=lambda: asyncio.sleep(0, result=5580),
         ))
         in_session = datetime(2026, 10, 12, 2, 0, tzinfo=timezone.utc)  # Monday 10:00 in Shanghai

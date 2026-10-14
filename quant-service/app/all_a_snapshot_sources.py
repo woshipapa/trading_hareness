@@ -17,7 +17,8 @@ from .datasources.catalog import BINDINGS
 from .datasources.contracts import CapabilityEvidence
 from .error_detail import safe_error_detail
 from .fuyao_provider import FUYAO_PROVIDER_KEY, FuyaoProviderError
-from .public_provider_rate_limits import PublicProviderRateLimited
+from .intraday_cross_section import SharedAsyncSnapshot
+from .public_provider_rate_limits import PublicProviderRateLimited, acquire_public_provider_slot
 
 
 TDX_PROVIDER_KEY = "tdx_public"
@@ -30,6 +31,8 @@ TDX_SNAPSHOT_MIN_COMPLETE_SHARE = 0.95
 TDX_SNAPSHOT_ROSTER_FLOOR = 5000
 #: How long a caller waits for one TDX all-A read (the shadow capture and the fallback chain).
 TDX_READ_TIMEOUT_SECONDS = 20.0
+#: Two readers of the TDX snapshot within this many seconds share one read.
+TDX_SHARED_READ_TTL_SECONDS = 5.0
 FALLBACK_REASON_MAX_CHARS = 300
 
 
@@ -146,6 +149,26 @@ def main_source_reference(
     if not rows or (rows[0].get("snapshot_metadata") or {}).get("provider_key") != FUYAO_PROVIDER_KEY:
         return None
     return remembered
+
+
+def shared_tdx_snapshot(
+    fetch: Callable[[], Awaitable[CapabilityEvidence | list[dict[str, Any]]]], *,
+    clock: Callable[[], float],
+    acquire_slot: Callable[..., Awaitable[None]] = acquire_public_provider_slot,
+) -> SharedAsyncSnapshot[CapabilityEvidence | list[dict[str, Any]]]:
+    """The one reader of the TDX all-A snapshot, for the shadow capture and the fallback chain.
+
+    Every ``tdx_protocol`` call opens its own connection and the access rule is one connection a
+    host, so the two callers must never read side by side: a read in flight is joined, and a
+    result is shared for ``TDX_SHARED_READ_TTL_SECONDS``. The read takes its ``tdx_public`` slot
+    without waiting; a refused slot reaches each caller as ``PublicProviderRateLimited``. A caller
+    keeps its own task around ``get()`` and consumes that task's late exception.
+    """
+    async def read_once() -> CapabilityEvidence | list[dict[str, Any]]:
+        await acquire_slot(TDX_PROVIDER_KEY, max_wait_seconds=0)
+        return await fetch()
+
+    return SharedAsyncSnapshot(read_once, ttl_seconds=TDX_SHARED_READ_TTL_SECONDS, clock=clock)
 
 
 def _consume_late_exception(task: asyncio.Future[Any]) -> None:
@@ -274,7 +297,8 @@ def compare(fuyao_rows: Iterable[Mapping[str, Any]], tdx_rows: Iterable[Mapping[
 
 __all__ = [
     "AllASnapshotFallbackError", "FALLBACK_REASON_MAX_CHARS", "TDX_PROVIDER_KEY", "TDX_READ_TIMEOUT_SECONDS",
-    "TDX_SNAPSHOT_MIN_COMPLETE_SHARE", "TDX_SNAPSHOT_ROSTER_FLOOR", "TDX_SNAPSHOT_SOURCE", "compare",
-    "main_source_reference", "project_tdx_snapshot_rows", "read", "tdx_snapshot_completeness",
-    "tdx_snapshot_decision_eligible", "tdx_snapshot_metadata",
+    "TDX_SHARED_READ_TTL_SECONDS", "TDX_SNAPSHOT_MIN_COMPLETE_SHARE", "TDX_SNAPSHOT_ROSTER_FLOOR",
+    "TDX_SNAPSHOT_SOURCE", "compare", "main_source_reference", "project_tdx_snapshot_rows", "read",
+    "shared_tdx_snapshot", "tdx_snapshot_completeness", "tdx_snapshot_decision_eligible",
+    "tdx_snapshot_metadata",
 ]
