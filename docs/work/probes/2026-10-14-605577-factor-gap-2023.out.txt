@@ -1,0 +1,9 @@
+# 2026-10-14 00:57 Asia/Shanghai; owner host 118.178.133.37, scheduler container; read-only
+bars 61; without adj_factor 48 (2023-08-15..2023-11-09); bars whose pre_close differs from the close before: []
+providers of the bars without a factor: ['tushare_primary', 'tushare_super_sdk']
+canonical adj_factor values in the range: ['1.018']
+first bars with a factor: [('2023-08-17', '1.018'), ('2023-08-23', '1.018'), ('2023-08-24', '1.018')]
+factor table rows in the range, by provider: rows, dates covered among the bars without a factor, distinct values
+   {'provider': 'tushare_primary', 'rows': 3, 'on_gap_dates': 2, 'factors': ['1.018'], 'first': datetime.date(2023, 8, 17), 'last': datetime.date(2023, 8, 21)}
+   {'provider': 'tushare_super_sdk', 'rows': 58, 'on_gap_dates': 46, 'factors': ['1.018'], 'first': datetime.date(2023, 8, 15), 'last': datetime.date(2023, 11, 15)}
+factor table columns: ['symbol', 'trading_date', 'adj_factor', 'provider', 'available_at', 'raw', 'adjustment_state', 'factor_semantics', 'retired_at']

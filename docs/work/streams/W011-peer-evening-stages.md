@@ -1,13 +1,14 @@
 # W011 每晚该跑的阶段由我们这一侧自己触发
 
-- state: merged
-- holder: Claude Code 会话 93ba6e1d（主会话），2026-10-13
+- state: released
+- holder: Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14
 - goal: 每个交易日晚上不靠人手，自动存当天的涨停榜和大面风险分读数，随后是情绪温度、宽基 ETF 放量、金银指；别的工作线以后把自己的晚间阶段加到同一个地方
 - plan: docs/work/plans/peer-evening-stages.md
 - branch: main
 - head: 0a57d7fb
-- next: 等用户执行发布（见 Waiting on the user）。发布后立即只读核对：owner 库里 10 月 13 日的五个 `peer_` 回执都是 completed（榜单和风险分当晚手工补过，应直接完成）；当天的情绪温度、宽基 ETF、金银指读数存在；前一交易日（10 月 12 日）的两个回执也是 completed；调度容器日志里没有“left open”那一行；发布前后调度进程内存相差不超过约 50 MB。然后在 10 月 14 日 16:50 核对第一次真正的当晚自动运行，并把 16:20 左右的风险分读数与 19:00 之后的重算对比
-- updated: 2026-10-13
+- release: owner-code-20261013-06（owner 纯代码，2026-10-14 00:43）
+- next: 10 月 14 日 16:50 核对第一次真正的当晚自动运行（见 Due）：用 `docs/work/probes/2026-10-14-peer-evening-receipts.py` 的做法查 10 月 14 日五个 `peer_` 回执和读数（把脚本里的日期改成 10 月 13、14 日另存一份），再看调度容器日志有没有“left open”。通过后把本记录改成 `verified`；连续两晚通过后删掉手工脚本 `state/lists13.sh` 那条 Due。
+- updated: 2026-10-14
 
 ## Requirements
 
@@ -23,9 +24,9 @@
 - [x] 1 `peer_close_research.py`：阶段顺序、适配、依赖、时限；测试 — 632bce9b；`Ran 3058 tests ... OK (skipped=2)`；`pytest scripts -q` → `1 failed, 360 passed`（失败的是 B035）；主会话自己写的（用户 2026-10-13 让主会话接手实现）
 - [x] 2 `main.py` 接线与组合测试；决策记录 0021；`docs/ARCHITECTURE.md` 一段 — 632bce9b、6743d4a1
 - [x] 合并 — 0a57d7fb（`--no-ff`）。评审只有主会话自己逐条过了一遍，没有第二个评审者：实现者和评审者是同一个，这是本线的一处欠缺，发布后的核对要做足
-- [ ] 发布（owner 纯代码，用户执行）
+- [x] 发布（owner 纯代码，用户执行）— `owner-code-20261013-06`，2026-10-14 00:43，发布日志见 `docs/RELEASE_SYNC_47.md` 当天那一行
 - [ ] 第一个晚上的核对；连续两晚通过后撤掉手工脚本
-- [ ] 发布后手工补 10 月 12、13 日的温度、ETF、金银指读数（写 owner，用户同意后做）
+- [x] 10 月 12、13 日的温度、ETF、金银指读数 — 不用手工补：发布后循环补跑 10 月 13 日时这三个阶段把两天的读数都存了（探针输出里两天各 1 份，时间 00:44）
 
 ## Log
 
@@ -34,10 +35,19 @@
 - 2026-10-13 23:13 审计第 1 轮的十条和改法（方案文件末尾有同样的清单）：新阶段改排在现有五个之后，不会拖慢老师复盘的阶段；回执用我们自己的名字（`peer_` 前缀），不会被阶段表里“跳过也算完成”的旧回执压住；榜单阶段只有当天真的有榜单才算完成，取不到是 partial、下一轮重试；风险分阶段依赖榜单阶段；历史榜单只用于补没有实时榜单的日子，并且每一轮都先补前一个交易日；时限改成 120、120、180、180、120 秒；两个测试文件要跟着改；每轮打印一行没完成的阶段。当晚 22:49 还量了一件事：历史榜单接口当天晚上还没有当天的数据（10 月 13 日返回无数据，10 月 12 日有），所以当晚必须靠实时榜单。
 
 - 2026-10-13 23:30 用户说「codex当前推进太慢了，全部交给你来处理现在，全部推进」。主会话自己实现了本线：`peer_close_research.py` 加五个 `peer_` 阶段、依赖检查、补前一交易日、每轮打印未完成阶段；`limit_up_risk_repository.live_lists_stored`；`main.py` 接线（没有配置授权接口的环境不接这几个阶段）；决策 0021。发布路径测试 3058 项通过，组件边界检查通过。合并 0a57d7fb，主线已推送，`rel06.sh` 的检查模式通过（纯代码、3 个运行时文件）。
+- 2026-10-14 00:43 用户执行了发布（`bash ~/codebase/n8n/state/rel06.sh --apply`）：`owner-code-20261013-06` 生效，脚本输出 `code-only release active: owner-code-20261013-06 (overlay source verified against the container)`。
+- 2026-10-14 00:45 发布后的只读核对（目标：owner 主机 118.178.133.37 上的 scheduler 容器；隧道 `http://127.0.0.1:15682/health` 报告 `owner-code-20261013-06`、`0a57d7fb`；探针 `docs/work/probes/2026-10-14-peer-evening-receipts.py` 与 `.out.txt`，状态检查 `docs/work/probes/2026-10-14-release-status-06.out.txt`）：
+  - 回执：10 月 13 日的 `peer_limit_performance_lists`、`peer_limit_up_risk`、`peer_market_temperature`、`peer_broad_etf_flow`、`peer_market_timing` 都是 completed（00:43:55 到 00:44:35，温度 25 秒、ETF 12 秒，其余 1 秒）；10 月 12 日的两个补做回执也是 completed（00:44:35–00:44:37）。循环在 scheduler 重启后约 30 秒内就开始补跑前一个交易日。
+  - 读数：10 月 12、13 日的 `market_temperature_daily`、`broad_etf_flow_daily`、`market_timing_daily` 各 1 份（00:44 写入），`broad_etf_daily` 两天各 12 份；`limit_performance_live` 两天各 5 份（都是之前存的，阶段没有重取）；`limit_up_risk_daily` 10 月 13 日仍是 1 份（与当晚手工补的一致，没有新版本），10 月 12 日变成 2 份：补做阶段重算出来的读数与原来那份不同，所以存了新版本。差在哪里没有查。
+  - 日志：scheduler 最近 20 分钟没有“left open”一行。
+  - 内存：主机可用 336 MB、交换区已用 448 MB；scheduler 容器 26.77 MiB、主服务 173.3 MiB。发布前 scheduler 的占用没有量过，所以“前后相差不超过约 50 MB”这一条没法按原样核对，只有发布后的绝对值。
+  - `release-sync-status.sh --owner-source-sha 0a57d7fb --edge-source-sha 83b5d49e`：ALL CHECKS PASSED。
+  - 没核对到的：第一次真正的当晚运行（实时榜单要当天取，这次两天的榜单都已在库里）；16:20 左右算的风险分与 19:00 后重算是否一致。
+  - 第一次探针里有一条按 `LIKE` 扫 `raw_market_observations` 的查询超时（25 秒上限），换成精确能力名后正常；探针文件是改后的版本。
 
 ## Waiting on the user
 
-- [ ] 2026-10-13 23:30 执行发布：`! bash ~/codebase/n8n/state/rel06.sh --apply`（owner 纯代码发布 `owner-code-20261013-06`，从 e8cb8dbf 到 0a57d7fb，3 个运行时文件；主线已推送，检查模式已通过）。为什么等：生产发布只能用户执行（会话的安全检查会拦）。可发的时段：现在到 10 月 14 日 08:30 之前，或 11:30–13:00、15:10–18:45。之后：agent 按 next 核对。
+- [x] 2026-10-13 23:30 执行发布：`! bash ~/codebase/n8n/state/rel06.sh --apply`（owner 纯代码发布 `owner-code-20261013-06`，从 e8cb8dbf 到 0a57d7fb，3 个运行时文件；主线已推送，检查模式已通过）。为什么等：生产发布只能用户执行（会话的安全检查会拦）。可发的时段：现在到 10 月 14 日 08:30 之前，或 11:30–13:00、15:10–18:45。之后：agent 按 next 核对。
 
 ## Running
 
@@ -46,7 +56,8 @@
 
 ## Due
 
-- [ ] 2026-10-14 15:00 当晚的手工补跑仍然要做，直到本线发布并核对通过：15:00 之后、24:00 之前执行 `bash ~/codebase/n8n/state/lists13.sh`（写 owner 库；会话的安全检查可能拦，拦了就请用户执行）。本线若已在当天发布，就等 16:40 看自动运行的结果，没出来再手工跑。
+- [ ] 2026-10-14 16:50 第一次真正的当晚自动运行：核对 10 月 14 日五个 `peer_` 回执和读数；另在 19:00 后干跑一次风险分，与 16:20 左右那份比较。没出来再手工跑（下一条）。
+- [ ] 2026-10-14 17:00 （只在自动运行没出结果时）手工补跑：15:00 之后、24:00 之前执行 `bash ~/codebase/n8n/state/lists13.sh`（写 owner 库；会话的安全检查可能拦，拦了就请用户执行）。本线若已在当天发布，就等 16:40 看自动运行的结果，没出来再手工跑。
 
 ## Evidence
 

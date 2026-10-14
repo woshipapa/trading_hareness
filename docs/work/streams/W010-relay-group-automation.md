@@ -5,9 +5,9 @@
 - goal: 在转发看板里完成建同步群、管理目标群成员、源头撤回后同步撤回、降级告警加急、粘贴邀请链接入群，以及把现有目标群纳入看板管理
 - plan: docs/work/plans/relay-group-automation.md
 - branch: integration/relay-auto
-- head: 34ff843b
-- release: edge 中继 `hotfix-20261013T161335Z-34ff843b4f50-21014`（七项功能在线；会员表有备注名、按备注名的建议和指定到期日）
-- next: 等用户运行改备注名的探测（Waiting on the user）；通过后做“续费时一键改备注名”：bridge 的写备注接口、adapter 的接口、编辑框里的备注名一栏。其余见 Open questions 和待办 B056。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified`
+- head: 83b5d49e
+- release: edge 中继 `hotfix-20261013T162249Z-83b5d49e0b70-12319`（七项功能在线；会员保存时可一并改飞书里的备注名）
+- next: 用户第一次在编辑框里改了备注名并保存后，核对飞书里的备注名和会员表（这是经线上 bridge 接口的第一次写入）；其余见 Open questions 和待办 B056 的 (2)、(4)。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified`
 - updated: 2026-10-13
 
 ## Requirements
@@ -215,10 +215,20 @@
   (3) 续费后一键改备注名：写备注的命令是 `users.PutUserAliasRequest`（5400，字段 `targetId`、`name`、`targetToken`）或 `users.PatchUserMemoRequest`（5036，带 `alias` 和备注信息，
   怕它连备注信息一起覆盖，先不用）。本会话要在一个联系人身上试写（同值、多一个字、改回），被权限分类器拒绝（改的是用户飞书里的联系人资料），没有绕过。
   探测脚本备好了，没有运行：`docs/work/probes/2026-10-14-alias-write-probe.sh`。
+- 2026-10-14 00:24 用户运行了探测：`users.PutUserAliasRequest`（`targetId`、`name`，不带 `targetToken`）写同值、多一个字、写回原值，三次都是 `payloadType: 1`，中间那次读回是改后的值，最后读回原值。
+  据此做了“保存时一并改备注名”：bridge 的 `/users/alias`；`PUT …/memberships/:userId` 可带 `alias`——有变化才写，先写飞书再存库（飞书拒绝就什么都不存），并更新这个人在所有群里的行；
+  建议里带 `span`（在备注名里读到它的位置），多认一种写法“918到1030”（开始加固定到期日）；看板编辑框里备注名成了输入框，旁边“按下面的日期改写”把表单里的日期写进备注名，
+  替换掉描述旧日期的那一段（或用户点过的那条建议；备注名里有几段而都对不上这一行时加在末尾），用户看过再保存。
+  集成分支 08b03d28 → main 83b5d49e → `hotfix-20261013T162249Z-83b5d49e0b70-12319`，状态脚本通过。
+  证据：bridge 全套在 edge 上 224 项；adapter 350；看板 39（含改写规则的单元测试，和真实组件里“点建议→改期限→改写→保存”发出的内容）；真实 PostgreSQL 16 上带备注名保存的路径通过
+  （`docs/work/probes/2026-10-14-membership-alias-expiry-pg-probe.out.txt`）。线上只读核对：两个群的建议都带位置且落在备注名之内，页面资源里有新控件的文字。
+  没做的：经线上 bridge 接口真的改一次备注名（本会话写联系人资料会被权限分类器拒绝；命令本身用户的探测已证明可用）；没在真浏览器里看过。
 
 ## Waiting on the user
 
-- [ ] 2026-10-14 运行改备注名的探测：`! bash docs/work/probes/2026-10-14-alias-write-probe.sh <群编号> <那个联系人现在的备注名>`（本会话给用户的命令里填的是擒龙群和一位备注名等于本名的成员）。
+- [ ] 2026-10-14 在看板上给一位续费的会员改日期并改写备注名、保存，然后看一眼飞书里这个人的备注名是否变了。为什么等：这是经线上接口的第一次真实写入，本会话不能代做。
+  之后：不对就把看到的提示或现象告诉本会话。
+- [x] 2026-10-14 运行改备注名的探测 → 用户运行了（2026-10-14 00:20 前后），三次写入都回成功、多一个字读得回、原值已恢复（`docs/work/probes/2026-10-14-alias-write-probe.out.json`，名字已换掉）。原说明：`! bash docs/work/probes/2026-10-14-alias-write-probe.sh <群编号> <那个联系人现在的备注名>`（本会话给用户的命令里填的是擒龙群和一位备注名等于本名的成员）。
   它把这一个联系人的备注名写三次——原值、原值多一个“·”、再写回原值——每次写完读一遍，前后约两三秒；备注名只有本账号自己看得到，不会给任何人发消息。
   为什么等：这是改用户飞书里的资料，本会话执行被权限分类器拒绝。之后：读同目录的 `…-alias-write-probe.out.json`；写得进去、读得回来、能复原，就做 bridge 的 `/users/alias`、
   adapter 的 `PUT …/memberships/:userId/alias` 和编辑框里的备注名一栏（保存时一并改）；被拒绝就按返回的原因换 `PatchUserMemo` 再探。
@@ -296,8 +306,8 @@
 
 ## Resume here
 
-七项功能在线：edge 中继是 `hotfix-20261013T161335Z-34ff843b4f50-21014`（main 34ff843b；之前的提交被别的会话推送 main 时带到了 origin，这之后的没有推送）。
-先跑 `bash scripts/release-sync-status.sh --skip-owner --edge-source-sha 34ff843b` 确认线上仍是这一版。
+七项功能在线：edge 中继是 `hotfix-20261013T162249Z-83b5d49e0b70-12319`（main 83b5d49e；之前的提交被别的会话推送 main 时带到了 origin，这之后的没有推送）。
+先跑 `bash scripts/release-sync-status.sh --skip-owner --edge-source-sha 83b5d49e` 确认线上仍是这一版。
 “目标群”页的表列的是转发目标加本账号是群主的群（`targetRegistry.groups()`）；转发和送达核对只看转发目标（`list()`）。会员行按群的数字编号存。
 adapter 的功能模块上线前要在真实 PostgreSQL 上跑一遍它的每条语句（办法见 `docs/work/probes/2026-10-13-memberships-pg-probe.mjs`）：单元测试的假数据库不解析 SQL，也不按 node-pg 的形状回 `date` 列。
 看板的改动上线前要看实际渲染：接口通、页面资源里有文字都不算；连不上浏览器时用 `TargetRegistryPanel.test.ts` 那样的真实组件挂载测试。

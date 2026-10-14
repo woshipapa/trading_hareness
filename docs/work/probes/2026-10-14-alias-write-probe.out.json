@@ -1,0 +1,25 @@
+{
+ "status": "run",
+ "before": "<备注名>",
+ "write_same_value": {
+  "payloadType": 1,
+  "sid": "",
+  "body": {}
+ },
+ "read_after_same_value": "<备注名>",
+ "write_one_more_character": {
+  "payloadType": 1,
+  "sid": "",
+  "body": {}
+ },
+ "read_after_change": "<备注名>·",
+ "write_original_again": {
+  "payloadType": 1,
+  "sid": "",
+  "body": {}
+ },
+ "read_after_restore": "<备注名>",
+ "changed_as_written": true,
+ "restored": true,
+ "note": "用户 2026-10-14 运行；联系人的备注名在这份存档里换成了 <备注名>"
+}

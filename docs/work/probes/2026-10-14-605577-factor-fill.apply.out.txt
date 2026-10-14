@@ -1,0 +1,9 @@
+Mem:             894         603         112           1         320         291
+Swap:           2047         433        1614
+605577.SH 2023-08-15..2023-11-15: bars 61, without adj_factor 48
+  1. price-chain breaks: none
+  2. factors on the canonical bars: ['1.018']
+  3. factors in the factor table (61 rows, providers ['tushare_primary', 'tushare_super_sdk']): ['1.018']
+  to write: adj_factor 1.018 on 48 sessions, 2023-08-15 .. 2023-11-09
+written: 48 of 48; bars of the range still without a factor: 0; peak memory of this process 102 MB
+slow database transaction site=__main__:<module> seconds=18.1 statements=290

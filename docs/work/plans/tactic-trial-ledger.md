@@ -1,6 +1,6 @@
 # Tactic trial ledger: register conditions, combine them into tactics, judge them from every day's summary
 
-Status: rev 8, 2026-10-14. Rev 7 was APPROVED by the user on 2026-10-13 ("可以，按这个方案开工"). Rev 8 keeps the product and changes how it is stored and scheduled, for the measured reasons in the paragraph "Rev 8" below; its key points were reported to the user on 2026-10-14, it has no approval of its own. In implementation on `codex/tactic-trials` (base `932f6b5c`). Rev 5 was audited in three rounds; the exit layer of rev 6 was audited once (ten objections, all accepted in rev 7). The user's words: "不一定要设立很严格的限制，有一些策略思路可以先注册，然后拿每天的样本
+Status: rev 9, 2026-10-14. Rev 7 was APPROVED by the user on 2026-10-13 ("可以，按这个方案开工"). Revs 8 and 9 keep the product and change how it is stored and scheduled, for the reasons in the paragraphs "Rev 8" and "Rev 9" below; the key points of rev 8 were reported to the user on 2026-10-14, neither has an approval of its own. In implementation on `codex/tactic-trials` (base `932f6b5c`). Rev 5 was audited in three rounds; the exit layer of rev 6 was audited once (ten objections, all accepted in rev 7). The user's words: "不一定要设立很严格的限制，有一些策略思路可以先注册，然后拿每天的样本
 去尝试"; "有几个不成立的你也要加入，可以组合成不同的策略战法，去做判断，咱们就是要从每天的总结出来". Earlier requests
 it also serves: a 09:25 board of picks and of stocks to avoid; a daily review of consecutive-board stocks with their
 success cases and the patterns found.
@@ -49,6 +49,39 @@ Rev 8 (2026-10-14; forced by three facts measured on 2026-10-13, not by a change
    for about two million bar rows); the CLI prints its peak memory.
 5. The decision record is 0023 (0021 and 0022 were taken on 2026-10-13).
 Where the body below still says otherwise, this paragraph and decision 0023 win.
+
+Rev 9 (2026-10-14; from the independent review of rev 8's code, `docs/work/probes/2026-10-14-tactic-review.md`, 22
+findings, and an estimate of the stored volume: a settled document is 0.3 to 0.8 MB and changes every evening
+until its day is resolved, about 2.5 GB a year for the two slots):
+1. Settled documents are not stored. Outcomes are computed again from a reading and the bars whenever they are
+   needed. Every evening the pick days of the last 12 sessions without a final digest are settled in memory, one
+   day at a time; a day's pairs and then its digest are stored once, when every sell rule has left it or when it
+   is the oldest day of the window. A stored digest is what says a day is final.
+2. The summary folds the stored digests before the window (chunks of 60 sessions), then the window's stored and
+   just-computed digests in date order. Its day sections describe, for each slot, the newest pick day that has
+   outcomes (on the evening of T usually T-1) and name it; today's own sample size is reported beside it;
+   `open_days` counts the days not final yet.
+3. A digest carries the registry's fingerprint (tactic definitions, the outcomes kept per tactic, the sell
+   rules). Only digests of the current fingerprint are folded: inside the window a stale one is computed again,
+   outside it is counted in `stale_digest_days` and rebuilt by `--digests` from the stored readings and bars,
+   which never touches a reading.
+4. The replay does not replace a reading the scheduled path stored, and reads exit bars one day at a time.
+5. `evening` is `blocked` on two conditions: the day's lists or risk reading are not stored, or the last 12
+   sessions hold no close reading at all (the replay has not been applied). It first builds the previous session's
+   readings when that evening was missed. The stage is last in the loop's order.
+6. The auction reading's decision time is the stored time of the desk's row; an auction row's reference price is
+   the `reference_close` of the previous close reading; every price that reaches `evaluate_pick` is a `Decimal`;
+   documents are plain JSON before they are stored. The auction loop is enabled only where the licensed source
+   is configured.
+7. Reads: the summary route returns the newest summary up to the given day; the board without a day is the
+   session after the newest close reading; the cases route computes each day on request (default 10 sessions,
+   at most 20) and reads bars only for a day the tactic picked something on. Dates have a lower bound.
+8. Tests: the fold is compared with a reference computed by the code before the fold (b04be9b9) on the same
+   deterministic days; one integration test walks replay, auction reading, evening, summary, board, cases, a
+   missed evening, a stale digest, the digest rebuild and "the replay keeps a live reading" on the real test
+   database.
+Where the body below or the paragraph "Rev 8" still says otherwise (settled capabilities, "stored with every
+settled snapshot", "reads only the latest settled day"), this paragraph and decision 0023 win.
 
 ## Goal
 
@@ -286,14 +319,14 @@ For the evening of T, from the days settled that evening:
   Written once by the scheduled path: it reads `newest` for the day and skips when a reading of the current
   `version` exists. The CLI replay with `--apply` stores a newer document (`replayed: true`), which `newest` then
   returns.
-- `tactic_trials_settled_close_daily` and `tactic_trials_settled_auction_daily` (pick day; rev 8: one capability
+- (Rev 8, removed in rev 9: no settled document is stored.) `tactic_trials_settled_close_daily` and `tactic_trials_settled_auction_daily` (pick day; rev 8: one capability
   per slot, because the store keeps one document a session and capability): each row's returns under every entry and sell rule, state
   outcomes and room measures, with `complete` true once every rule is resolved. Every document is a full
   snapshot of the pick day (all rows, everything resolved so far), so reading only `newest` never loses a
   result. The stage stores a newer snapshot for a pick day until it is complete (usually two or three evenings;
   `store` keeps the older versions, there is no cap).
 - `tactic_trials_digest_{close,auction}_daily` and `tactic_trials_pairs_{close,auction}_daily` (pick day; rev 8):
-  stored with every settled snapshot of a day; what the summary folds instead of the rows.
+  what the summary folds instead of the rows. Rev 9: stored once per pick day, when the day is final.
 - `tactic_trials_summary_daily` (T): the daily summary (records, the day's cases, the kept pairs). The routes read
   this, never the whole history.
 - Size: about 100 rows a day and slot, some tens of KB per reading, the summary under 200 KB. The four
@@ -306,7 +339,8 @@ For the evening of T, from the days settled that evening:
   `close` reading of T; settle the pick days of the last 12 sessions that are not complete, storing each day's
   digest and pairs with it; fold the stored digests into the summary. Timeout 600 seconds. Receipt: `completed`,
   or `blocked` when the day's lists or risk reading are not stored (tried again on the next tick); an exception is
-  `failed` and is tried again. The rest of this bullet is rev 7 and no longer holds.
+  `failed` and is tried again. Rev 9 changes what is stored, the order (last) and adds a second blocking
+  condition: see "Rev 9" above. The rest of this bullet is rev 7 and no longer holds.
 - (Rev 7, superseded) Post-close stage `tactic_trials` after `limit_up_risk` (dependency: `limit_up_risk`): store the `close` reading
   of T; settle the pick days of the last 12 sessions that are not complete; store the summary. Reads are ranges: the
   day's inputs, the window query, the market aggregate, and the whole stored history in three calls of `newest`
