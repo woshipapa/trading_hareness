@@ -787,3 +787,25 @@
 - result: 2026-10-14 提交 e3291702（已推送到 origin/main，2026-10-14；未发布）；`test_track_separates_a_board_that_stayed_one_word_from_one_that_reopened`；全套 3,240 条通过，输出 `docs/work/probes/2026-10-14-auction-bucket-split-release-path.out.txt`。还没有用真实读数看过两档各有多少只：发布后读 `/api/v1/market/auction-desk/track`
 - updated: 2026-10-14
 
+### B071 涨停次日大面风险分按“次日开盘到收盘”判定，并给两组成本
+
+- state: done
+- kind: follow-up
+- why: 用户 2026-10-14 说「这两条可以做」，指 Grok 调研（`docs/archive/2026-10-14-grok-a-share-community-research/`，未审计）的建议 2。`/api/v1/market/limit-up-risk/track` 只有收盘到收盘的对比，里面含买入者拿不到的隔夜跳空
+- how: `limit_up_risk_runtime.track` 多取次日开盘价，每个交易日另给 `open_to_close`（同一个高低五分位对比），顶层新增 `recent_open_to_close`（同一个 `working` 规则：高低差 ≥3 个点且 t ≥2）、`mean_open_to_close` 和 `net_of_round_trip_costs`（`ROUND_TRIP_COSTS`：万 5 佣金加千 1 滑点合计 15 个基点，千 2 滑点合计 25 个基点，是来源文章自述的口径，不是交易所费率），`judged_on` 说明按哪个判。原有的 `recent`（收盘到收盘）一字未改。控制台是否改成显示 `recent_open_to_close` 没有做，那是前端的事
+- who: agent
+- needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
+- result: 2026-10-14 提交 4fa711f3（本地 main，尚未推送、未发布）；全套 3,248 条通过，输出 `docs/work/probes/2026-10-14-risk-oc-and-temperature-freeze-release-path.out.txt`。还没有用真实读数看过：发布后读该接口的 `recent_open_to_close`，高分档的 `big_loss_rate` 是否仍比低分档高 3 个点以上，要看实际数
+- updated: 2026-10-14
+
+### B072 情绪温度的档位规则冻结，并按事先写下的假设做前向检验
+
+- state: done
+- kind: follow-up
+- why: 用户 2026-10-14 说「这两条可以做」，指 Grok 调研建议 6。我之前把它对到 B033 是错的：B033 是存储冷热分层，这里说的是情绪温度的档位（决策 0013）
+- how: 见决策 0013 末尾新增的“2026-10-14 规则冻结与前向检验”。要点：分项、方向、窗口、门槛、档位边界的指纹 `RULES_SHA256` 由测试钉住；存下的读数带 `rules_sha256`；`forward_test` 只数 2026-10-15 起、盖了当前指纹的读数，判一条事先写下的假设（冰点日之后下一交易日上证开盘到收盘，高于其他日），冰点日和其他日各满 20 天才判，约一年多。读数新增 `index_open`
+- who: agent
+- needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
+- result: 2026-10-14 提交 bd029769（本地 main，尚未推送、未发布）；全套 3,248 条通过，输出同 B071。注意：发布后的第一个晚上，最近 30 个读数会因为多了 `rules_sha256` 和 `index_open` 被重新存一次（内容变了），是预期的；`index_open` 在冻结日之前存下的读数里没有，不进前向样本
+- updated: 2026-10-14
+

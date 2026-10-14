@@ -1,0 +1,242 @@
+QUANT_TESTS="" bash scripts/run-release-path-tests.sh
+ Container n8n Running 
+ Container n8n-quant-research-gateway Running 
+ Container n8n-postgres Running 
+ Container n8n-quant-research Running 
+ Container n8n-feishu-adapter Running 
+ Container n8n-runners Running 
+ Container n8n-postgres Waiting 
+ Container n8n-postgres Healthy 
+ Container n8n-postgres Running 
+ Container n8n-quant-research Running 
+ Container n8n-feishu-adapter Running 
+ Container n8n-runners Running 
+ Container n8n Running 
+ Container n8n-quant-research-gateway Running 
+ Container n8n-quant-research-run-25c1e5d37ae7 Creating 
+ Container n8n-quant-research-run-25c1e5d37ae7 Created 
+ Container n8n-runners Running 
+ Container n8n Running 
+ Container n8n-quant-research-gateway Running 
+ Container n8n-postgres Running 
+ Container n8n-quant-research Running 
+ Container n8n-feishu-adapter Running 
+ Container n8n-quant-research-run-3598e867e239 Creating 
+ Container n8n-quant-research-run-3598e867e239 Created 
+async pool watchdog replaced a stalled pool: async pool holds no connections while 64 requests wait (min_size=1, max_size=8)
+async pool watchdog replaced a stalled pool: async pool holds no connections while 64 requests wait (min_size=1, max_size=8)
+async pool watchdog replaced a stalled pool: async pool holds no connections while 64 requests wait (min_size=1, max_size=8)
+async pool watchdog replaced a stalled pool: async pool holds no connections while 64 requests wait (min_size=1, max_size=8)
+auction_pool_capture_retry late_table=not_final attempt=1
+auction_pool_capture_retry late_table=not_final attempt=2
+auction_pool_capture_retry late_table=not_final attempt=3
+auction_pool_capture_retry late_table=not_final attempt=4
+auction_pool_capture_retry late_table=not_final attempt=5
+auction_pool_capture_retry late_table=not_final attempt=6
+auction_pool_capture_retry late_table=not_final attempt=7
+auction_pool_capture_retry late_table=not_final attempt=8
+auction_pool_capture_retry late_table=not_final attempt=9
+auction_pool_capture_retry late_table=not_final attempt=10
+auction_pool_capture_retry late_table=not_final attempt=11
+auction_pool_capture_retry late_table=not_final attempt=12
+auction_pool_capture_retry late_table=not_final attempt=13
+auction_pool_capture_retry late_table=not_final attempt=14
+auction_pool_capture_retry late_table=not_final attempt=15
+auction_pool_capture_retry late_table=not_final attempt=16
+auction_pool_capture_retry late_table=not_final attempt=17
+auction_pool_capture_retry late_table=not_final attempt=18
+auction_pool_capture_retry late_table=not_final attempt=19
+auction_pool_capture_retry late_table=not_final attempt=20
+auction_pool_capture_retry late_table=not_final attempt=21
+auction_pool_capture_retry late_table=not_final attempt=22
+auction_pool_capture_retry late_table=not_final attempt=23
+auction_pool_capture_retry late_table=not_final attempt=24
+auction_pool_capture_retry late_table=not_final attempt=25
+auction_pool_capture_retry late_table=not_final attempt=26
+auction_pool_capture_retry late_table=not_final attempt=27
+auction_pool_capture_retry late_table=not_final attempt=28
+auction_pool_capture_retry late_table=not_final attempt=29
+auction_pool_capture_retry late_table=not_final attempt=30
+auction_pool_capture scheduled=0 stored=0 rate_limited=0 failed=0 curves={'stored': 1, 'failed': 0} bids={'stored': 1, 'rate_limited': 0, 'failed': 0} late_table=not_final
+auction_pool_capture scheduled=0 stored=0 rate_limited=0 failed=0 curves={'stored': 1, 'failed': 0} bids={'stored': 0, 'rate_limited': 0, 'failed': 0, 'skipped_late': 1} late_table=not_final
+auction_pool_capture_retry late_table=stored attempt=1
+auction_pool_capture scheduled=0 stored=0 rate_limited=0 failed=0 curves={'stored': 1, 'failed': 0} bids={'stored': 1, 'rate_limited': 0, 'failed': 0} late_table=stored
+auction_pool_capture scheduled=0 stored=0 rate_limited=0 failed=0 curves=0 bids=0 late_table=0
+auction_pool_capture scheduled=0 stored=0 rate_limited=0 failed=0 curves=0 bids=0 late_table=0
+auction_pool_capture scheduled=0 stored=0 rate_limited=0 failed=0 curves=0 bids=0 late_table=0
+auction_pool_capture scheduled=0 stored=0 rate_limited=0 failed=0 curves=0 bids=0 late_table=0
+storage tiering pass failed: tunnel down
+database transaction failed sql=
+    WITH last AS (
+        SELECT max(occurred_at) AS at FROM quant.market_events
+         WHERE event_type='limit_up_pool' AND source=%s AND occurred_at>=%s AND occurred_at<%s
+    )
+    SELECT DISTINCT ON(e.symbol) e.symbol,e.body,e.source,e.occurred_at,e.available_at
+      FROM quant.market_events e
+      JOIN last ON e.occurred_at>=date_trunc('minute',last.at)
+               AND e.occurred_at<date_trunc('minute',last.at)+interval '1 minute'
+     WHERE e.event_type='limit_up_pool' AND e.source=%s
+     ORDER BY e.symbol,e.occurred_at DESC params=('fuyao_ths', datetime.datetime(2097, 6, 17, 0, 0, tzinfo=zoneinfo.ZoneInfo(key='Asia/Shanghai')), datetime.datetime(2097, 6, 18, 0, 0, tzinfo=zoneinfo.ZoneInfo(key='Asia/Shanghai')), 'fuyao_ths')
+Traceback (most recent call last):
+  File "/src/quant-service/app/database.py", line 1927, in transaction
+    yield _LoggingConnection(connection, recorder)
+  File "/src/quant-service/tests/test_limit_event_repository.py", line 244, in test_close_snapshot_ladder_others_prior_and_evidence_on_postgres
+    raise self.Rollback
+test_limit_event_repository.LimitEventSqlIntegrationTests.Rollback
+Fuyao code list unavailable for the auction capture: fuyao down
+{"refused": "outside the safe window (weekdays 22:10-08:00 Beijing, or the weekend)"}
+owner peer contract has passed once now; blocking will begin on the next restart
+http client error method=POST path=/api/v1/market/bars/import status=401
+http client error method=POST path=/api/v1/market/bars/import status=401
+http client error method=POST path=/api/v1/market/bars/import status=422
+http client error method=POST path=/api/v1/strategies/intraday/replay-recorded-inputs status=401
+http client error method=POST path=/api/v1/strategies/intraday/replay-recorded-inputs status=422
+http client error method=POST path=/api/v1/analyst-research/reviews/run status=401
+http client error method=POST path=/api/v1/analyst-research/reviews/run status=422
+http client error method=POST path=/licensed/stock-api/call status=401
+http client error method=POST path=/api/v1/research/longhu/probe status=401
+http client error method=POST path=/api/v1/analysts/anqiang/trade-action-outcomes/recompute status=401
+http client error method=POST path=/api/v1/analyst-research/reviews/run status=401
+http client error method=POST path=/api/v1/research/l2/evaluations status=401
+http client error method=PUT path=/api/v1/paper/accounts status=401
+http client error method=POST path=/api/v1/paper/decisions/{decision_id}/accept status=401
+http client error method=POST path=/api/v1/personal/portfolio-snapshots status=401
+http client error method=POST path=/api/v1/personal/trade-plans status=401
+http client error method=POST path=/api/v1/analyst-prompt-lab/materialize status=401
+http client error method=POST path=/api/v1/analyst-prompt-lab/candidates/{candidate_id}/label status=401
+http client error method=POST path=/api/v1/analyst-prompt-lab/evaluate/{variant_key} status=401
+http client error method=POST path=/api/v1/analyst-intraday-outcomes/recompute status=401
+http client error method=POST path=/api/v1/internal/raw-overflow/ack status=401
+http client error method=POST path=/api/v1/internal/raw-overflow/failure status=401
+http client error method=POST path=/api/v1/bootstrap status=401
+http client error method=POST path=/api/v1/providers/akshare/probe status=401
+http client error method=POST path=/api/v1/providers/fuyao/query status=401
+http client error method=POST path=/api/v1/stocks/{symbol}/study status=401
+http client error method=POST path=/api/v1/analysis/jobs/{analysis_id}/run status=401
+http client error method=POST path=/api/v1/remote-archive/reports/import status=401
+http client error method=POST path=/api/v1/remote-archive/messages/import status=401
+http client error method=POST path=/api/v1/remote-archive/reports/reprocess status=401
+http client error method=POST path=/api/v1/remote-archive/messages/reprocess status=401
+http client error method=POST path=/api/v1/remote-archive/sync status=401
+http client error method=POST path=/api/v1/strategies/intraday/replay-recorded-events status=401
+http client error method=POST path=/api/v1/strategies/intraday/replay-recorded-inputs status=401
+http client error method=POST path=/api/v1/strategies/intraday/entry-timing-challengers status=401
+http client error method=POST path=/api/v1/claim-review/{review_id} status=401
+http client error method=POST path=/api/v1/universes/members status=401
+http client error method=POST path=/api/v1/features/build status=401
+http client error method=POST path=/api/v1/factors/evaluate status=401
+http client error method=POST path=/api/v1/strategies/backtest status=401
+http client error method=POST path=/api/v1/operations/fetch-runs/reconcile-stale status=401
+http client error method=POST path=/api/v1/data-snapshots/build status=401
+http client error method=PUT path=/api/v1/analyst-research/profiles/{analyst_id} status=401
+http client error method=PUT path=/api/v1/remote-archive/sync-cursors status=401
+http client error method=PUT path=/api/v1/remote-archive/sync-cursors-global status=401
+http client error method=POST path=/api/v1/market/bars/import status=401
+http client error method=POST path=/api/v1/market/universe/sync status=401
+http client error method=POST path=/api/v1/market/sync/full-daily status=401
+http client error method=POST path=/api/v1/market/sync/full-daily-controls status=401
+http client error method=POST path=/api/v1/market/post-close/refresh status=401
+http client error method=POST path=/api/v1/market/post-close/refresh/start status=401
+http client error method=POST path=/api/v1/events/cninfo/sync status=401
+http client error method=POST path=/api/v1/market/flow/features/rebuild status=401
+http client error method=PUT path=/api/v1/intraday/watchlists/{symbol} status=401
+http client error method=POST path=/api/v1/intraday/watchlists/{symbol}/history/sync status=401
+http client error method=DELETE path=/api/v1/intraday/watchlists/{symbol} status=401
+http client error method=POST path=/api/v1/intraday/scan status=401
+http client error method=POST path=/api/v1/intraday/minute-sessions/capture status=401
+http client error method=POST path=/api/v1/intraday/board-report/run status=401
+http client error method=POST path=/api/v1/market/sectors/review/report/run status=401
+http client error method=POST path=/api/v1/market/sectors/sync status=401
+http client error method=POST path=/api/v1/market/sectors/eastmoney/members/sync status=401
+http client error method=POST path=/api/v1/market/sectors/intraday/report status=401
+http client error method=POST path=/api/v1/market/sectors/flows/sync status=401
+http client error method=POST path=/api/v1/market/sectors/concepts/sync status=401
+http client error method=POST path=/api/v1/market/sectors/concepts/members/sync status=401
+http client error method=POST path=/api/v1/market/sectors/concepts/members/backfill/run status=401
+http client error method=POST path=/api/v1/market/sectors/members/backfill/run status=401
+http client error method=POST path=/api/v1/market/sectors/concepts/candidates/sync status=401
+http client error method=POST path=/api/v1/market/sectors/concepts/research/run status=401
+http client error method=POST path=/api/v1/market/snapshots/run status=401
+http client error method=POST path=/api/v1/market/minute/import-offline status=401
+http client error method=POST path=/api/v1/market/sync/baostock status=401
+http client error method=POST path=/api/v1/strategy/decisions/run status=401
+http client error method=POST path=/api/v1/strategy/reviews/run status=401
+http client error method=POST path=/api/v1/strategy/post-close/run status=401
+http client error method=POST path=/api/v1/strategy/pattern-mining/run status=401
+http client error method=POST path=/api/v1/strategy/watchlist-main-wave/run status=401
+http client error method=POST path=/api/v1/analyst-scorecards/recompute status=401
+http client error method=POST path=/api/v1/outcomes/recompute status=401
+http client error method=POST path=/api/v1/intraday/outcomes/recompute status=401
+http client error method=POST path=/api/v1/recommendations/generate status=401
+http client error method=POST path=/api/v1/pipeline/daily status=401
+http client error method=POST path=/api/v1/research/strategies/xiaojie-leader-flow/evaluate status=401
+http client error method=POST path=/api/v1/watch-reviews/run status=401
+http client error method=POST path=/api/v1/teacher-review/packs status=401
+http client error method=POST path=/api/v1/teacher-review/roll status=401
+http client error method=POST path=/api/v1/teacher-review/outcome-review status=401
+http client error method=POST path=/api/v1/research/strategy-changes status=401
+http client error method=POST path=/api/v1/research/ten-day-leader-rotation/run status=401
+ST evidence for 2099-03-02 was not recorded: the query has 0 placeholders but 5 parameters were passed
+http client error method=POST path=/api/v1/teacher-review/nothing-here status=401
+http client error method=POST path=/api/v1/intraday/nothing-here status=403
+http client error method=POST path=/api/v1/intraday/nothing-here status=404
+plan: tqcenter.get_market_data -> /tmp/tdx-test kinds=1m symbols=600000.SH
+daily: 1 rows -> /tmp/tmpygz3t1hy/tdx_quant_daily_20261009_20261009.csv
+database transaction failed sql=INSERT INTO quant.intraday_signal_events(
+                 scan_id,symbol,signal_key,signal_type,severity,state,score,observed_at,expires_at,
+                 conditions,evidence,risk_flags,episode_id,material_state_hash,stage)
+               VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING signal_event_id params=(UUID('21046af6-bf22-44ec-98e9-2b46eb048471'), '999984.SZ', '999984.SZ:data_issue:teacher_review', 'data_issue', 'warning', 'confirming', 0, datetime.datetime(2026, 9, 22, 1, 30, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 9, 22, 1, 35, tzinfo=datetime.timezone.utc), Json({'setup': 'teacher_review_data_miss ... (4915 chars)), Json({'quote': {'price': 26.47, 'pct_cha ... (2110 chars)), Json(['teacher_review_research', 'manual ... (180 chars)), None, None, 'data_issue')
+Traceback (most recent call last):
+  File "/src/quant-service/app/database.py", line 1927, in transaction
+    yield _LoggingConnection(connection, recorder)
+  File "/src/quant-service/tests/test_teacher_review.py", line 1033, in test_teacher_entry_and_data_gap_persist_as_confirmed_events
+    raise self.Rollback
+test_teacher_review.ScanPersistenceIntegrationTests.Rollback
+database transaction failed sql=SELECT count(*)::int total FROM quant.sectors s WHERE s.taxonomy_key=%s AND s.metadata->>'listed_on'=%s params=('fuyao_ths_concept', '2099-03-03')
+Traceback (most recent call last):
+  File "/src/quant-service/app/database.py", line 1927, in transaction
+    yield _LoggingConnection(connection, recorder)
+  File "/src/quant-service/tests/test_ths_board_replacement_integration.py", line 53, in run_rolled_back
+    raise _Rollback
+test_ths_board_replacement_integration._Rollback
+database transaction failed sql=SELECT o.taxonomy_key,o.sector_key,s.label,o.trading_date,o.close,o.change_pct,o.net_amount,o.net_buy_amount,o.net_sell_amount,
+                      o.constituent_count,o.leading_symbol,o.leading_label,o.provider_key,o.available_at
+                 FROM quant.sector_market_observations o JOIN quant.sectors s ON s.taxonomy_key=o.taxonomy_key AND s.sector_key=o.sector_key
+                WHERE o.taxonomy_key=%s AND o.trading_date=%s
+                ORDER BY o.net_amount DESC NULLS LAST,s.label LIMIT %s params=('fuyao_ths_concept_limit_strength', datetime.date(2099, 3, 3), 10)
+Traceback (most recent call last):
+  File "/src/quant-service/app/database.py", line 1927, in transaction
+    yield _LoggingConnection(connection, recorder)
+  File "/src/quant-service/tests/test_ths_board_replacement_integration.py", line 53, in run_rolled_back
+    raise _Rollback
+test_ths_board_replacement_integration._Rollback
+database transaction failed sql=
+    SELECT sync.state,count(*)::int boards,coalesce(sum(active.member_count),0)::int members,
+           sum(sync.member_count)::int evidence_rows,max(sync.updated_at) latest_updated_at
+      FROM quant.sector_member_sync_state sync
+      LEFT JOIN LATERAL (
+          SELECT count(*)::int member_count FROM quant.sector_membership_history history
+           WHERE history.taxonomy_key=sync.taxonomy_key AND history.sector_key=sync.sector_key
+             AND history.effective_to IS NULL
+      ) active ON true
+     WHERE sync.taxonomy_key=%s AND sync.trading_date=%s
+     GROUP BY sync.state ORDER BY sync.state
+ params=('fuyao_ths_concept', datetime.date(2099, 3, 2))
+Traceback (most recent call last):
+  File "/src/quant-service/app/database.py", line 1927, in transaction
+    yield _LoggingConnection(connection, recorder)
+  File "/src/quant-service/tests/test_ths_board_replacement_integration.py", line 53, in run_rolled_back
+    raise _Rollback
+test_ths_board_replacement_integration._Rollback
+slow database transaction site=async:test_transaction_audit:opener seconds=0.2 statements=1
+slow database transaction site=test_transaction_audit:test_sync_transactions_are_recorded_against_their_caller seconds=0.2 statements=2
+slow database transaction site=app.x:slow seconds=7.0 statements=250
+slow database transaction site=app.a:once seconds=60.0 statements=1
+slow database transaction site=app.b:often seconds=2.0 statements=400
+slow database transaction site=app.b:often seconds=2.0 statements=400
+slow database transaction site=app.b:often seconds=2.0 statements=400
+----------------------------------------------------------------------
+Ran 3248 tests in 43.976s
+
+OK (skipped=2)
+exit=0
