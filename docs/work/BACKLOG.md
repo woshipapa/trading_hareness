@@ -626,7 +626,7 @@
 - how: 没有直接做，因为两种改法都会改运行信号：(a) 把 `skipped` 记成 `blocked`，每个 10 分钟的轮次都会重跑这两个阶段，W011 用来验收的“left open”日志行会常驻；(b) 只给老师两阶段一个“开关关着不关回执”的标记，要在回执摘要里多存一个键。先问 W011 的验收是否要保留“left open”为零，再选
 - who: agent
 - needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
-- result: 2026-10-14 提交 e6363b8e（已推送到 origin/main，2026-10-14；未发布）：老师两阶段在开关关着时返回 `receipt: open`，回执记 `blocked`、下一轮再问；调用方仍看到 `skipped`，所以日志里不会多出“left open”（`open_stages` 读的是阶段自己返回的状态）。其他 `skipped` 阶段（配置关掉的）不变。读回执状态的只有探针脚本，运行代码里没有别处读。测试 `test_a_skipped_stage_keeps_its_receipt_open_only_when_it_asks_to`；全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
+- result: 2026-10-14 提交 e6363b8e（已推送到 origin/main，2026-10-14；已发布 `owner-code-20261014-09`，15:11，发布后检查通过，见 `docs/RELEASE_SYNC_47.md` 发布表）：老师两阶段在开关关着时返回 `receipt: open`，回执记 `blocked`、下一轮再问；调用方仍看到 `skipped`，所以日志里不会多出“left open”（`open_stages` 读的是阶段自己返回的状态）。其他 `skipped` 阶段（配置关掉的）不变。读回执状态的只有探针脚本，运行代码里没有别处读。测试 `test_a_skipped_stage_keeps_its_receipt_open_only_when_it_asks_to`；全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
 - updated: 2026-10-14
 
 ### B066 战法标签不看 q 值
@@ -637,7 +637,7 @@
 - how: 标签加一道 `q` 阈值，阈值由用户定（例如 0.1）；`p` 改 t 分布，样本 20 天时差别不大。改动在 `_label` 和调用处，测试是纯函数
 - who: agent
 - needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
-- result: 2026-10-14 提交 e6363b8e（已推送到 origin/main，2026-10-14；未发布）：`supports`/`against` 要求主要结果的 BH `q` ≤ 0.10（`LABEL_MAX_Q`）；`p` 仍用正态近似，没有改（改会动 `records` 的键和固定的参考指纹）。在 66 个战法的参考数据上，原有的 4 个 `supports`/`against` 的 `q` 是 0.10 到 0.53，现在都是 `undecided`，参考文件 `tests/fixtures/tactic_fold_reference_b04be9b9.json` 只改了这 4 个标签。发布后的第一次每日总结，`label_changes` 里会出现这几条从 `supports`/`against` 到 `undecided` 的变化，是预期的。全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
+- result: 2026-10-14 提交 e6363b8e（已推送到 origin/main，2026-10-14；已发布 `owner-code-20261014-09`，15:11，发布后检查通过，见 `docs/RELEASE_SYNC_47.md` 发布表）：`supports`/`against` 要求主要结果的 BH `q` ≤ 0.10（`LABEL_MAX_Q`）；`p` 仍用正态近似，没有改（改会动 `records` 的键和固定的参考指纹）。在 66 个战法的参考数据上，原有的 4 个 `supports`/`against` 的 `q` 是 0.10 到 0.53，现在都是 `undecided`，参考文件 `tests/fixtures/tactic_fold_reference_b04be9b9.json` 只改了这 4 个标签。发布后的第一次每日总结，`label_changes` 里会出现这几条从 `supports`/`against` 到 `undecided` 的变化，是预期的。全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
 - updated: 2026-10-14
 
 ### B067 风险分的回执门禁和 `partial` 的含义
@@ -659,7 +659,7 @@
 - how: 无回执时在 15:10–22:00 补跑一次收盘检查点（先 `completed_for_checkpoint` 查回执，保持幂等）；11:31 的盘中检查点是时点快照，不补
 - who: agent
 - needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
-- result: 2026-10-14 提交 e6363b8e（已推送到 origin/main，2026-10-14；未发布）：收盘检查点 15:10–22:00 在没有回执时补跑，失败后至多每 10 分钟一次；只在带 `completed_for_checkpoint`（持久回执）时才补，避免重复结算；盘中检查点不补。4 条新用例，全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
+- result: 2026-10-14 提交 e6363b8e（已推送到 origin/main，2026-10-14；已发布 `owner-code-20261014-09`，15:11，发布后检查通过，见 `docs/RELEASE_SYNC_47.md` 发布表）：收盘检查点 15:10–22:00 在没有回执时补跑，失败后至多每 10 分钟一次；只在带 `completed_for_checkpoint`（持久回执）时才补，避免重复结算；盘中检查点不补。4 条新用例，全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
 - updated: 2026-10-14
 
 ### B069 审查里推测的四处，要用运行证据确认
@@ -762,7 +762,7 @@
 - how: 已改并提交（c94eb531）：`AuctionPoolCaptureRuntime.retry_late_table`；循环里晚补为 `failed`/`not_final`/`database_busy` 时每分钟再读一次，最多 30 次、不过 11:30；`no_pool` 在 09:30 之前每 30 秒重试。新增三条用例在 `quant-service/tests/test_auction_pool_runtime.py`
 - who: agent 改并提交；推送、发布由用户做
 - needs: 无；发布要随下一次 owner 纯代码发布（`scripts/release plan` 先确认，推送与发布由用户做），W002 的持有会话看到本条后并进 W002
-- result: 2026-10-14 `make -C quant-service test-release-path` 3,232 条通过、2 条跳过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（已推送到 origin/main，2026-10-14；未发布）、未在线上验证
+- result: 2026-10-14 `make -C quant-service test-release-path` 3,232 条通过、2 条跳过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（已推送到 origin/main，2026-10-14；已发布 `owner-code-20261014-09`，15:11，发布后检查通过，见 `docs/RELEASE_SYNC_47.md` 发布表）、未在线上验证
 - updated: 2026-10-14
 
 ### B064 周复盘的回归永远凑不够样本
@@ -773,7 +773,7 @@
 - how: 已改并提交（c94eb531）：报告仍展示自己的 7 天，回归读以报告日结尾的 28 个自然日（`REGRESSION_LOOKBACK_DAYS=27`），`summary.regression_window` 记下窗口，方法版本升到 `analyst-market-review-v2`（读取侧只回显版本，不按版本过滤）。这是我选的口径；要换成别的窗口（例如只用交易日、或 60 日）改一个常量
 - who: agent 改并提交；推送、发布由用户做
 - needs: 无；28 天窗口由用户确认，要换改 `REGRESSION_LOOKBACK_DAYS`；发布同 B063
-- result: 2026-10-14 同 B063 的全套测试通过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（已推送到 origin/main，2026-10-14；未发布）。回归仍是描述性的，`live_effect: none`
+- result: 2026-10-14 同 B063 的全套测试通过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（已推送到 origin/main，2026-10-14；已发布 `owner-code-20261014-09`，15:11，发布后检查通过，见 `docs/RELEASE_SYNC_47.md` 发布表）。回归仍是描述性的，`live_effect: none`
 - updated: 2026-10-14
 
 ### B070 竞价分档：把“真一字”和“开盘涨停后开板”分开记
@@ -784,7 +784,7 @@
 - how: 09:25 的表只知道开盘，所以表里的 `bucket` 仍是 `opens_at_limit`，没有改（竞价池、战法条件都读它）。已实现的跟踪汇总 `/api/v1/market/auction-desk/track` 在日线出来之后按当日最低价拆成 `opens_at_limit:one_word`（最低价在涨停价上：全天买不到，记现金 0 且不从样本里删）和 `opens_at_limit:reopened`（最低价低于涨停价：开板后可按涨停价买，保守规则仍不假设成交），每档带 `fill_rule`；没有最低价的日线留在合并档里。`gap_bucket` 的历史统计 `BUCKET_STATISTICS['opens_at_limit']`（n=754）是合并口径，没有改
 - who: agent
 - needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
-- result: 2026-10-14 提交 e3291702（已推送到 origin/main，2026-10-14；未发布）；`test_track_separates_a_board_that_stayed_one_word_from_one_that_reopened`；全套 3,240 条通过，输出 `docs/work/probes/2026-10-14-auction-bucket-split-release-path.out.txt`。还没有用真实读数看过两档各有多少只：发布后读 `/api/v1/market/auction-desk/track`
+- result: 2026-10-14 提交 e3291702（已推送到 origin/main，2026-10-14；已发布 `owner-code-20261014-09`，15:11，发布后检查通过，见 `docs/RELEASE_SYNC_47.md` 发布表）；`test_track_separates_a_board_that_stayed_one_word_from_one_that_reopened`；全套 3,240 条通过，输出 `docs/work/probes/2026-10-14-auction-bucket-split-release-path.out.txt`。还没有用真实读数看过两档各有多少只：发布后读 `/api/v1/market/auction-desk/track`
 - updated: 2026-10-14
 
 ### B071 涨停次日大面风险分按“次日开盘到收盘”判定，并给两组成本
@@ -795,7 +795,7 @@
 - how: `limit_up_risk_runtime.track` 多取次日开盘价，每个交易日另给 `open_to_close`（同一个高低五分位对比），顶层新增 `recent_open_to_close`（同一个 `working` 规则：高低差 ≥3 个点且 t ≥2）、`mean_open_to_close` 和 `net_of_round_trip_costs`（`ROUND_TRIP_COSTS`：万 5 佣金加千 1 滑点合计 15 个基点，千 2 滑点合计 25 个基点，是来源文章自述的口径，不是交易所费率），`judged_on` 说明按哪个判。原有的 `recent`（收盘到收盘）一字未改。控制台是否改成显示 `recent_open_to_close` 没有做，那是前端的事
 - who: agent
 - needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
-- result: 2026-10-14 提交 4fa711f3（已推送到 origin/main，2026-10-14；未发布）；全套 3,248 条通过，输出 `docs/work/probes/2026-10-14-risk-oc-and-temperature-freeze-release-path.out.txt`。还没有用真实读数看过：发布后读该接口的 `recent_open_to_close`，高分档的 `big_loss_rate` 是否仍比低分档高 3 个点以上，要看实际数
+- result: 2026-10-14 提交 4fa711f3（已推送到 origin/main，2026-10-14；已发布 `owner-code-20261014-09`，15:11，发布后检查通过，见 `docs/RELEASE_SYNC_47.md` 发布表）；全套 3,248 条通过，输出 `docs/work/probes/2026-10-14-risk-oc-and-temperature-freeze-release-path.out.txt`。还没有用真实读数看过：发布后读该接口的 `recent_open_to_close`，高分档的 `big_loss_rate` 是否仍比低分档高 3 个点以上，要看实际数
 - updated: 2026-10-14
 
 ### B072 情绪温度的档位规则冻结，并按事先写下的假设做前向检验
@@ -806,6 +806,17 @@
 - how: 见决策 0013 末尾新增的“2026-10-14 规则冻结与前向检验”。要点：分项、方向、窗口、门槛、档位边界的指纹 `RULES_SHA256` 由测试钉住；存下的读数带 `rules_sha256`；`forward_test` 只数 2026-10-15 起、盖了当前指纹的读数，判一条事先写下的假设（冰点日之后下一交易日上证开盘到收盘，高于其他日），冰点日和其他日各满 20 天才判，约一年多。读数新增 `index_open`
 - who: agent
 - needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
-- result: 2026-10-14 提交 bd029769（已推送到 origin/main，2026-10-14；未发布）；全套 3,248 条通过，输出同 B071。注意：发布后的第一个晚上，最近 30 个读数会因为多了 `rules_sha256` 和 `index_open` 被重新存一次（内容变了），是预期的；`index_open` 在冻结日之前存下的读数里没有，不进前向样本
+- result: 2026-10-14 提交 bd029769（已推送到 origin/main，2026-10-14；已发布 `owner-code-20261014-09`，15:11，发布后检查通过，见 `docs/RELEASE_SYNC_47.md` 发布表）；全套 3,248 条通过，输出同 B071。注意：发布后的第一个晚上，最近 30 个读数会因为多了 `rules_sha256` 和 `index_open` 被重新存一次（内容变了），是预期的；`index_open` 在冻结日之前存下的读数里没有，不进前向样本
+- updated: 2026-10-14
+
+### B073 2026-10-14 上午主源缺的分钟快照，用个股分钟线事后重建并写进主序列
+
+- state: done
+- kind: data-backfill
+- why: owner 主机 09:21–11:06 失去响应（F031、B058），主源全 A 分钟快照缺 09:30–10:44 和 10:46–11:05 共 95 分钟。用户 2026-10-14 在盘中说「当前盘中因为上午有很多点缺失了……缺失数据点全部取得存到数据库」，随后「我允许了这次」（同意在交易时段做一次约 5,300 次的读取，超过 5,000 次的门槛）、「需要全市场快照的补充，都去补充，然后事后统一写到owner里」「主分钟序列肯定要认longhu」
+- how: 14:49–15:05 用 `state/fetch_today_minutes.py`（本机，不进仓库）经 owner 读路径取今天每只股票的分钟线（`GetStockTrendIncremental`），6 并发：沪深 5,141 只 + 补取 425 只（北交所 349 只和面板里没有的 76 只），共约 5,570 次，0 次失败，速度 5–8 次/秒，owner 没有拒绝；`state/build_minute_docs.py` 把每个缺的分钟重建成一份文档（价格、累计成交量、累计成交额、开高低收昨收；没有资金流，这与主源这一路“价量快照、无主力资金流”的口径一致）；与已存的真文档对比后（`docs/work/probes/2026-10-14-minute-reconstruction-validation.out.txt`，11:10、13:30、14:30 三分钟）：累计成交量中位误差 0.04%–0.07%，96% 的股票在 1% 以内；价格 50%–57% 在半个最小变动单位内（已存的是该分钟第 39–50 秒，重建的是分钟末）；最高价偏窄、最低价偏宽（分钟收盘价的滚动极值）。95 份写进 `a_share_minute_cross_section`，来源 `longhuvip`，`effective_at` 记在 HH:MM:59，`available_at` 是写入时间；元数据 `reconstructed: true`、`decision_eligible: false`、`fallback_for: fuyao_ths`
+- who: agent；写库由会话在用户同意后执行
+- needs: 无
+- result: 2026-10-14 15:13 写入 95 份（`docs/work/probes/2026-10-14-minute-reconstruction-write.out.txt`，6,405 万字节）；读取方认 `longhuvip` 的代码 `2e0affeb` 随 `owner-code-20261014-10` 发布（15:15）；读取方探针：当天 246 份分钟文档，09:30–11:29 没有缺分钟（`docs/work/probes/2026-10-14-minute-series-after-backfill.out.txt`）。指标健康的 `fallback_minutes` 当天会显示 95、WARN，符合它的定义（主源失败、别的来源补）。没做：09:21–09:29（集合竞价阶段，分钟线里没有）；W008 升级通达信要数满的 5 个通过日，今天不算
 - updated: 2026-10-14
 

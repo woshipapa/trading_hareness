@@ -1,0 +1,5 @@
+09:45 no stored main document
+10:30 no stored main document
+11:10: reconstructed=5566 stored_rows=5562 common=5562 price_within_half_tick=0.504 volume_within_1%=0.966 turnover_within_1%=0.966 vol_err_median=0.0007 vol_err_p95=0.0082 high_gap_median=-0.020 share_high_below_stored=0.739 share_low_above_stored=0.687
+13:30: reconstructed=5566 stored_rows=5562 common=5562 price_within_half_tick=0.570 volume_within_1%=0.963 turnover_within_1%=0.963 vol_err_median=0.0004 vol_err_p95=0.0085 high_gap_median=-0.020 share_high_below_stored=0.736 share_low_above_stored=0.642
+14:30: reconstructed=5566 stored_rows=5562 common=5562 price_within_half_tick=0.527 volume_within_1%=0.969 turnover_within_1%=0.969 vol_err_median=0.0007 vol_err_p95=0.0080 high_gap_median=-0.020 share_high_below_stored=0.739 share_low_above_stored=0.602

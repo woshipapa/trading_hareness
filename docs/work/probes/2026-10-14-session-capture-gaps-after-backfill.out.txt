@@ -1,0 +1,37 @@
+now (database): 2026-10-14 15:14:22.357680
+  fuyao_ths              realtime_quote                           market_wide=False n= 27810 11:31:15 .. 15:12:41
+  eastmoney_hot_rank     hot_rank_popularity                      market_wide=False n=  2300 09:15:27 .. 14:50:55
+  eastmoney_hot_rank     hot_rank_surge                           market_wide=False n=  1366 09:15:27 .. 14:50:55
+  cls_telegraph          news_flash                               market_wide=True  n=   838 00:01:53 .. 15:12:51
+  eastmoney_flash        news_flash                               market_wide=True  n=   821 00:01:53 .. 15:07:51
+  jin10_flash            news_flash                               market_wide=True  n=   765 00:00:00 .. 15:09:37
+  quant_scan             watch_scan_tape                          market_wide=False n=   573 09:15:00 .. 14:59:55
+  ths_flash              news_flash                               market_wide=True  n=   570 00:04:03 .. 15:12:04
+  fuyao_ths              a_share_skyrocket_list                   market_wide=False n=   510 09:15:21 .. 14:59:31
+  fuyao_ths              a_share_hot_stock_list                   market_wide=False n=   510 09:15:21 .. 14:59:36
+  eastmoney_ztb          limit_pool_strong                        market_wide=False n=   391 15:00:00 .. 15:00:00
+  eastmoney_ztb          limit_pool_sub_new                       market_wide=False n=   162 15:00:00 .. 15:00:00
+  local_derived          all_a_snapshot_source_agreement          market_wide=True  n=   151 09:15:52 .. 14:59:52
+  fuyao_ths              a_share_minute_cross_section             market_wide=True  n=   151 09:15:50 .. 14:59:50
+  tdx_public             a_share_minute_cross_section_shadow      market_wide=True  n=   151 09:15:52 .. 14:59:52
+  local_derived          market_radar                             market_wide=True  n=   151 09:15:50 .. 14:59:50
+  longhuvip              opening_auction_pulse                    market_wide=True  n=   121 09:15:00 .. 09:21:33
+  tdx_public             auction_curve_daily                      market_wide=False n=    95 09:26:00 .. 09:26:00
+  longhuvip              a_share_minute_cross_section             market_wide=True  n=    95 09:30:59 .. 11:05:59
+  longhuvip              auction_bid_daily                        market_wide=False n=    93 09:30:00 .. 09:30:00
+  eastmoney_ztb          limit_pool_previous_limit_up             market_wide=False n=    69 15:00:00 .. 15:00:00
+  eastmoney_ztb          limit_pool_limit_up                      market_wide=False n=    61 15:00:00 .. 15:00:00
+  fuyao_ths              auction_pool_snapshot                    market_wide=True  n=    43 09:15:05 .. 09:25:05
+  quant_scan             storage_tiering_run                      market_wide=False n=    35 00:09:48 .. 15:12:23
+  derived_market_sentiment market_sentiment_snapshot                market_wide=True  n=    30 10:45:36 .. 14:55:57
+  eastmoney_ztb          limit_pool_broken                        market_wide=False n=    24 15:00:00 .. 15:00:00
+  eastmoney_ztb          limit_pool_limit_down                    market_wide=False n=    21 15:00:00 .. 15:00:00
+  eastmoney_ztb          board_change_snapshot                    market_wide=True  n=    13 10:44:07 .. 14:45:53
+  tencent_index_free     daily_bar                                market_wide=False n=     4 08:00:00 .. 08:00:00
+  derived_market_sentiment market_sentiment_close                   market_wide=True  n=     3 15:00:00 .. 15:00:00
+  eastmoney_ztb          stock_change_daily_summary               market_wide=True  n=     3 15:00:00 .. 15:00:00
+  local_derived          auction_open_desk_daily                  market_wide=True  n=     1 15:00:00 .. 15:00:00
+  eastmoney_free         daily_bar                                market_wide=False n=     1 08:00:00 .. 08:00:00
+  fuyao_ths a_share_minute_cross_section: 151 minutes; stamped seconds [50]; runs [('09:15', '09:20'), ('10:45', '10:45'), ('11:06', '11:29'), ('13:00', '14:59')]
+  tdx_public a_share_minute_cross_section_shadow: 151 minutes; stamped seconds [0, 52]; runs [('09:15', '09:20'), ('10:46', '10:46'), ('11:06', '11:29'), ('13:00', '14:59')]
+  derived for 2026-10-14: auction_open_desk_daily n=1 stored 2026-10-14 11:45:58.037339

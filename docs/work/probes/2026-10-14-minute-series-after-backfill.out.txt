@@ -1,0 +1,7 @@
+providers read: ('fuyao_ths', 'tdx_public', 'longhuvip')
+  fuyao_ths  n= 151 09:15:50 .. 14:59:50
+  longhuvip  n=  95 09:30:59 .. 11:05:59
+day_documents: 246
+morning minutes 09:30-11:29 without a document: 0 []
+10:00 minute document: 2026-10-14T10:00:59+08:00 metadata.provider longhuvip reconstructed True 000001.SZ price 11.64
+slow database transaction site=__main__:<module> seconds=29.8 statements=4

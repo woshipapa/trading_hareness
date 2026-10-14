@@ -1,0 +1,26 @@
+now (database): 2026-10-14 14:45:15.168944
+  fuyao_ths              realtime_quote                           market_wide=False n=  5562 11:31:15 .. 11:31:15
+  eastmoney_hot_rank     hot_rank_popularity                      market_wide=False n=  2200 09:15:27 .. 14:40:51
+  eastmoney_hot_rank     hot_rank_surge                           market_wide=False n=  1283 09:15:27 .. 14:40:51
+  cls_telegraph          news_flash                               market_wide=True  n=   765 00:01:53 .. 14:41:32
+  eastmoney_flash        news_flash                               market_wide=True  n=   752 00:01:53 .. 14:41:00
+  jin10_flash            news_flash                               market_wide=True  n=   713 00:00:00 .. 14:41:45
+  ths_flash              news_flash                               market_wide=True  n=   504 00:04:03 .. 14:42:53
+  quant_scan             watch_scan_tape                          market_wide=False n=   494 09:15:00 .. 14:45:04
+  fuyao_ths              a_share_hot_stock_list                   market_wide=False n=   450 09:15:21 .. 14:37:23
+  fuyao_ths              a_share_skyrocket_list                   market_wide=False n=   450 09:15:21 .. 14:37:17
+  local_derived          market_radar                             market_wide=True  n=   136 09:15:50 .. 14:44:50
+  fuyao_ths              a_share_minute_cross_section             market_wide=True  n=   136 09:15:50 .. 14:44:50
+  local_derived          all_a_snapshot_source_agreement          market_wide=True  n=   136 09:15:52 .. 14:44:52
+  tdx_public             a_share_minute_cross_section_shadow      market_wide=True  n=   136 09:15:52 .. 14:44:52
+  longhuvip              opening_auction_pulse                    market_wide=True  n=   121 09:15:00 .. 09:21:33
+  tdx_public             auction_curve_daily                      market_wide=False n=    95 09:26:00 .. 09:26:00
+  longhuvip              auction_bid_daily                        market_wide=False n=    93 09:30:00 .. 09:30:00
+  fuyao_ths              auction_pool_snapshot                    market_wide=True  n=    43 09:15:05 .. 09:25:05
+  quant_scan             storage_tiering_run                      market_wide=False n=    31 00:09:48 .. 14:15:40
+  derived_market_sentiment market_sentiment_snapshot                market_wide=True  n=    27 10:45:36 .. 14:40:51
+  eastmoney_ztb          board_change_snapshot                    market_wide=True  n=    12 10:44:07 .. 14:30:47
+  local_derived          auction_open_desk_daily                  market_wide=True  n=     1 15:00:00 .. 15:00:00
+  fuyao_ths a_share_minute_cross_section: 136 minutes; stamped seconds [50]; runs [('09:15', '09:20'), ('10:45', '10:45'), ('11:06', '11:29'), ('13:00', '14:44')]
+  tdx_public a_share_minute_cross_section_shadow: 136 minutes; stamped seconds [0, 52]; runs [('09:15', '09:20'), ('10:46', '10:46'), ('11:06', '11:29'), ('13:00', '14:44')]
+  derived for 2026-10-14: auction_open_desk_daily n=1 stored 2026-10-14 11:45:58.037339
