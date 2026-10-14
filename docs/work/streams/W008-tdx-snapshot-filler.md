@@ -7,7 +7,7 @@
 - branch: main
 - head: e8cb8dbf
 - release: owner-code-20261013-05
-- next: B1（派工 6、7）已派给一个 Claude 子代理在工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`（分支 `codex/tdx-live-snapshot-fallback`，基点 main c5da5fa0）里实现，见 Running。交回后主会话复跑发布路径测试、读 diff 验收，再派 B2（派工 8、9、10），整条分支做完后独立评审、合并。发布 B 不急：它要等发布 A 之后的核对。还欠着的核对（owner 主机 10 月 14 日上午连不上，BACKLOG B058）：两条采集循环按新节拍落库（Due 里 09:16 那条，主机恢复后补做，并看今天缺了哪些分钟）；当日汇总作为五个交易日观察的第 1 天，今天多半不成立，观察从主机恢复后的第一个完整交易日重新数。
+- next: 等 B2 的子代理交回（Running）。交回后主会话在工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback` 复跑 `COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path` 和 `python -m pytest scripts -q`，读 `git diff main...HEAD`，再起独立评审，修完合并。只有 B1 的分支不能合并（见 Log 11:29）。发布 B 之前还要有发布 A 之后五个完整交易日的当日汇总；10 月 14 日因主机故障不算，从 10 月 15 日数起，每天收盘后跑一次当日汇总并把输出存进 `docs/work/probes/`。
 - updated: 2026-10-13
 
 ## Requirements
@@ -93,6 +93,7 @@
 - 2026-10-13 22:40 第二次发布：用户 22:38 执行 `bash ~/codebase/n8n/state/rel05.sh --apply`，`owner-code-20261013-05`（源 e8cb8dbf）在新服务器生效，纯代码、2 个运行时文件。核对：`release-sync-status.sh` ALL CHECKS PASSED（`docs/work/probes/2026-10-13-release-status-05.out.txt`）；两个容器实际导入的是 `owner-code-20261013-05`，目录里有 `min_share`；发布后主机可用内存 323 MB。已记入 `docs/RELEASE_SYNC_47.md`。发布前出过一个岔子：改默认地址的提交动了两个被分类规则判为全量的手工脚本，发布计划变成全量，已撤回那两处（e8cb8dbf），由此开了 W012。
 - 2026-10-14 11:11 新会话 4a420907 接手本记录（旧会话已无动静）。用户 11:02：「你现在owner修复好之前，把代码部分现在需要做的升级完善都做完」。B033（两条通达信数据流进冷热分层）已随一批小修合进 main（c5da5fa0）。B1 开工：建工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`，派给只在该工作区里干活的 Claude 子代理（opus；用户 10 月 13 日夜说 Codex 太慢，不再用它），派工内容是方案的 B1 一节原文，要求两个提交、不碰 B2。09:16 的核对没做：主机连不上。
 - 2026-10-14 11:17 主机 11:15 恢复后补做了 Due 里 09:16 那条核对（FACTS F031，探针 `docs/work/probes/2026-10-14-session-capture-gaps.py`）：存下的 17 分钟里主源都在第 50 秒、通达信在第 52 秒（一份在第 0 秒，没查是哪一分钟），节拍与发布 A 一致；但今天只有 09:15–09:20、10:45、11:06 之后有文档，中间是主机故障（B058），不是采集循环的问题。今天不能算五个交易日观察里的一天；观察从下一个完整交易日（10 月 15 日）重新数。
+- 2026-10-14 11:29 B1 交回（99f8d5de、ae3800aa）。实现者报告：发布路径测试 `Ran 3147 tests in 41.877s OK (skipped=2)`、`pytest scripts -q` → `380 passed, 3 skipped`、数据源目录校验 0 个问题；主会话还没有复跑，也没有读 diff（放到 B2 交回后与整条分支一起验收）。它指出的要点：**只有 B1 的分支不能合并**——主源失败时通达信补的那一分钟会交给所有使用方，而使用方还当它是主源（派生资金流标成 `fuyao_ths_derived`，是规则可用的；落库也记在 `fuyao_ths` 名下），要 B2 做完才安全。它与方案不同或自己定的地方：限时等待用 `asyncio.wait` 而不是 `wait_for(shield)`（后者在 Python 3.14 下会把迟到的失败报成警告；镜像是 3.12，行为相同）；名册读取加了按文档元数据过滤主源的条件；链抛出的是 `FuyaoProviderError` 的子类；主源的 `decision_eligible` 写死为真（目录里那条绑定的默认值是假，照读会改变主源的行为）；共享读取器在 TTL 过后仍留着最后一份快照（约 5,580 行常驻内存）。B2 已派给另一个子代理（同一工作区），派工里带上了这些要点。
 
 ## Waiting on the user
 
@@ -117,7 +118,9 @@
 - [x] 2026-10-13 评审第 2 轮 → APPROVED（2026-10-13 21:14）
 
 - [x] 2026-10-13 13:50 主会话派出的接手 agent 在做：查清四个前置问题（只读）、把方案改到第 3 版、送 Codex 审查（最多三轮）、更新本记录并提交。结束标志：它交回最终方案和待用户批准的问题，本记录的 Plan 一节写了各轮审查结果。之后：主会话把方案转给用户请批准。该 agent 挂在主会话上，主会话结束它就停：接手者看本记录的 Log 和方案文件的修订说明，从没做完的那一步继续。 → 2026-10-13 15:25 做完交回：方案第 3 版、三轮审查、待批准的问题都在本记录里；没做成的只有收盘后重跑容差探针（见 Due）。
-- [ ] 2026-10-14 11:11 Claude 子代理实现 B1（派工 6、7），挂在会话 4a420907 上，会话结束它就停。工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`，分支 `codex/tdx-live-snapshot-fallback`。结束标志：主会话收到完成通知；分支在 c5da5fa0 之后有两个提交且 `git status --short` 只剩 `frontend/node_modules`。之后：主会话复跑 `COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path` 并读 diff。新会话接手而它没做完时：看分支上已有的提交，按方案 B1 一节补完剩下的。
+- [x] 2026-10-14 11:11 Claude 子代理实现 B1（派工 6、7），挂在会话 4a420907 上，会话结束它就停。工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`，分支 `codex/tdx-live-snapshot-fallback`。结束标志：主会话收到完成通知；分支在 c5da5fa0 之后有两个提交且 `git status --short` 只剩 `frontend/node_modules`。之后：主会话复跑 `COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path` 并读 diff。新会话接手而它没做完时：看分支上已有的提交，按方案 B1 一节补完剩下的。 → 11:24 交回，提交 99f8d5de、ae3800aa（2026-10-14）
+
+- [ ] 2026-10-14 11:29 Claude 子代理实现 B2（派工 8、9、10），同一工作区和分支，挂在会话 4a420907 上。结束标志：主会话收到完成通知；分支在 ae3800aa 之后有三个提交。之后：主会话复跑验收命令、读 diff，再起一个独立评审看整条分支（`git diff main...codex/tdx-live-snapshot-fallback`），修完才合并。新会话接手而它没做完时：看分支已有的提交，按方案 B2 一节补完。
 
 ## Due
 
