@@ -11,7 +11,7 @@
 | [W003](streams/W003-daily-close-completion.md) | 日线收盘补全 | released | Claude Code 会话 93ba6e1d，2026-10-13 | 把剩下的两件事定下来再改状态：(1) 28 只一直“缺日线”的股票（6 只北交所，其余多半停牌）应归到“未交易”，否则这个阶段永远是 partial；(2) 控制面现在卡在每日指标 5,138/5,560 上，对账循环每 5 分钟调一次补全，后 21 次都是空跑（BACKLOG B043）。先只读查清每日指标的缺口是不是常态，再写修正方案 | 2026-10-13 |
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
 | [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | merged | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | 已合进本地 main（2a69145b），还没推送。等两件事：用户推送并发布（见 Waiting on the user，命令 `bash ~/codebase/n8n/state/rel07.sh`），以及 owner 主机恢复（BACKLOG B058；10 月 14 日 10:59 本机到它的隧道仍连不上）。主机恢复后 agent 先做 W012 记录 next 第 2 点的只读核对（两个脚本在主机上的内容），再请用户执行发布；发布后按 Due 的顺序：干跑一个分块看内存 → 全量回放（用户执行）→ 当晚阶段自己出总结 → 次日 09:26 核对竞价读数。edge 的中继和控制台在 owner 发布之后再发（否则新页签只会报错）。回收工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`（先删里面的 `frontend/node_modules` 符号链接）放在发布核对之后。 | 2026-10-14 |
-| [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | released | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 10 月 14 日 09:16 核对新服务器上两条采集循环按新节拍落库（见 Due）；然后从 main 建 `tdx-live-snapshot-fallback` 工作区派工 6（B1 的读取链）。当日汇总从 10 月 14 日起才有可判的分钟：收盘后跑一次并把输出存到 `docs/work/probes/`，记为五个交易日观察的第 1 天 | 2026-10-13 |
+| [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | released | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | B1（派工 6、7）已派给一个 Claude 子代理在工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`（分支 `codex/tdx-live-snapshot-fallback`，基点 main c5da5fa0）里实现，见 Running。交回后主会话复跑发布路径测试、读 diff 验收，再派 B2（派工 8、9、10），整条分支做完后独立评审、合并。发布 B 不急：它要等发布 A 之后的核对。还欠着的核对（owner 主机 10 月 14 日上午连不上，BACKLOG B058）：两条采集循环按新节拍落库（Due 里 09:16 那条，主机恢复后补做，并看今天缺了哪些分钟）；当日汇总作为五个交易日观察的第 1 天，今天多半不成立，观察从主机恢复后的第一个完整交易日重新数。 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在编辑框里改了备注名并保存后，核对飞书里的备注名和会员表（这是经线上 bridge 接口的第一次写入）；其余见 Open questions 和待办 B056 的 (2)、(4)。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
 | [W011](streams/W011-peer-evening-stages.md) | 每晚该跑的阶段由我们这一侧自己触发 | released | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | 10 月 14 日 16:50 核对第一次真正的当晚自动运行（见 Due）：用 `docs/work/probes/2026-10-14-peer-evening-receipts.py` 的做法查 10 月 14 日五个 `peer_` 回执和读数（把脚本里的日期改成 10 月 13、14 日另存一份），再看调度容器日志有没有“left open”。通过后把本记录改成 `verified`；连续两晚通过后删掉手工脚本 `state/lists13.sh` 那条 Due。 | 2026-10-14 |
@@ -38,11 +38,11 @@
 
 ## 正在运行
 
-无。
+- W008 2026-10-14 11:11 Claude 子代理实现 B1（派工 6、7），挂在会话 4a420907 上，会话结束它就停。工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-fallback`，分支 `codex/tdx-live-snapshot-fallback`。结束标志：主会话收到完成通知；分支在 c5da5fa0 之后有两个提交且 `git status --short` 只剩 `frontend/node_modules`。之后：主会话复跑 `COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path` 并读 diff。新会话接手而它没做完时：看分支上已有的提交，按方案 B1 一节补完剩下的。
 
 ## 待办清单
 
-open 32, ready 15, doing 2, waiting-user 1, done 7, dropped 1
+open 30, ready 15, doing 2, waiting-user 1, done 9, dropped 1
 
 在做的、可以开工的、等用户处理的:
 

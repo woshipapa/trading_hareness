@@ -94,7 +94,8 @@
 - how: 按 2026-10-12 的实测改规则并加测试；9 月 30 日的错值用“沿用比例”规则重算后覆盖（写库）
 - who: agent 改代码；写库由用户执行
 - needs: 无
-- updated: 2026-10-13
+- note1: 2026-10-14 只做了北交所取整这一处：新函数 `market_rules.a_share_limit_prices`（北交所向昨收方向取整，其余分位半入），`longhu_market_sync.build_control_rows`、`t1_settlement._limits`、`factor_lab` 三处改用它。提交 3d2e6a8b，合进 main c5da5fa0（2026-10-14 11:10），还没发布；发布路径测试 `Ran 3129 tests in 42.675s OK (skipped=2)`。**主板 ST 的比例和 302 前缀没有改**：动手后发现“主板 ST 自 2026-07-06 起 10%”在六个测试里被明确钉住（纸面执行、`live_policy`、板块规则），是有意写的规则，而本条依据的是 10 月 12 日一次只读测量（决定 0018 第 4 点），两者矛盾，owner 主机又连不上、没法再读一次；这条规则进 `live_policy` 的兜底判断，不凭一次没法复核的测量去翻。主机恢复后先跑只读探针 `docs/work/probes/2026-10-14-st-limit-band.py`（主板 ST 自 5 月起每月存下的涨跌停比例，按日线来源和涨跌停表的来源分组；302 开头代码的比例），再定改不改、从哪天起。9 月 30 日那 143 只的错值重算也等这个结论
+- updated: 2026-10-14
 
 ### B010 日线表里周末日期的行
 
@@ -184,7 +185,8 @@
 - how: 在导入处加量级校验，不合理就拒绝并说明
 - who: agent
 - needs: 无
-- updated: 2026-10-13
+- note1: 2026-10-14 代码改了：`validate_pack` 对名字里带 `amount` 的参数（`amount_mult` 除外，区间型逐个）要求是 1e6 到 1e12 之间的数，否则报“不是以元计的金额”。提交 3d2e6a8b，合进 main c5da5fa0（2026-10-14 11:10），还没发布；发布路径测试 `Ran 3129 tests in 42.675s OK (skipped=2)`。发布后导入下一份复盘包时即生效，再关
+- updated: 2026-10-14
 
 
 ### B029 22 个通达信探索分支的归档
@@ -215,7 +217,8 @@
 - how: 在分层策略里给这两条流加规则（并行快照不参与当日实时计算，可按 20 个交易日转冷或更短），按该文件的测试和 `docs/OWNER_DATABASE_STORAGE.md` 的流程走；属于 W008 的范围，可随它的分支一起做
 - who: agent
 - needs: 无
-- updated: 2026-10-13
+- note1: 2026-10-14 代码改了：`storage_tiering_policy.RULES` 加了 `a_share_minute_cross_section_shadow` 和 `all_a_snapshot_source_agreement`，热 20 个交易日。提交 3d2e6a8b，合进 main c5da5fa0（2026-10-14 11:10），还没发布；发布路径测试 `Ran 3129 tests in 42.675s OK (skipped=2)`。发布后读 `/api/v1/research/storage-tiering` 确认两条规则在，再关；`docs/OWNER_DATABASE_STORAGE.md` 没有逐条列流，未改
+- updated: 2026-10-14
 
 ### B021 控制台提速方案的现状要对账
 
@@ -259,13 +262,15 @@
 
 ### B025 `scripts/test_runtime_hosts.py` 在主线上失败
 
-- state: open
+- state: done
 - kind: defect
 - why: 另一个会话的改动（s2-gateway-tunnel）引起，10 月 12 日起每次跑 `pytest scripts` 都有这 1 个失败；不是本线工作造成的，但会让人误判
 - how: 属于那个会话的工作；这里只提醒：`pytest scripts` 的基线是 1 failed
 - who: 改动的所有者
 - needs: 无
-- updated: 2026-10-13
+- note1: 2026-10-14 与 B035 是同一件事，已随它修掉（main c5da5fa0）
+- result: 2026-10-14 与 B035 同一件事，随提交 3d2e6a8b 修掉
+- updated: 2026-10-14
 
 ### B026 两份旧方案的现状要对账
 
@@ -299,14 +304,16 @@
 
 ### B035 `scripts/test_runtime_hosts.py` 有一项失败：supervisor 任务 `s2-gateway-tunnel` 没有主机归属
 
-- state: open
+- state: done
 - kind: defect
 - why: 提交前要过的脚本测试（`python3 -m pytest scripts -q`）因此有 1 项失败，后面真正的失败容易被当成“已知的那一项”放过。失败信息：`supervisor task s2-gateway-tunnel is not classified in hosts[workstation].supervisor_tasks; say whether it writes to the owner, reads it, talks to the edge or stays local`。来自提交 9c70389d（2026-10-12，另一条工作线给 supervisor 加了 S2 网关隧道），在已发布的 26170231 的干净检出里同样失败，与 W006、W008 的改动无关
 - how: 在主机登记表里给 `s2-gateway-tunnel` 填上归属（写 owner、读 owner、连 edge 还是只在本机），由加这个任务的那条工作线来填：它连到哪里只有那边清楚。验收：`/Users/papa/.venvs/svc/bin/python -m pytest scripts/test_runtime_hosts.py -q` 全过
 - who: 加这个任务的会话（主检出里 `scripts/svc_supervisor.py` 还有那边未提交的修改，本会话没有动）
 - needs: none
 - found: 2026-10-13，W008 派工 4 的实现者跑脚本测试时报出，主会话在主检出和发布检出 `/Users/papa/codebase/.codex-wt/n8n-release-26170231` 各复现一次（1 failed, 8 passed）
-- updated: 2026-10-13
+- note1: 2026-10-14 改了：`config/components.json` 里把 `s2-gateway-tunnel` 登记为 `tunnel`（它在 `scripts/svc_supervisor.py:111-117` 是一条到 edge 的 SSH 转发，与 `feishu-tunnel` 同形；这是按代码读出来的，没有问加它的那条工作线）。提交 3d2e6a8b，合进 main c5da5fa0；`python -m pytest scripts -q` → `380 passed, 3 skipped`，不再有“已知的那一项失败”
+- result: 2026-10-14 `config/components.json` 把 `s2-gateway-tunnel` 登记为 `tunnel`，提交 3d2e6a8b（main c5da5fa0）；`python -m pytest scripts -q` → `380 passed, 3 skipped`
+- updated: 2026-10-14
 
 ### B036 短线来财：9 路打板战法 + 八阵图 8 槽登记进试验台
 
@@ -410,7 +417,8 @@
 - who: agent
 - needs: none
 - found: 2026-10-13
-- updated: 2026-10-13
+- note1: 2026-10-14 全量发布加了构建前的内存检查（可用内存不足 700 MB 就拒绝，`RELEASE_ALLOW_BUILD_ON_HOST=1` 放行；main 556a9a2c，见 W012 的 Log）。主机 10 月 14 日盘中没有应答（B058），原因未定；恢复后要量的见 B058
+- updated: 2026-10-14
 
 ### B045 空的涨停榜被存成两行并计为“格式不对”
 
@@ -421,7 +429,8 @@
 - who: agent
 - needs: none
 - found: 2026-10-13（`docs/work/probes/2026-10-13-high-board-rows.py` 与 `.out.txt`）
-- updated: 2026-10-13
+- note1: 2026-10-14 代码改了：`_info_rows` 把“空列表加一个附带元素”认作空榜，测试用了这个形状。提交 3d2e6a8b，合进 main c5da5fa0（2026-10-14 11:10），还没发布；发布路径测试 `Ran 3129 tests in 42.675s OK (skipped=2)`。发布后看一个有空榜的交易日的读数里 `coverage.malformed` 是不是 0，再关
+- updated: 2026-10-14
 
 ### B046 W010 的探测 P0-8：富文本和卡片转发读回的样子
 
