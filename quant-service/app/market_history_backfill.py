@@ -86,10 +86,15 @@ def _payload(response: Any) -> dict[str, Any]:
 
 
 def _info_rows(payload: dict[str, Any]) -> list[Any]:
-    """Longhu lists: ``info`` is either the row list or [row list, extras...]."""
+    """Longhu lists: ``info`` is either the row list or [row list, extras...].
+
+    An empty list comes as ``[[], "<text>"]``: an empty row list and an extra, not two rows.
+    """
     info = payload.get("info")
     if isinstance(info, list) and info and isinstance(info[0], list) and info[0] and isinstance(info[0][0], list):
         return list(info[0])
+    if isinstance(info, list) and info and info[0] == [] and not any(isinstance(item, list) and item for item in info):
+        return []
     return list(info) if isinstance(info, list) else []
 
 

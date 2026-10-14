@@ -87,6 +87,18 @@ class PackValidationTests(unittest.TestCase):
         self.assertTrue(any("unknown playbook free_form_code" in item for item in problems))
         self.assertTrue(any("evidence" in item for item in problems))
 
+    def test_an_amount_that_is_not_in_yuan_is_refused(self):
+        for wrong in (7100, 0.71, "71000000", None, True):   # 万元, 亿元, text, missing, a flag
+            pack = load_pack()
+            params = next(stock["params"] for stock in pack["stocks"] if "auction_amount_min" in stock["params"])
+            params["auction_amount_min"] = wrong
+            with self.subTest(wrong=wrong):
+                self.assertTrue(any("auction_amount_min" in item and "yuan" in item for item in validate_pack(pack)))
+        pack = load_pack()
+        ranged = next(stock["params"] for stock in pack["stocks"] if "entry_amount_range" in stock["params"])
+        ranged["entry_amount_range"] = [3.0, 5.0]
+        self.assertEqual(sum("entry_amount_range" in item for item in validate_pack(pack)), 2)
+
 
 class PlanTests(unittest.TestCase):
     def test_longhu_kline_payload_is_normalized_oldest_first(self):

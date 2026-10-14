@@ -245,6 +245,7 @@
         "feishu-tunnel": "tunnel",
         "xhs-edge-tunnel": "tunnel",
         "paper-kb-webhook-tunnel": "tunnel",
+        "s2-gateway-tunnel": "tunnel",
         "xhs-ai-worker": "edge-client",
         "itougu-table-watch": "local",
         "model-service": "local", "service-index": "local",

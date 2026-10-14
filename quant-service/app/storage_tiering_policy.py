@@ -54,6 +54,10 @@ RULES: tuple[TierRule, ...] = (
                          "a_share_skyrocket_list", "ths_index_prices_snapshot", "a_share_valuations_snapshot",
                          "limit_pool_broken", "news_flash", "limit_performance_live", "limit_performance_history",
                          "auction_pool_snapshot", "auction_curve_daily", "auction_bid_daily")),
+    # W008: the TDX snapshot taken beside the main one (about 0.58 MB a minute, 150 MB a session) and the rows that
+    # compare the two sources. Same-day reads only: the day's summary and the fallback read the current session.
+    TierRule(*_RAW, "a_share_minute_cross_section_shadow", HOT_SESSIONS, False, "TDX all-A snapshot taken beside the main source"),
+    TierRule(*_RAW, "all_a_snapshot_source_agreement", HOT_SESSIONS, False, "per-minute agreement of the two snapshot sources"),
     TierRule("quant.intraday_quote_observations", "quant.intraday_quote_observations_cold", "observed_at", None,
              HOT_SESSIONS, False, "sampled full quote evidence per watched stock"),
     TierRule("quant.intraday_rule_input_snapshots", "quant.intraday_rule_input_snapshots_cold", "observed_at", None,

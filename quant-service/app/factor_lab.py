@@ -8,11 +8,12 @@ later be checked with AlphaLens, Qlib, LEAN, or a GPU research worker.
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import Any
 
-from .market_rules import a_share_limit_ratio
+from .market_rules import a_share_limit_prices, a_share_limit_ratio
 from .point_in_time_status import pit_st_sql
 from .owner_storage import eligible_cold_tables, tiered_relation_sql
 from .research_prices import adjusted_value
@@ -324,9 +325,9 @@ def run_multi_factor_strategy(connection: Any, universe_key: str, start_date: da
             exit_pre_close = value(exit_bar.get("pre_close"))
             ratio = a_share_limit_ratio(symbol, bool(entry_bar.get("is_st")), entry_bar.get("trading_date"))
             if limit_up is None and entry_pre_close is not None:
-                limit_up = round(entry_pre_close * (1 + ratio), 2)
+                limit_up = float(a_share_limit_prices(symbol, Decimal(str(entry_pre_close)), ratio)[0])
             if limit_down is None and exit_pre_close is not None:
-                limit_down = round(exit_pre_close * (1 - ratio), 2)
+                limit_down = float(a_share_limit_prices(symbol, Decimal(str(exit_pre_close)), ratio)[1])
             blocked = blocked or (limit_up is not None and entry is not None and entry >= limit_up)
             blocked = blocked or (limit_down is not None and exit_price is not None and exit_price <= limit_down)
             if blocked or entry is None or exit_price is None or not entry:

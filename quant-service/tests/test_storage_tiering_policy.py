@@ -23,6 +23,9 @@ class StorageTieringPolicyTests(unittest.TestCase):
             {rule.capability for rule in RULES} & {"limit_performance_live", "limit_performance_history"},
             {"limit_performance_live", "limit_performance_history"},
         )
+        # A stream no rule names stays in the hot database for good: the TDX snapshot is 150 MB a session.
+        from app.tdx_shadow_snapshot_runtime import AGREEMENT_CAPABILITY, SHADOW_CAPABILITY
+        self.assertLessEqual({SHADOW_CAPABILITY, AGREEMENT_CAPABILITY}, set(capabilities))
 
     def test_status_reports_tier_usage_and_twin_presence(self):
         class Result:
