@@ -6,7 +6,7 @@
 - plan: docs/OWNER_HOST_SWITCH.md
 - branch: main
 - head: 9e32ca21
-- next: 等用户回答 Waiting on the user 的三项；然后写步骤文档并在新主机上分步预备（不启动任何会和 edge 同时消费的服务）
+- next: 预备只做不启动服务的部分（镜像包、venv、状态快照到新主机的暂存目录），写步骤文档；切换在 2026-10-15 收盘后（15:10 起），不早于此。对方的约定见 Log 22:2x
 - updated: 2026-10-14
 
 ## Requirements
@@ -40,9 +40,11 @@
 - 2026-10-14 17:5x 由此得出的四个技术问题：(1) rootless Docker 里 `network_mode: host` 是 rootlesskit 的网络命名空间，不是宿主的，所以 compose 里写的 `127.0.0.1:15682`、`127.0.0.1:5432` 在新主机上要重做（端口映射 + 同一个 compose 网络或 host-gateway），不能原样搬；(2) 没有 root 就装不了 Postgres 包、nginx 站点、tailscale；Postgres 只能用容器，但 Hub 不可达，镜像得在 edge 上 `docker save` 再传过去（edge 上的 Postgres 是 apt 包，没有现成镜像）或用国内镜像；(3) bridge 和 itougu 是宿主 Python 进程，可以用 `systemd --user` 跑，venv 可以整个拷过去（同为 Ubuntu 24.04、Python 3.12）；(4) 两边同时消费同一个飞书会话/同一个机器人，会重复或互相踢，所以切换必须先停 edge 再起新主机。
 - 2026-10-14 17:5x 和仓库规矩的冲突：`AGENTS.md` 规定 edge 与 owner 是独立发布单元，edge 的脚本正文不出现 owner 地址，`test_release_unit_isolation.py` 用 `OWNER_MARKERS` 守这一点；edge 搬到 owner 主机后，edge 的热发布脚本的目标地址就是 owner 地址。需要先改规矩（决策记录）和测试，不能只改地址。另外：10 月 14 日上午 owner 旧主机失去响应（B058）时，飞书中继会跟着一起停，这正是当初分开放的理由。
 - 2026-10-14 17:5x 关于值：配置文件的值我没有打印，也不会写进对话或仓库；核对用的是键名、是否为空、长度和是否含本机地址（探针脚本 `docs/work/probes/2026-10-14-edge47-config-shapes.py`）。搬运打算用 `ssh edge 'cat 文件' | ssh 新主机 'cat > 文件; chmod 600'` 的管道，不落在工作站磁盘上。`config/secrets/` 的规矩（只用 `sync-secrets.sh`、不手工拷 env 文件）管的是仓库托管的那些；这几个 `/etc/*.env` 不在 `config/secrets/` 里，是 edge 自己的，所以走主机间管道，这一点请用户确认。
+- 2026-10-14 22:2x 条件变化（用户转来对方的说明）：新主机 stockpeer 已开免密 sudo，所以第一项阻塞（要 root）解除；对方明确要求 edge 等 10 月 15 日收盘后再搬进来（明天是新量化机第一次实盘验证），交易时段 09:15–15:10 不重启 Docker、不升级系统软件、不重启机器，动 nginx 前先说一声，对外开端口或加域名要找他们在控制台或 Cloudflare 上做，edge 的容器要设内存上限（新机 8 GB，量化开盘约 1.6 GB）。其余三个技术问题（rootless 网络、Hub 不可达、同时消费）不变。
+- 2026-10-14 22:3x 密钥：新主机 authorized_keys 里 `stockpeer-self-tunnel`、`quant-edge-to-owner` 已改成只许端口转发（详见 W014 Log 22:3x）。
 
 ## Waiting on the user
-- [ ] 2026-10-14 17:5x 新主机 stockpeer 要 root：装 `python3-venv`（或我整套拷 edge 的 venv 就不用）、Postgres（或走容器）、tailscale 入网、nginx 站点。为什么等：`sudo` 要密码，我没有。之后：给出一次性命令清单由用户执行，或用户把 sudo 免密给 stockpeer。
+- [x] 2026-10-14 17:5x 新主机 stockpeer 要 root：装 `python3-venv`（或我整套拷 edge 的 venv 就不用）、Postgres（或走容器）、tailscale 入网、nginx 站点。为什么等：`sudo` 要密码，我没有。 → 用户 22:2x 告知已开免密 sudo（对方 `/etc/sudoers.d/90-stockpeer`，2026-10-14）
 - [ ] 2026-10-14 17:5x 数据库方案：n8n_relay 库 2.4 GB 搬法。选项：只搬业务表（不含 `execution_data` 1.5 GB 的历史执行）进新主机上的 Postgres 容器（镜像从 edge `docker save` 过去）。为什么等：丢不丢执行历史、要不要保留 baidu 归档队列 878 MB 是用户的取舍。
 - [ ] 2026-10-14 17:5x 同机共用的风险是否接受，以及切换时刻：owner 与飞书中继同机后，owner 主机故障会同时带走中继；切换会有几分钟两边都不消费。为什么等：需要用户定。之后：写决策记录、改 `OWNER_MARKERS` 与 edge 脚本的主机默认值。
 
