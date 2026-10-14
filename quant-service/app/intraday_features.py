@@ -206,6 +206,12 @@ def annotate_flow_snapshot_provenance(
     the way into a signal's persisted evidence.  A direct watch quote may
     refresh price independently, but it does not make its inherited flow
     proxy fresh.
+
+    A snapshot also says whether its source is decision eligible.  The cache puts its own
+    ``status`` and age over the supplier's, so a minute the fallback filled reads ``fresh``
+    here: eligibility is taken from ``decision_eligible`` and never inferred from ``status``.
+    A status that carries the flag must carry ``True``; one without the key predates the flag
+    and is judged on freshness and scope alone.
     """
     status = str(snapshot_status.get("status") or "unknown")
     try:
@@ -220,6 +226,7 @@ def annotate_flow_snapshot_provenance(
     decision_eligible = (
         cross_sectional and status in {"fresh", "cached"}
         and age is not None and age <= max_age_seconds
+        and snapshot_status.get("decision_eligible", True) is True
     )
     provenance = {
         "status": status,

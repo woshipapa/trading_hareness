@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
+from .intraday_derived_flow_metrics import DERIVED_FLOW_LABELS
 from .platform.evidence_contracts import materialize_evidence_status
 from .intraday_price_priority import fresh_price_rows
 
@@ -184,7 +185,7 @@ async def _apply_derived_flow_metrics(
     sources = dependencies.apply_derived_flow_metrics(quotes, derived)
     divergence = dependencies.derived_flow_divergence(quotes, derived)
     field_counts = {
-        field: sum(1 for labels in sources.values() if labels.get(field) in {"fuyao_ths_derived", "longhuvip_volume_derived"})
+        field: sum(1 for labels in sources.values() if labels.get(field) in DERIVED_FLOW_LABELS)
         for field in ("volume_ratio", "turnover_rate")
     }
     return materialize_evidence_status(
@@ -270,6 +271,13 @@ async def capture_watch_quotes(
     except timeout_or_all_a_errors as error:
         detail = dependencies.safe_error(str(error), 300)
         all_a_rows, all_a_snapshot_status = [], {"status": "unavailable", "error": detail}
+    # The evidence contract's ``decision_eligible`` says the snapshot's price is no decision
+    # quote, and overwrites the key.  What the snapshot itself said about its source is kept
+    # apart for the flow annotation; a status without the key (no snapshot) stays without it.
+    all_a_flow_eligibility = (
+        {"decision_eligible": all_a_snapshot_status["decision_eligible"]}
+        if "decision_eligible" in all_a_snapshot_status else {}
+    )
     all_a_snapshot_status = materialize_evidence_status("fuyao_all_a_snapshot", all_a_snapshot_status)
     quotes = {item["symbol"]: item for row in all_a_rows if (item := dependencies.quote_from_all_a(row)) is not None}
     eastmoney_watch_flow_rows: list[dict[str, Any]] = []
@@ -290,7 +298,10 @@ async def capture_watch_quotes(
         )
     if all_a_rows and all_a_snapshot_status.get("cross_sectional", True):
         dependencies.annotate_percentiles(quotes)
-    dependencies.annotate_flow_provenance(quotes, all_a_snapshot_status)
+    dependencies.annotate_flow_provenance(quotes, {
+        **{key: value for key, value in all_a_snapshot_status.items() if key != "decision_eligible"},
+        **all_a_flow_eligibility,
+    })
     if eastmoney_watch_flow_rows:
         dependencies.merge_eastmoney_flows(quotes, eastmoney_watch_flow_rows)
         eastmoney_quotes = {

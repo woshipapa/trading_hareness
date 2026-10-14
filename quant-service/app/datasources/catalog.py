@@ -891,24 +891,42 @@ LEGACY_SOURCE_KEYS: Final[frozenset[str]] = frozenset({
 })
 
 
+def binding_decision_eligible(source: str, capability: str, bindings: tuple[Binding, ...] = BINDINGS) -> bool:
+    """Whether ``source`` has a decision-eligible binding for ``capability``; no binding is not eligible."""
+    return any(item.decision_eligible for item in bindings
+               if item.source == source and item.capability == capability)
+
+
+def _labels(bindings: tuple[Binding, ...]) -> tuple[SourceLabel, ...]:
+    """The provenance labels, with every property that follows a binding read from ``bindings``."""
+    return (
+        SourceLabel("tencent_batched_watch_quote", "tencent_free", "quote.watch_snapshot", exchange_timestamped=True),
+        SourceLabel("longhuvip_watch_quote", "longhuvip", "quote.watch_snapshot", exchange_timestamped=True,
+                    notes="作为量能标签暂不进规则：9-15 原生量比与腾讯中位比 0.994，但 9-16/17 有腾讯盘口派生值"
+                          "混入 longhuvip 行（量比≈0.03），报价合并路径查清前保持 rule_usable_flow=False"),
+        SourceLabel("longhuvip_volume_derived", "longhuvip", "quote.watch_snapshot",
+                    notes="持牌成交量 + 本地流通股推算；同上待查"),
+        SourceLabel("sina_batched_watch_quote", "sina_free", "quote.watch_snapshot", notes="无交易所时间戳契约"),
+        SourceLabel("fuyao_ths_all_a_snapshot", "fuyao_ths", "quote.all_a_snapshot", notes="横截面快照，非逐票交易所时间戳"),
+        SourceLabel("akshare_tencent_all_a_snapshot", "akshare", "quote.all_a_snapshot", notes="腾讯公开横截面，日期推断且无逐票交易所时间戳"),
+        SourceLabel("fuyao_ths_derived", "fuyao_ths", "quote.all_a_snapshot", rule_usable_flow=True,
+                    notes="全 A 快照成交量 + 本地流通股推算的量比/换手，横截面口径"),
+        SourceLabel("tdx_public_all_a_snapshot", "tdx_public", "quote.all_a_snapshot",
+                    notes="主源失败时补位的横截面快照；无上游时间戳，非逐票交易所时间戳"),
+        # The filler's derived flow may feed a rule exactly when its binding is decision eligible:
+        # the operator act that marks the binding eligible is the only switch.
+        SourceLabel("tdx_public_derived", "tdx_public", "quote.all_a_snapshot",
+                    rule_usable_flow=binding_decision_eligible("tdx_public", "quote.all_a_snapshot", bindings),
+                    notes="补位快照成交量 + 本地流通股推算的量比/换手；是否进规则取决于该 binding 的 decision_eligible"),
+        SourceLabel("eastmoney_watch_flow", "eastmoney_free", "flow.watch_intraday", notes="观察池篮子，非横截面，仅研究"),
+        SourceLabel("longhuvip_main_net", "longhuvip_composite", "flow.stock_daily"),
+        SourceLabel("moneyflow_dc", "tushare_super_get", "flow.stock_daily"),
+    )
+
+
 #: Provenance labels stored on quotes and flow fields.  Rules test these
 #: properties instead of comparing vendor strings.
-SOURCE_LABELS: Final[dict[str, SourceLabel]] = {label.label: label for label in (
-    SourceLabel("tencent_batched_watch_quote", "tencent_free", "quote.watch_snapshot", exchange_timestamped=True),
-    SourceLabel("longhuvip_watch_quote", "longhuvip", "quote.watch_snapshot", exchange_timestamped=True,
-                notes="作为量能标签暂不进规则：9-15 原生量比与腾讯中位比 0.994，但 9-16/17 有腾讯盘口派生值"
-                      "混入 longhuvip 行（量比≈0.03），报价合并路径查清前保持 rule_usable_flow=False"),
-    SourceLabel("longhuvip_volume_derived", "longhuvip", "quote.watch_snapshot",
-                notes="持牌成交量 + 本地流通股推算；同上待查"),
-    SourceLabel("sina_batched_watch_quote", "sina_free", "quote.watch_snapshot", notes="无交易所时间戳契约"),
-    SourceLabel("fuyao_ths_all_a_snapshot", "fuyao_ths", "quote.all_a_snapshot", notes="横截面快照，非逐票交易所时间戳"),
-    SourceLabel("akshare_tencent_all_a_snapshot", "akshare", "quote.all_a_snapshot", notes="腾讯公开横截面，日期推断且无逐票交易所时间戳"),
-    SourceLabel("fuyao_ths_derived", "fuyao_ths", "quote.all_a_snapshot", rule_usable_flow=True,
-                notes="全 A 快照成交量 + 本地流通股推算的量比/换手，横截面口径"),
-    SourceLabel("eastmoney_watch_flow", "eastmoney_free", "flow.watch_intraday", notes="观察池篮子，非横截面，仅研究"),
-    SourceLabel("longhuvip_main_net", "longhuvip_composite", "flow.stock_daily"),
-    SourceLabel("moneyflow_dc", "tushare_super_get", "flow.stock_daily"),
-)}
+SOURCE_LABELS: Final[dict[str, SourceLabel]] = {label.label: label for label in _labels(BINDINGS)}
 EXCHANGE_TIMESTAMPED_QUOTE_LABELS: Final[frozenset[str]] = frozenset(
     label for label, item in SOURCE_LABELS.items() if item.exchange_timestamped)
 RULE_USABLE_FLOW_LABELS: Final[frozenset[str]] = frozenset(
@@ -1200,7 +1218,7 @@ def catalog_document() -> dict[str, Any]:
 __all__ = [
     "BINDINGS", "CAPABILITIES", "CATALOG_VERSION", "EXCHANGE_TIMESTAMPED_QUOTE_LABELS", "HEALTH_CAPABILITY_ALIASES", "NON_SECTOR_GROUPS",
     "NON_SECTOR_LABEL_PATTERN", "RULE_USABLE_FLOW_LABELS",
-    "SESSION_AGREEMENT_RULES", "SOURCES", "SOURCE_LABELS", "TAXONOMIES", "bindings_for", "capabilities_of", "catalog_document",
+    "SESSION_AGREEMENT_RULES", "SOURCES", "SOURCE_LABELS", "TAXONOMIES", "binding_decision_eligible", "bindings_for", "capabilities_of", "catalog_document",
     "evidence_locations", "health_capability", "primary_source", "primary_store_value", "store_values", "taxonomies_for",
     "validate_catalog",
 ]
