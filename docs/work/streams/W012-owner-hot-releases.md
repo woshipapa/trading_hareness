@@ -65,6 +65,7 @@
 - 2026-10-14 10:59 correction: 本会话上面两条最初写的时刻（10:40、12:10）是估的；已按提交时间改成 10:31、10:44。
 - 2026-10-14 11:14 用户 11:02 要求 owner 修好之前把现在能做的代码都做完。B 段里与主机无关、今天就有用的一项先做了：全量发布在构建镜像之前读主机的可用内存，不足 700 MB 就拒绝（退出码 7，此时什么都没改），放行要带 `RELEASE_ALLOW_BUILD_ON_HOST=1`（提交 599ee1e3，合进 main 556a9a2c；`python -m pytest scripts -q` → `382 passed, 3 skipped`，其中一条测试把这段检查拿出来对着假的 `/proc/meminfo` 实际执行）。700 这个数是主会话定的，方案没有给数；894 MB 的主机上它总是拒绝，这是有意的。B 段其余部分（主机目录树的不构建发布）没有开工：方案写明要等 A 段用过一阵、并先把第 2 轮审计的 11 条并进方案；切换脚本也只能在主机上演练。
 - 2026-10-14 11:17 主机恢复后做了 next 第 (1) 点的只读核对：主机上那两个脚本与 main 上的内容相同（FACTS F032）。所以这次发布可以用 `RELEASE_RELABELLED_CURRENT` 放行这两个脚本；`state/rel07.sh` 在每次运行时自己再比一遍。主机内存已是 3,499 MB（F030），全量发布的内存检查在它上面会通过。
+- 2026-10-14 11:42 A 段的第一次真实使用：用户执行 `state/rel07.sh`（检查，再 `--apply`），`owner-code-20261014-07`（`861ecbfa`）生效。检查模式的输出：两个登记跨线的脚本 `host copy is the commit's`、`schema: owner database 20261010_ow0121, release head 20261010_ow0121: at_head`、23 个运行时文件、其余为跳过，没有 `full`、`image`、`unclassified`。状态脚本 ALL CHECKS PASSED（`docs/work/probes/2026-10-14-release-status-07.out.txt`）。检查模式和发布的终端输出在用户的终端里，没有另存成文件；要点已抄在这里和发布表里。
 
 ## Waiting on the user
 

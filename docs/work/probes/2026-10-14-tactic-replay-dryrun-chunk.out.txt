@@ -1,0 +1,11 @@
+Mem:            3499         873        1767           2        1091        2625
+trading-hareness-peer-quant-research-scheduler-1 128.5MiB / 3.417GiB
+trading-hareness-peer-quant-research-1 132.1MiB / 3.417GiB
+trading-hareness-peer-db-tunnel-1 3.184MiB / 3.417GiB
+trading-hareness-peer-db-batch-tunnel-1 8.125MiB / 3.417GiB
+--- dry run of one replay chunk
+{"status": "completed", "slot": "close", "start": "2026-09-01", "end": "2026-09-28", "years": {"2026": {"days_built": 19, "rows": 1095, "skipped_days": 0, "disagreement_share": 0.0, "raw_basis_share": 0.0, "history_raw_basis_share": 0.0182648401826484}}, "days": 19, "rows": 1095, "replayed": true, "research_only": true, "live_effect": "none", "peak_rss_mb": 134}
+{"status": "completed", "slot": "auction", "start": "2026-09-01", "end": "2026-09-28", "years": {"2026": {"days_built": 0, "rows": 0, "skipped_days": 19, "disagreement_share": null, "raw_basis_share": null, "history_raw_basis_share": null}}, "days": 0, "rows": 0, "replayed": true, "research_only": true, "live_effect": "none", "peak_rss_mb": 67}
+seconds 3
+{"status": "completed", "slot": "close", "start": "2023-09-01", "end": "2023-09-28", "years": {"2023": {"days_built": 20, "rows": 576, "skipped_days": 0, "disagreement_share": 0.0, "raw_basis_share": 1.0, "history_raw_basis_share": 1.0}}, "days": 20, "rows": 576, "replayed": true, "research_only": true, "live_effect": "none", "peak_rss_mb": 85}
+seconds 12
