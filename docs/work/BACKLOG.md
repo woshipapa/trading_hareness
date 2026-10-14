@@ -784,6 +784,6 @@
 - how: 09:25 的表只知道开盘，所以表里的 `bucket` 仍是 `opens_at_limit`，没有改（竞价池、战法条件都读它）。已实现的跟踪汇总 `/api/v1/market/auction-desk/track` 在日线出来之后按当日最低价拆成 `opens_at_limit:one_word`（最低价在涨停价上：全天买不到，记现金 0 且不从样本里删）和 `opens_at_limit:reopened`（最低价低于涨停价：开板后可按涨停价买，保守规则仍不假设成交），每档带 `fill_rule`；没有最低价的日线留在合并档里。`gap_bucket` 的历史统计 `BUCKET_STATISTICS['opens_at_limit']`（n=754）是合并口径，没有改
 - who: agent
 - needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
-- result: 2026-10-14 提交 e3291702（本地 main，尚未推送、未发布）；`test_track_separates_a_board_that_stayed_one_word_from_one_that_reopened`；全套 3,240 条通过，输出 `docs/work/probes/2026-10-14-auction-bucket-split-release-path.out.txt`。还没有用真实读数看过两档各有多少只：发布后读 `/api/v1/market/auction-desk/track`
+- result: 2026-10-14 提交 e3291702（已推送到 origin/main，2026-10-14；未发布）；`test_track_separates_a_board_that_stayed_one_word_from_one_that_reopened`；全套 3,240 条通过，输出 `docs/work/probes/2026-10-14-auction-bucket-split-release-path.out.txt`。还没有用真实读数看过两档各有多少只：发布后读 `/api/v1/market/auction-desk/track`
 - updated: 2026-10-14
 
