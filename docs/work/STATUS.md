@@ -17,6 +17,7 @@
 | [W011](streams/W011-peer-evening-stages.md) | 每晚该跑的阶段由我们这一侧自己触发 | released | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | 10 月 14 日 16:50 核对第一次真正的当晚自动运行（见 Due）：用 `docs/work/probes/2026-10-14-peer-evening-receipts.py` 的做法查 10 月 14 日五个 `peer_` 回执和读数（把脚本里的日期改成 10 月 13、14 日另存一份），再看调度容器日志有没有“left open”。通过后把本记录改成 `verified`；连续两晚通过后删掉手工脚本 `state/lists13.sh` 那条 Due。 | 2026-10-14 |
 | [W012](streams/W012-owner-hot-releases.md) | owner 只用一套镜像，其余改动全部热部署 | building | Claude Code 会话 4a420907（新会话，接手 93ba6e1d），2026-10-14 | A 段已合进本地 main（86831925），随 W006 的发布一起到 owner（见 W006 的 Waiting on the user）。接着：(1) owner 主机恢复后（BACKLOG B058），发布之前只读核对主机上 `scripts/backfill-full-market-daily.sh` 和 `scripts/fill-longhu-sector-membership.py` 与目标提交的是否相同（`sha256sum ~/trading_hareness/scripts/<名字>` 对 `git show <sha>:scripts/<名字> \| shasum -a 256`）：这两个脚本的目录登记在本线改成了 `47owner`，分类会把它们报成 `full` 而拒绝纯代码发布。相同就照 `state/rel07.sh` 里已写好的 `RELEASE_RELABELLED_CURRENT` 放行；不同就告诉用户（要么手工把这两个文件拷上主机，要么做一次全量发布，后者要在 894 MB 的主机上构建镜像），并把 `rel07.sh` 里那一行去掉。(2) 第一次用新规则的发布之后，把检查模式和发布的输出存进 `docs/work/probes/`，状态才改 `released`。(3) 回收工作区 `/Users/papa/codebase/.codex-wt/n8n-owner-hot-a`。(4) 之后才是 B 段（Steps 里的 1–4），先为它建分支。 | 2026-10-14 |
 | [W014](streams/W014-owner-host-switch.md) | owner 中转主机再换一台：做好切换的准备 | released | Claude Code 会话 d39e7e11（接手 4a420907），2026-10-14 | 核对一个完整交易日：10 月 15 日 09:25 的竞价处置表、两条分钟快照每分钟一份（`docs/work/probes/2026-10-14-session-capture-gaps.py` 改日期）、16:15 之后晚间阶段回执；跑 `docs/OWNER_HOST_SWITCH.md` 7.0（盘中每 10 分钟一次 `docker stats`，存进 `docs/work/probes/`）。通过后状态改 `verified`。旧主机 118.178.133.37 保持停止、Docker 屏蔽，不要解除。 | 2026-10-14 |
+| [W015](streams/W015-edge47-relay-to-owner-host.md) | edge47 上的 feishu-relay 和 itougu 迁到新 owner 主机 | proposed | Claude Code 会话 d39e7e11，2026-10-14 | 等用户回答 Waiting on the user 的三项；然后写步骤文档并在新主机上分步预备（不启动任何会和 edge 同时消费的服务） | 2026-10-14 |
 
 ## 等用户处理
 
@@ -24,6 +25,9 @@
 - W010 2026-10-13 在看板上试用七项功能并反馈；特别是会员期限：对真实目标群第一次“同步成员”后，老成员的开始日期是各自的入群日期、期限是默认的 1 个月，
 - W010 2026-10-13 擒龙群现在可以发到期提醒了：是否打开“每天自动审查”由用户决定（预览现在是 0 人；10-17、10-19 各有一人到期）。为什么等：打开后机器人会在客户群里 @ 人。
 - W010 2026-10-14 在看板上给一位续费的会员改日期并改写备注名、保存，然后看一眼飞书里这个人的备注名是否变了。为什么等：这是经线上接口的第一次真实写入，本会话不能代做。
+- W015 2026-10-14 17:5x 同机共用的风险是否接受，以及切换时刻：owner 与飞书中继同机后，owner 主机故障会同时带走中继；切换会有几分钟两边都不消费。为什么等：需要用户定。之后：写决策记录、改 `OWNER_MARKERS` 与 edge 脚本的主机默认值。
+- W015 2026-10-14 17:5x 数据库方案：n8n_relay 库 2.4 GB 搬法。选项：只搬业务表（不含 `execution_data` 1.5 GB 的历史执行）进新主机上的 Postgres 容器（镜像从 edge `docker save` 过去）。为什么等：丢不丢执行历史、要不要保留 baidu 归档队列 878 MB 是用户的取舍。
+- W015 2026-10-14 17:5x 新主机 stockpeer 要 root：装 `python3-venv`（或我整套拷 edge 的 venv 就不用）、Postgres（或走容器）、tailscale 入网、nginx 站点。为什么等：`sudo` 要密码，我没有。之后：给出一次性命令清单由用户执行，或用户把 sudo 免密给 stockpeer。
 - W014 2026-10-14 13:06 对方工作站上的库能承受多少并发连接（第 7.3 步要用）。为什么等：只有对方知道。之后：按这个数定两个容器的数据库线程和连接池上限。
 
 ## 到点要做
@@ -42,7 +46,7 @@
 
 ## 待办清单
 
-open 34, ready 17, doing 3, done 27, dropped 2
+open 34, ready 17, doing 3, waiting-user 1, done 27, dropped 2
 
 在做的、可以开工的、等用户处理的:
 
@@ -66,3 +70,4 @@ open 34, ready 17, doing 3, done 27, dropped 2
 - B076 (ready) 试验台的收益拆成“隔夜”和“盘中”，并给买入类加上“一字记 0 不删”的账
 - B077 (ready) 每晚把当天龙头选股和候选的分钟线落本机
 - B083 (ready) 新主机的 7.0：先量一个完整交易日
+- B084 (waiting-user) edge47 的 feishu-relay 和 itougu 迁到新 owner 主机

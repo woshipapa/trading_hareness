@@ -929,3 +929,13 @@
 - needs: 10 月 15 日交易日
 - updated: 2026-10-14
 
+### B084 edge47 的 feishu-relay 和 itougu 迁到新 owner 主机
+
+- state: waiting-user
+- kind: follow-up
+- why: 用户 2026-10-14 17:5x 要求；清点和阻塞（要 root、Hub 不可达、rootless 网络、同机共用的规矩）记在 W015
+- how: 见 `docs/work/streams/W015-edge47-relay-to-owner-host.md`
+- who: agent，切换步骤由用户确认
+- needs: 用户的三项决定（W015 Waiting on the user）
+- updated: 2026-10-14
+

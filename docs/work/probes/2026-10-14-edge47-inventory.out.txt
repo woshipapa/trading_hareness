@@ -1,0 +1,125 @@
+== host
+iZbp1dt12f48kec0fw5qwpZ
+2
+Mem:            3499        2714         221         143         983         784
+/dev/vda3        40G   26G   12G  70% /
+load average: 4.59, 4.03, 3.65
+== os
+Ubuntu 24.04.4 LTS
+x86_64
+== docker
+Docker version 29.1.3, build 29.1.3-0ubuntu3~24.04.2
+feishu-relay-edge-adapter	feishu-relay-edge-adapter:local	Up 6 hours (healthy)
+feishu-relay-edge-xhs	feishu-relay-edge-xhs:local	Up 5 days (healthy)
+feishu-relay-edge-n8n	docker.n8n.io/n8nio/n8n:2.33.7	Up 5 days (healthy)
+feishu-relay-edge-n8n-runners	n8nio/runners:2.33.7	Up 2 weeks
+== images (size)
+feishu-relay-edge-xhs:local	1.15GB
+feishu-relay-edge-adapter:local	319MB
+n8nio/runners:2.33.7	721MB
+docker.n8n.io/n8nio/n8n:2.33.7	2.47GB
+== docker disk
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          4         4         4.777GB   4.777GB (100%)
+Containers      4         4         66.73MB   0B (0%)
+Local Volumes   1         1         512.4MB   0B (0%)
+Build Cache     72        0         331.9MB   331.9MB
+== running services (relevant)
+avahi-daemon.service
+clash-verge-service.service
+codex-model-router.service
+derper.service
+fwupd.service
+itougu-neican.service
+larkagentx-group-relay.service
+mihomo-sg.service
+mihomo-singapore-aa.service
+mihomo-singapore-t.service
+mihomo.service
+nginx.service
+paper-s2-gateway.service
+postgresql@16-main.service
+quant-longhu-owner-tunnel.service
+redis-server.service
+stock-reports-import.service
+stock-reports.service
+sub2api.service
+switcheroo-control.service
+tailscaled-derp.service
+tailscaled.service
+tuned.service
+wpa_supplicant.service
+== timers
+stock-reports-import-watchdog.service
+sysstat-collect.service
+paper-sources.service
+sysstat-summary.service
+sub2api-system-log-retention.service
+paper-arxiv-rss.service
+itougu-perf-daily.service
+itougu-perf-weekly.service
+== listeners (public-facing)
+0.0.0.0:8787 users:(("python3",pid=2559972,fd=3))
+127.0.1.1:5432 users:(("postgres",pid=1353639,fd=7))
+100.98.179.101:44784 users:(("tailscaled",pid=1666897,fd=25))
+0.0.0.0:22 users:(("sshd",pid=2560008,fd=3),("systemd",pid=1,fd=256))
+127.0.0.54:53 users:(("systemd-resolve",pid=2560001,fd=17))
+172.17.0.1:17896 users:(("python3",pid=3321086,fd=3))
+0.0.0.0:18081 users:(("nginx",pid=2560024,fd=6),("nginx",pid=823455,fd=6),("nginx",pid=823454,fd=6))
+0.0.0.0:18301 users:(("nginx",pid=2560024,fd=5),("nginx",pid=823455,fd=5),("nginx",pid=823454,fd=5))
+127.0.0.53%lo:53 users:(("systemd-resolve",pid=2560001,fd=15))
+0.0.0.0:62848 users:(("tailscaled",pid=2400610,fd=18))
+*:80 users:(("derper",pid=2400637,fd=8))
+[::]:22 users:(("sshd",pid=2560008,fd=4),("systemd",pid=1,fd=257))
+[fd7a:115c:a1e0::4a39:b366]:48667 users:(("tailscaled",pid=1666897,fd=29))
+*:443 users:(("derper",pid=2400637,fd=3))
+*:5680 users:(("ld-musl-x86_64.",pid=713023,fd=6))
+*:7892 users:(("verge-mihomo",pid=875,fd=16))
+*:7893 users:(("verge-mihomo",pid=875,fd=12))
+*:7895 users:(("verge-mihomo",pid=875,fd=14))
+*:7890 users:(("verge-mihomo",pid=875,fd=9))
+*:7891 users:(("verge-mihomo",pid=875,fd=10))
+== listeners (loopback, non-ssh)
+127.0.0.1:15678 127.0.0.1:15682 127.0.0.1:18082 127.0.0.1:18083 127.0.0.1:18084 127.0.0.1:18300 127.0.0.1:18790 127.0.0.1:18791 127.0.0.1:37669 127.0.0.1:5432 127.0.0.1:5678 127.0.0.1:5679 127.0.0.1:6379 127.0.0.1:7896 127.0.0.1:8090 127.0.0.1:9090 127.0.0.1:9096 127.0.0.1:9198 127.0.0.1:9199 
+== opt and etc dirs
+/etc/feishu-relay-edge
+/etc/quant-intraday-edge
+/etc/quant-intraday-edge.env
+/etc/quant-intraday-edge.env.bak.dailybar-20260902T160210Z
+/etc/quant-intraday-edge.release.env
+/opt/codex-model-router
+/opt/containerd
+/opt/feishu-relay-edge
+/opt/itougu-neican
+/opt/larkagentx
+/opt/paper-arxiv-edge
+/opt/quant-intraday-edge
+/opt/stock-reports
+/opt/sub2api
+/opt/supervisor
+== sizes
+12K	/opt/containerd
+80K	/opt/codex-model-router
+1.4M	/opt/itougu-neican
+19M	/opt/larkagentx
+99M	/opt/supervisor
+170M	/opt/feishu-relay-edge
+186M	/opt/paper-arxiv-edge
+561M	/opt/sub2api
+876M	/opt/quant-intraday-edge
+3.8G	/opt/stock-reports
+== cron
+e2scrub_all
+sysstat
+== nginx
+/etc/nginx/conf.d:
+feishu-relay-dashboard.conf
+stock-reports.conf
+stock-reports.conf.backup-20260811T161732Z
+stock-reports.conf.backup-media-routing-20260914-204904
+stock-reports.conf.backup-media-text-20260914-125636
+
+/etc/nginx/sites-enabled:
+    listen 0.0.0.0:18081 ssl;
+    listen 0.0.0.0:18301;
+    server_name _;

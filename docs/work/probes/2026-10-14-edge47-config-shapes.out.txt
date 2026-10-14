@@ -1,0 +1,171 @@
+--- /etc/feishu-relay-edge/runtime.env (4019 B, mode 640)
+  FEISHU_SUMMARY_LISTENER_ENABLED                  flag false
+  APP_GIT_SHA                                      len=40
+  APP_RELEASE                                      len=48
+  APP_BUILD_CREATED_AT                             len=20
+  WECHAT_GROUP_RELAY_ENABLED                       flag true
+  WECHAT_GROUP_RELAY_SOURCE_KEY                    len=14  [secret]
+  WECHAT_GROUP_RELAY_SOURCE_CHAT_ID                len=20
+  WECHAT_GROUP_RELAY_ROUTE_TAG                     len=7
+  WECHAT_GROUP_RELAY_ENDPOINT_TOKEN                EMPTY
+  BAIDU_PAN_ENABLED                                flag true
+  BAIDU_PAN_REDIRECT_URI                           url http://localhost:8080  [LOCAL-ADDR:localhost]
+  BAIDU_PAN_ARCHIVE_PROVIDER                       len=4
+  BAIDU_PAN_MARKET_ARCHIVE_ENABLED                 flag true
+  BAIDU_PAN_MARKET_ARCHIVE_INTERVAL_SECONDS        len=2
+  BAIDU_PAN_MARKET_ARCHIVE_ROOT_PATH               path /apps/股票paper存储/market-realtime
+  FEISHU_RELAY_WRITER_ID                           len=13
+  BAIDU_PAN_RAW_OVERFLOW_ENABLED                   flag true
+  BAIDU_PAN_RAW_OVERFLOW_CAPABILITIES              len=90
+  BAIDU_PAN_RAW_OVERFLOW_ROOT_PATH                 path /apps/股票paper存储/quant-lake/v1/raw-overflow
+  BAIDU_PAN_RAW_OVERFLOW_BATCH_ROWS                len=3
+  BAIDU_PAN_RAW_OVERFLOW_BATCHES_PER_DRAIN         len=2
+  QUANT_SERVICE_URL                                url http://127.0.0.1:15682  [LOCAL-ADDR:127.0.0.1]
+  FEISHU_GROUP_RELAY_INTERVAL_SECONDS              len=2
+  FEISHU_SUMMARY_LISTENER_INTERVAL_SECONDS         len=2
+  FEISHU_GROUP_RELAY_RECONCILE_SECONDS             len=5
+  FEISHU_GROUP_RELAY_RECONCILE_LOOKBACK_SECONDS    len=5
+  FEISHU_GROUP_RELAY_WEBHOOKS                      len=471
+  FEISHU_GROUP_RELAY_ENABLED                       flag false
+  LARKX_GROUP_RELAY_ENABLED                        flag true
+  LARKX_GROUP_RELAY_ROUTES                         len=702
+  FEISHU_GROUP_RELAY_WEBHOOK_KEYWORDS              len=166  [secret]
+  FEISHU_ADAPTER_HOTFIX_ENABLED                    flag true
+  FEISHU_ADAPTER_HOTFIX_DIR                        path /opt/feishu-relay-edge/hotfix
+  LARKX_OFFICIAL_FALLBACK_ENABLED                  flag false
+  LARKX_CARD_BACKFILL_ENABLED                      flag true
+  LARKX_DYNAMIC_ROUTE_DISCOVERY                    flag true
+  LARKX_CARD_BACKFILL_TAGS                         len=3
+  LARKX_PAPER_KB_COMMANDS_ENABLED                  flag true
+  PAPER_KB_FEISHU_CHAT_ID                          len=35
+  PAPER_KB_INGEST_WEBHOOK                          url http://127.0.0.1:15678  [LOCAL-ADDR:127.0.0.1]
+  PAPER_KB_SEARCH_WEBHOOK                          url http://127.0.0.1:15678  [LOCAL-ADDR:127.0.0.1]
+  PAPER_KB_FEEDBACK_WEBHOOK                        url http://127.0.0.1:15678  [LOCAL-ADDR:127.0.0.1]
+  XHS_COOKIE_FILE                                  path /etc/feishu-relay-edge/xhs-cookie  [secret]
+  XHS_KEYWORDS                                     len=32  [secret]
+  XHS_FETCH_LIMIT                                  len=1
+  LARKX_XHS_COMMANDS_ENABLED                       flag true
+  LARKX_XHS_COMMAND_CHAT_IDS                       len=55
+  XHS_SOURCE_GIT_SHA                               len=40
+  XHS_SOURCE_TREE_SHA256                           len=64
+  XHS_INTEL_TREE_SHA256                            len=64
+  XHS_WORKFLOW_SHA256                              len=64
+  XHS_RECOMMEND_FETCH_LIMIT                        len=2
+  XHS_RECOMMEND_CATEGORY                           len=18
+  XHS_HOTFIX_ENABLED                               flag true
+  XHS_HOTFIX_DIR                                   path /opt/feishu-relay-edge/hotfix-xhs
+--- /etc/larkagentx-group-relay.env (2747 B, mode 640)
+  LARKX_HOME                                       path /var/lib/larkagentx
+  LARKX_BRIDGE_TOKEN                               len=43  [secret]
+  LARKX_INGRESS_URL                                url http://127.0.0.1:18300  [LOCAL-ADDR:127.0.0.1]
+  LARKX_LISTEN_CHAT_IDS                            len=427
+  LARKX_SEND_CHAT_IDS                              len=355
+  LARKX_SOURCE_LABEL                               len=22
+  NO_PROXY                                         len=19  [LOCAL-ADDR:127.0.0.1,localhost]
+  no_proxy                                         len=19  [LOCAL-ADDR:127.0.0.1,localhost]
+  LARKX_BRIDGE_HOTFIX_ROOT                         path /opt/feishu-relay-edge/hotfix
+  LARKX_SUMMARY_CHAT_IDS                           len=55
+  LARKX_SUMMARY_INGESTION_ENABLED                  flag false
+  LARKX_SUMMARY_INGRESS_URL                        url http://127.0.0.1:18300  [LOCAL-ADDR:127.0.0.1]
+  LARKX_GAP_REPAIR_ENABLED                         flag false
+  LARKX_DYNAMIC_ROUTE_DISCOVERY                    flag true
+  LARKX_ROUTE_CATALOG_URL                          url http://127.0.0.1:18300  [LOCAL-ADDR:127.0.0.1]
+  LARKX_ROUTE_CATALOG_REFRESH_SECONDS              len=2
+  LARKX_GROUP_RELAY_ROUTES                         len=84
+  LARKX_ROUTE_BINDINGS_FILE                        path /var/lib/larkagentx/route-bindings.json
+  LARKX_ANQIANG_SOURCE_KEYS                        len=46  [secret]
+  LARKX_ANQIANG_CHAT_IDS                           len=39
+  LARKX_ANQIANG_BLOCK_KEYWORDS                     len=8  [secret]
+  LARKX_PRIVATE_GAP_REPAIR_ENABLED                 flag true
+  LARKX_PRIVATE_GAP_REPAIR_ON_START                flag true
+  LARKX_PRIVATE_GAP_REPAIR_CHAT_IDS                len=159
+  LARKX_PRIVATE_REPAIR_MAX_POSITIONS               len=2
+  LARKX_PAPER_KB_COMMANDS_ENABLED                  flag true
+  LARKX_PRIVATE_TAIL_REPAIR_ENABLED                flag true
+  LARKX_PRIVATE_TAIL_REPAIR_CHAT_IDS               EMPTY
+  LARKX_XHS_COMMANDS_ENABLED                       flag true
+  LARKX_XHS_COMMAND_CHAT_IDS                       len=55
+  LARKX_RAW_CAPTURE_CHAT_IDS                       len=19
+  LARKX_RAW_CAPTURE_DIR                            path /var/lib/larkagentx/raw-capture
+  LARKX_RAW_CAPTURE_MAX                            len=3
+  LARKX_WS_PARAM_OVERRIDES                         len=58
+  LARKX_RAW_CAPTURE_ALL_FRAMES                     flag 1
+  LARKX_WS_NOTIFY_CMDS                             len=4
+  LARKX_PRIVATE_TAIL_REPAIR_SECONDS                len=3
+--- /etc/itougu-neican.env (1028 B, mode 600)
+  FEISHU_APP_ID                                    len=20
+  FEISHU_APP_SECRET                                len=32  [secret]
+  ITOUGU_AUTH_FILE                                 path /opt/itougu-neican/itougu_auth.json  [secret]
+  ITOUGU_STATE_FILE                                path /var/lib/itougu-neican/state.json
+  ITOUGU_ENV_FILE                                  path /dev/null
+  ITOUGU_CHAT_IDS                                  len=35
+  ITOUGU_DELIVERY_LABEL                            len=2
+  ITOUGU_QINLONG_CHAT_IDS                          len=35
+  ITOUGU_JUEJIN_CHAT_IDS                           len=35
+  ITOUGU_ARTICLE_CHAT_IDS                          len=35
+  ITOUGU_FEISHU_WEBHOOKS                           len=353
+  ITOUGU_FEISHU_WEBHOOK_KEYWORDS                   len=120  [secret]
+--- /etc/itougu-perf-report.env (1018 B, mode 600)
+  FEISHU_APP_ID                                    len=20
+  FEISHU_APP_SECRET                                len=32  [secret]
+  ITOUGU_AUTH_FILE                                 path /opt/itougu-neican/itougu_auth.json  [secret]
+  ITOUGU_ENV_FILE                                  path /dev/null
+  ITOUGU_PERF_STATE_FILE                           path /var/lib/itougu-neican/perf-report.json
+  ITOUGU_PERF_TARGETS                              len=111
+  ITOUGU_PERF_DELIVERY                             len=6
+--- /etc/quant-intraday-edge/shared-gateway.env (124 B, mode 600)
+  QUANT_SHARED_READ_API_BASE_URL                   url http://127.0.0.1:15682  [LOCAL-ADDR:127.0.0.1]
+  QUANT_SHARED_READ_API_KEY                        len=43  [secret]
+--- json/other secret files (keys/shape only)
+/opt/itougu-neican/itougu_auth.json json keys: ['_all_headers', '_captured_at', '_from', 'headers']
+/etc/feishu-relay-edge/xhs-cookie text len=786
+--- dirs under /etc/feishu-relay-edge: []
+--- certs: ['market-review-api.pem']
+--- compose inline env keys (names, shape)
+  DB_POSTGRESDB_HOST                           len=9
+  DB_POSTGRESDB_PASSWORD                       from-env RELAY_PGPASSWORD}
+  N8N_ENCRYPTION_KEY                           from-env N8N_ENCRYPTION_KEY}
+  N8N_HOST                                     len=9
+  N8N_LISTEN_ADDRESS                           len=9
+  N8N_EDITOR_BASE_URL                          url http://127.0.0.1:5678
+  N8N_WEBHOOK_URL                              url http://127.0.0.1:5678
+  N8N_SECURE_COOKIE                            flag false [secret-inline]
+  N8N_RUNNERS_AUTH_TOKEN                       from-env N8N_RUNNERS_AUTH_TOKEN
+  N8N_RUNNERS_BROKER_LISTEN_ADDRESS            len=9
+  QUANT_SERVICE_URL                            from-env QUANT_SERVICE_URL
+  QUANT_WRITE_API_KEY                          from-env QUANT_WRITE_API_KEY}
+  XHS_COLLECTOR_TOKEN                          from-env XHS_COLLECTOR_TOKEN
+  PGHOST                                       len=9
+  PGPASSWORD                                   from-env RELAY_PGPASSWORD}
+  FEISHU_APP_SECRET                            from-env FEISHU_APP_SECRET}
+  N8N_WEBHOOK_URL                              url http://127.0.0.1:5678
+  N8N_TEXT_WEBHOOK_URL                         url http://127.0.0.1:5678
+  N8N_MEDIA_WEBHOOK_URL                        url http://127.0.0.1:5678
+  N8N_MEDIA_PART_WEBHOOK_URL                   url http://127.0.0.1:5678
+  N8N_MEDIA_FINALIZE_WEBHOOK_URL               url http://127.0.0.1:5678
+  N8N_MEDIA_STATE_WEBHOOK_URL                  url http://127.0.0.1:5678
+  PAPER_KB_INGEST_WEBHOOK                      from-env PAPER_KB_INGEST_WEBHOOK
+  PAPER_KB_SEARCH_WEBHOOK                      from-env PAPER_KB_SEARCH_WEBHOOK
+  PAPER_KB_FEEDBACK_WEBHOOK                    from-env PAPER_KB_FEEDBACK_WEBHOOK
+  XHS_COMMAND_WEBHOOK                          from-env XHS_COMMAND_WEBHOOK
+  DASHBOARD_HOST                               len=9
+  QUANT_SERVICE_URL                            from-env QUANT_SERVICE_URL
+  QUANT_WRITE_API_KEY                          from-env QUANT_WRITE_API_KEY}
+  QUANT_ALERT_WEBHOOK_TOKEN                    from-env QUANT_ALERT_WEBHOOK_TOKEN
+  FEISHU_GROUP_RELAY_WEBHOOK_KEYWORDS          from-env FEISHU_GROUP_RELAY_WEBHOOK_KEYWORDS
+  WECHAT_GROUP_RELAY_SOURCE_KEY                from-env WECHAT_GROUP_RELAY_SOURCE_KEY
+  WECHAT_GROUP_RELAY_ENDPOINT_TOKEN            from-env WECHAT_GROUP_RELAY_ENDPOINT_TOKEN
+  FEISHU_USER_OAUTH_REDIRECT_URI               from-env FEISHU_USER_OAUTH_REDIRECT_URI
+  LARKX_BRIDGE_TOKEN                           from-env LARKX_BRIDGE_TOKEN
+  LARKX_BRIDGE_RESOURCE_URL                    from-env LARKX_BRIDGE_RESOURCE_URL
+  ITOUGU_CONTROL_URL                           from-env ITOUGU_CONTROL_URL
+  FEISHU_WORKBENCH_DRIVE_FOLDER_TOKEN          from-env FEISHU_WORKBENCH_DRIVE_FOLDER_TOKEN
+  BAIDU_PAN_APP_KEY                            from-env BAIDU_PAN_APP_KEY
+  BAIDU_PAN_SECRET_KEY                         from-env BAIDU_PAN_SECRET_KEY
+  FEISHU_WORKBENCH_WIKI_PARENT_NODE_TOKEN      from-env FEISHU_WORKBENCH_WIKI_PARENT_NODE_TOKEN
+  XHS_COLLECTOR_HOST                           len=9
+  XHS_COLLECTOR_TOKEN                          from-env XHS_COLLECTOR_TOKEN
+  XHS_COOKIE_FILE                              path /run/secrets/xhs_cookie [secret-inline]
+  XHS_KEYWORDS                                 from-env XHS_KEYWORDS
+  N8N_RUNNERS_TASK_BROKER_URI                  url http://127.0.0.1:5679
+  N8N_RUNNERS_AUTH_TOKEN                       from-env N8N_RUNNERS_AUTH_TOKEN

@@ -1,0 +1,128 @@
+== runtime.env key names (no values)
+FEISHU_SUMMARY_LISTENER_ENABLED= APP_GIT_SHA= APP_RELEASE= APP_BUILD_CREATED_AT= WECHAT_GROUP_RELAY_ENABLED= WECHAT_GROUP_RELAY_SOURCE_KEY= WECHAT_GROUP_RELAY_SOURCE_CHAT_ID= WECHAT_GROUP_RE
+LAY_ROUTE_TAG= WECHAT_GROUP_RELAY_ENDPOINT_TOKEN= BAIDU_PAN_ENABLED= BAIDU_PAN_REDIRECT_URI= BAIDU_PAN_ARCHIVE_PROVIDER= BAIDU_PAN_MARKET_ARCHIVE_ENABLED= BAIDU_PAN_MARKET_ARCHIVE_INTERVAL_S
+ECONDS= BAIDU_PAN_MARKET_ARCHIVE_ROOT_PATH= FEISHU_RELAY_WRITER_ID= BAIDU_PAN_RAW_OVERFLOW_ENABLED= BAIDU_PAN_RAW_OVERFLOW_CAPABILITIES= BAIDU_PAN_RAW_OVERFLOW_ROOT_PATH= BAIDU_PAN_RAW_OVERF
+LOW_BATCH_ROWS= BAIDU_PAN_RAW_OVERFLOW_BATCHES_PER_DRAIN= QUANT_SERVICE_URL= FEISHU_GROUP_RELAY_INTERVAL_SECONDS= FEISHU_SUMMARY_LISTENER_INTERVAL_SECONDS= FEISHU_GROUP_RELAY_RECONCILE_SECON
+DS= FEISHU_GROUP_RELAY_RECONCILE_LOOKBACK_SECONDS= FEISHU_GROUP_RELAY_WEBHOOKS= FEISHU_GROUP_RELAY_ENABLED= LARKX_GROUP_RELAY_ENABLED= LARKX_GROUP_RELAY_ROUTES= FEISHU_GROUP_RELAY_WEBHOOK_KE
+YWORDS= FEISHU_ADAPTER_HOTFIX_ENABLED= FEISHU_ADAPTER_HOTFIX_DIR= LARKX_OFFICIAL_FALLBACK_ENABLED= LARKX_CARD_BACKFILL_ENABLED= LARKX_DYNAMIC_ROUTE_DISCOVERY= LARKX_CARD_BACKFILL_TAGS= LARKX
+_PAPER_KB_COMMANDS_ENABLED= PAPER_KB_FEISHU_CHAT_ID= PAPER_KB_INGEST_WEBHOOK= PAPER_KB_SEARCH_WEBHOOK= PAPER_KB_FEEDBACK_WEBHOOK= XHS_COOKIE_FILE= XHS_KEYWORDS= XHS_FETCH_LIMIT= LARKX_XHS_CO
+MMANDS_ENABLED= LARKX_XHS_COMMAND_CHAT_IDS= XHS_SOURCE_GIT_SHA= XHS_SOURCE_TREE_SHA256= XHS_INTEL_TREE_SHA256= XHS_WORKFLOW_SHA256= XHS_RECOMMEND_FETCH_LIMIT= XHS_RECOMMEND_CATEGORY= XHS_HOT
+FIX_ENABLED= XHS_HOTFIX_DIR= 
+== other env files key counts
+/etc/larkagentx-group-relay.env: 37
+/etc/itougu-neican.env: 12
+/etc/itougu-perf-report.env: 7
+/etc/quant-intraday-edge/shared-gateway.env: 2
+== compose services/env_file/volumes/networks
+2:  n8n:
+3:    image: docker.n8n.io/n8nio/n8n:2.33.7
+5:    network_mode: host
+9:      DB_POSTGRESDB_HOST: 127.0.0.1
+55:  feishu-adapter:
+63:    image: ${FEISHU_ADAPTER_IMAGE:-feishu-relay-edge-adapter:local}
+65:    network_mode: host
+215:  xhs-collector:
+219:    image: feishu-relay-edge-xhs:local
+221:    network_mode: host
+268:  n8n-runners:
+269:    image: n8nio/runners:2.33.7
+271:    network_mode: host
+284:  n8n_data:
+== 18081/18082-18084/18790-18791/5678/5679/15678 listeners by process
+18081: 0.0.0.0:18081 users:(("nginx",pid=2560024,fd=6),("nginx",pid=823455,fd=6),("nginx",pid=823454,fd=6))
+
+18082: 127.0.0.1:18082 users:(("gunicorn",pid=2560179,fd=5),("gunicorn",pid=2560168,fd=5),("gunicorn",pid=2560037,fd=5))
+
+18083: 127.0.0.1:18083 users:(("gunicorn",pid=1011134,fd=5),("gunicorn",pid=1011102,fd=5))
+
+18084: 127.0.0.1:18084 users:(("python",pid=2559977,fd=3))
+
+18300: 127.0.0.1:18300 users:(("node",pid=824692,fd=32))
+
+18790: 127.0.0.1:18790 users:(("python",pid=3615109,fd=4))
+
+18791: 127.0.0.1:18791 users:(("python3",pid=2814254,fd=3))
+
+5678: 127.0.0.1:5678 users:(("MainThread",pid=3507797,fd=19))
+
+5679: 127.0.0.1:5679 users:(("MainThread",pid=3507797,fd=20))
+
+15678: 127.0.0.1:15678 users:(("sshd",pid=1088306,fd=5))
+
+17896: 172.17.0.1:17896 users:(("python3",pid=3321086,fd=3))
+
+8787: 0.0.0.0:8787 users:(("python3",pid=2559972,fd=3))
+
+== nginx 18081 conf
+/etc/nginx/conf.d/stock-reports.conf
+/etc/nginx/conf.d/stock-reports.conf.backup-20260811T161732Z
+
+server {
+    listen 0.0.0.0:18081 ssl;
+    server_name _;
+    server_tokens off;
+
+    ssl_certificate /etc/stock-reports/tls/server.crt;
+    ssl_certificate_key /etc/stock-reports/tls/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 32k;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    error_page 429 = /_internal/api-rate-limited;
+
+--
+
+server {
+    listen 0.0.0.0:18081 ssl;
+    server_name _;
+    server_tokens off;
+
+    ssl_certificate /etc/stock-reports/tls/server.crt;
+    ssl_certificate_key /etc/stock-reports/tls/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 32k;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    error_page 429 = /_internal/api-rate-limited;
+== tailscale
+100.98.179.101 feishu-relay-47 papasys666@ linux -
+100.106.150.114 infra41-thinkstation-px papasys666@ linux -
+100.70.96.36 laptop-dtqoa8sg papasys666@ windows offline,
+100.122.81.127 papamac-mini-main papasys666@ macOS offline,
+100.117.40.25 papamacbook-air papasys666@ macOS -
+== who talks to adapter 18300/18790 from outside docker (established, remote ips)
+Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess
+0      0      172.30.13.231:18081 183.192.16.5:8843       
+== feishu WS egress (bridge) and DNS: proxies?
+NO_PROXY=<set>
+== bridge state size
+19M	/opt/larkagentx
+61M	/var/lib/larkagentx
+208K	/var/lib/itougu-neican
+119M	/opt/feishu-relay-edge/adapter-ingestion
+14M	/opt/feishu-relay-edge/xhs-state
+740K	/opt/feishu-relay-edge/backups
+== n8n_relay table sizes top
+execution_data|1487 MB
+baidu_pan_archive_jobs|879 MB
+feishu_group_relay_messages|12 MB
+ingestion_jobs|11 MB
+feishu_group_history_messages|8920 kB
+== n8n active workflows
+5|5
+== adapter db connection (host/db names only)
+PGHOST=127.0.0.1
+QUANT_SERVICE_URL=http://127.0.0.1:15682
+== sudo/privileged: how much of host depends on postgres 5432 for adapter
+      1 127.0.0.1:42488 users:(("postgres",pid=1090497,fd=10))
+      1 127.0.0.1:45114 users:(("postgres",pid=1096739,fd=10))
+      1 127.0.0.1:45340 users:(("postgres",pid=1081169,fd=10))
+      1 127.0.0.1:5432 users:(("MainThread",pid=3507797,fd=18))
+      1 127.0.0.1:5432 users:(("node",pid=824692,fd=19))
+      1 127.0.0.1:5432 users:(("sub2api",pid=2263211,fd=14))
+      1 127.0.0.1:5432 users:(("sub2api",pid=2263211,fd=143))
+      1 127.0.0.1:5432 users:(("sub2api",pid=2263211,fd=149))
+      1 127.0.0.1:5432 users:(("sub2api",pid=2263211,fd=93))
+      1 127.0.0.1:54368 users:(("postgres",pid=1078086,fd=10))

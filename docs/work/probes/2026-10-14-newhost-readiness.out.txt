@@ -1,0 +1,47 @@
+== whoami/sudo/linger
+stockpeer
+sudo: a password is required
+Linger=yes
+== docker rootless?
+[name=seccomp,profile=builtin name=rootless name=cgroupns] | Ubuntu 24.04.2 LTS | cgroup=2 | root=/home/stockpeer/.local/share/docker
+== how the owner containers expose 15682 / network mode
+/trading-hareness-peer-quant-research-1 net=trading-hareness-peer_default ports={"8000/tcp":[{"HostIp":"127.0.0.1","HostPort":"15682"}]}
+/trading-hareness-peer-db-tunnel-1 net=trading-hareness-peer_default ports={}
+== who owns the loopback listeners
+127.0.0.1:15433 0.0.0.0:*
+127.0.0.1:15432 0.0.0.0:*
+127.0.0.1:15681 0.0.0.0:*
+127.0.0.1:15680 0.0.0.0:*
+127.0.0.1:15683 users:(("rootlesskit",pid=9637,fd=16))
+127.0.0.1:15682 users:(("rootlesskit",pid=9637,fd=15))
+== host tools
+python3=/usr/bin/python3 node=- npm=- psql=- pg_ctl=- nginx=/usr/sbin/nginx tailscale=- rclone=- redis-server=- 
+Python 3.12.3
+== pip venv possible
+Traceback (most recent call last):
+== subuid/ports<1024
+1024
+== registry reach (3s)
+dockerhub:000 pypi:200 feishu:404
+== free mem / load
+Mem:            7270        1108        3073           3        3397        6162
+load average: 0.24, 0.18, 0.17
+== existing user units
+dbus.service
+docker.service
+launchpadlib-cache-clean.timer
+peer-daily-backfill.timer
+peer-session-guard-heal.timer
+peer-session-guard-preopen.timer
+== home layout
+/home/stockpeer:
+cutover-start-new.sh
+migration-final-volumes-restored
+migration-old-writers-stopped.epoch
+peak-smoke-20261013
+start-tunnels-only.sh
+trading_hareness
+
+/home/stockpeer/.local/share/trading-hareness:
+releases
+/dev/vda3        69G  6.8G   59G  11% /

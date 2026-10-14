@@ -1,0 +1,150 @@
+== units: ExecStart / User / WorkingDirectory / EnvironmentFile
+--- larkagentx-group-relay
+After=network-online.target docker.service
+User=larkagentx
+WorkingDirectory=/opt/larkagentx
+EnvironmentFile=/etc/larkagentx-group-relay.env
+ExecStart=/opt/supervisor/.venv/bin/python /opt/larkagentx/bridge.py
+Restart=always
+ExecStart=
+ExecStart=/opt/larkagentx/bridge-entrypoint.sh
+--- itougu-neican
+After=network-online.target
+EnvironmentFile=/etc/itougu-neican.env
+WorkingDirectory=/opt/itougu-neican
+ExecStart=/opt/supervisor/.venv/bin/python /opt/itougu-neican/itougu_neican_relay.py --loop --interval 15 --off-hours-interval 600 --trading-hours-only
+Restart=always
+--- itougu-perf-daily
+After=network-online.target
+EnvironmentFile=/etc/itougu-perf-report.env
+WorkingDirectory=/opt/itougu-neican
+ExecStart=/usr/bin/python3 /opt/itougu-neican/itougu_perf_report.py --daily
+--- itougu-perf-weekly
+After=network-online.target
+EnvironmentFile=/etc/itougu-perf-report.env
+WorkingDirectory=/opt/itougu-neican
+ExecStart=/usr/bin/python3 /opt/itougu-neican/itougu_perf_report.py --weekly
+== compose projects
+/opt/feishu-relay-edge:
+adapter-ingestion
+backups
+certs
+config
+docker-compose.yml
+docker-compose.yml.bak-20260830_235858
+docker-compose.yml.bak-20260913-223817
+docker-compose.yml.bak.archive-env-20260830T170558Z
+docker-compose.yml.bak.raw-overflow-env-20260902T0958Z
+docker-compose.yml.bak-xhs-20260928-160547
+docker-compose.yml.bak-xhs-20260928-161805
+docker-compose.yml.bak-xhs-20260928-161958
+docker-compose.yml.bak-xhs-20260928-164822
+docker-compose.yml.bak-xhs-20260928-165039
+docker-compose.yml.bak-xhs-20260928-165242
+docker-compose.yml.bak-xhs-20260929-034320
+docker-compose.yml.bak-xhs-20260929-035105
+docker-compose.yml.bak-xhs-20260929-035332
+docker-compose.yml.bak-xhs-20260929-041414
+docker-compose.yml.bak-xhs-20260929-043041
+docker-compose.yml.bak-xhs-20260929-055149
+docker-compose.yml.bak-xhs-20260929-055449
+docker-compose.yml.bak-xhs-20260929-055826
+docker-compose.yml.bak-xhs-20260929-055950
+docker-compose.yml.bak-xhs-20260929-061430
+docker-compose.yml.bak-xhs-20260929-064323
+docker-compose.yml.bak-xhs-20260929-071247
+docker-compose.yml.bak-xhs-20260929-092834
+docker-compose.yml.bak-xhs-20260929-092952
+== compose ps
+docker-compose.yml
+== container mounts/ports/mem
+/feishu-relay-edge-adapter mem=0 ports={} binds=/opt/feishu-relay-edge/adapter-ingestion:/var/lib/adapter-ingestion:rw /opt/feishu-relay-edge/hotfix:/app/hotfix:ro /var/lib/itougu-neican:/var/lib/itougu-neican:ro 
+/feishu-relay-edge-xhs mem=0 ports={} binds=/opt/feishu-relay-edge/xhs-state:/var/lib/xhs-collector:rw /etc/feishu-relay-edge/xhs-cookie:/run/secrets/xhs_cookie:ro /opt/feishu-relay-edge/hotfix-xhs:/app/hotfix:ro 
+/feishu-relay-edge-n8n mem=0 ports={} binds=feishu-relay-edge_n8n_data:/home/node/.n8n:rw /opt/feishu-relay-edge/certs/market-review-api.pem:/opt/n8n-certs/market-review-api.pem:ro /opt/feishu-relay-edge/import:/import:ro 
+== docker stats
+feishu-relay-edge-adapter cpu=1.39% mem=119.1MiB / 3.417GiB
+feishu-relay-edge-xhs cpu=148.80% mem=87.02MiB / 3.417GiB
+feishu-relay-edge-n8n cpu=0.16% mem=328.3MiB / 3.417GiB
+feishu-relay-edge-n8n-runners cpu=0.00% mem=6.141MiB / 3.417GiB
+== postgres dbs
+postgres|7503 kB
+sub2api|3522 MB
+n8n_relay|2428 MB
+== redis
+used_memory_human:2.24M
+1230
+== /etc/feishu-relay-edge file names
+total  
+drwx------ 4096 .
+drwxr-xr-x 12288 ..
+-rw-r----- 4019 runtime.env
+-rw-r----- 1470 runtime.env.bak-20260913-143818
+-rw-r----- 1553 runtime.env.bak-20260913-214647
+-rw-r----- 1638 runtime.env.bak-20260913-223726
+-rw------- 1902 runtime.env.bak-20260913-224830
+-rw------- 2020 runtime.env.bak.20260913T160216Z
+-rw------- 2392 runtime.env.bak.20260913T165946Z
+-rw-r----- 3116 runtime.env.bak-20260916-090721
+-rw-r----- 4020 runtime.env.bak-20261012T033758Z
+-rw-r----- 1348 runtime.env.bak.batch500-20260902T154758Z
+-rw-r----- 1348 runtime.env.bak.dailybar-20260902T160210Z
+-rw------- 2357 runtime.env.bak.followup.20260914T014448Z
+-rw-r----- 2919 runtime.env.bak-keywords-20260914T161951Z
+-rw-r----- 4082 runtime.env.bak-leaked-token-20261009192606
+-rw-r----- 973 runtime.env.bak.local-image-20260831T024300Z
+-rw-r----- 815 runtime.env.bak.local-transfer-20260830T164029Z
+-rw-r----- 815 runtime.env.bak.local-transfer-20260830T164411Z
+== /etc/quant-intraday-edge
+known_hosts
+owner_tunnel_ed25519
+shared-gateway.env
+== env var NAMES in itougu-neican
+itougu_auth.json
+itougu-momo-watermark.png
+itougu_neican_relay.py
+itougu_neican_relay.py.before-01eac288c4f2fba5b3f630f6bc7b9e69f9023274
+itougu_neican_relay.py.before-193f54a1a7ef1d8c3201da3713b77b57c80bed26
+itougu_neican_relay.py.before-2d86a790cf1dd0e7f681ba20869e0183a73e362e
+itougu_neican_relay.py.before-31add823d267a6896d1ae8542409475a71dc56d1
+itougu_neican_relay.py.before-32007021454b843620989188fd37415e5c000a1e
+itougu_neican_relay.py.before-40ca9c9266bde92d176d04aa5ec02e8852001e32
+itougu_neican_relay.py.before-45de66793f68861b501c40c168b0a8c4078d1e67
+== nginx feishu conf
+server {
+    listen 0.0.0.0:18301;
+    server_name _;
+    server_tokens off;
+
+    # The listener may bind every interface so it survives a Tailscale address
+    # change, but only authenticated tailnet source addresses may use it.
+    allow 100.64.0.0/10;
+    deny all;
+
+    # The adapter owns both independently built SPAs. It selects the Feishu
+    # dashboard for /monitor, /dashboard, /workbench and /relay, and the quant console for
+    # /, /research and /personal. Keep one same-origin proxy so both apps use
+    # the same API, SSE and authentication boundary.
+    gzip on;
+    gzip_vary on;
+    gzip_comp_level 6;
+    gzip_min_length 1024;
+    gzip_types text/css text/javascript application/javascript application/json image/svg+xml;
+
+    location / {
+        proxy_pass http://127.0.0.1:18300;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+}
+== n8n workflows count
+config
+crash.journal
+n8nEventLog-1.log
+n8nEventLog-2.log
+n8nEventLog-3.log
+== journald size
+Archived and active journals take up 1.0G in the file system.
