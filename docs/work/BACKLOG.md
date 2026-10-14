@@ -626,7 +626,7 @@
 - how: 没有直接做，因为两种改法都会改运行信号：(a) 把 `skipped` 记成 `blocked`，每个 10 分钟的轮次都会重跑这两个阶段，W011 用来验收的“left open”日志行会常驻；(b) 只给老师两阶段一个“开关关着不关回执”的标记，要在回执摘要里多存一个键。先问 W011 的验收是否要保留“left open”为零，再选
 - who: agent
 - needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
-- result: 2026-10-14 提交 e6363b8e（本地 main，未推送、未发布）：老师两阶段在开关关着时返回 `receipt: open`，回执记 `blocked`、下一轮再问；调用方仍看到 `skipped`，所以日志里不会多出“left open”（`open_stages` 读的是阶段自己返回的状态）。其他 `skipped` 阶段（配置关掉的）不变。读回执状态的只有探针脚本，运行代码里没有别处读。测试 `test_a_skipped_stage_keeps_its_receipt_open_only_when_it_asks_to`；全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
+- result: 2026-10-14 提交 e6363b8e（已推送到 origin/main，2026-10-14；未发布）：老师两阶段在开关关着时返回 `receipt: open`，回执记 `blocked`、下一轮再问；调用方仍看到 `skipped`，所以日志里不会多出“left open”（`open_stages` 读的是阶段自己返回的状态）。其他 `skipped` 阶段（配置关掉的）不变。读回执状态的只有探针脚本，运行代码里没有别处读。测试 `test_a_skipped_stage_keeps_its_receipt_open_only_when_it_asks_to`；全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
 - updated: 2026-10-14
 
 ### B066 战法标签不看 q 值
@@ -637,7 +637,7 @@
 - how: 标签加一道 `q` 阈值，阈值由用户定（例如 0.1）；`p` 改 t 分布，样本 20 天时差别不大。改动在 `_label` 和调用处，测试是纯函数
 - who: agent
 - needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
-- result: 2026-10-14 提交 e6363b8e（本地 main，未推送、未发布）：`supports`/`against` 要求主要结果的 BH `q` ≤ 0.10（`LABEL_MAX_Q`）；`p` 仍用正态近似，没有改（改会动 `records` 的键和固定的参考指纹）。在 66 个战法的参考数据上，原有的 4 个 `supports`/`against` 的 `q` 是 0.10 到 0.53，现在都是 `undecided`，参考文件 `tests/fixtures/tactic_fold_reference_b04be9b9.json` 只改了这 4 个标签。发布后的第一次每日总结，`label_changes` 里会出现这几条从 `supports`/`against` 到 `undecided` 的变化，是预期的。全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
+- result: 2026-10-14 提交 e6363b8e（已推送到 origin/main，2026-10-14；未发布）：`supports`/`against` 要求主要结果的 BH `q` ≤ 0.10（`LABEL_MAX_Q`）；`p` 仍用正态近似，没有改（改会动 `records` 的键和固定的参考指纹）。在 66 个战法的参考数据上，原有的 4 个 `supports`/`against` 的 `q` 是 0.10 到 0.53，现在都是 `undecided`，参考文件 `tests/fixtures/tactic_fold_reference_b04be9b9.json` 只改了这 4 个标签。发布后的第一次每日总结，`label_changes` 里会出现这几条从 `supports`/`against` 到 `undecided` 的变化，是预期的。全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
 - updated: 2026-10-14
 
 ### B067 风险分的回执门禁和 `partial` 的含义
@@ -659,7 +659,7 @@
 - how: 无回执时在 15:10–22:00 补跑一次收盘检查点（先 `completed_for_checkpoint` 查回执，保持幂等）；11:31 的盘中检查点是时点快照，不补
 - who: agent
 - needs: 无；发布要随下一次 owner 纯代码发布，推送与发布由用户做
-- result: 2026-10-14 提交 e6363b8e（本地 main，未推送、未发布）：收盘检查点 15:10–22:00 在没有回执时补跑，失败后至多每 10 分钟一次；只在带 `completed_for_checkpoint`（持久回执）时才补，避免重复结算；盘中检查点不补。4 条新用例，全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
+- result: 2026-10-14 提交 e6363b8e（已推送到 origin/main，2026-10-14；未发布）：收盘检查点 15:10–22:00 在没有回执时补跑，失败后至多每 10 分钟一次；只在带 `completed_for_checkpoint`（持久回执）时才补，避免重复结算；盘中检查点不补。4 条新用例，全套 3,238 条通过，输出 `docs/work/probes/2026-10-14-review-fixes-2-release-path.out.txt`
 - updated: 2026-10-14
 
 ### B069 审查里推测的四处，要用运行证据确认
@@ -762,7 +762,7 @@
 - how: 已改并提交（c94eb531）：`AuctionPoolCaptureRuntime.retry_late_table`；循环里晚补为 `failed`/`not_final`/`database_busy` 时每分钟再读一次，最多 30 次、不过 11:30；`no_pool` 在 09:30 之前每 30 秒重试。新增三条用例在 `quant-service/tests/test_auction_pool_runtime.py`
 - who: agent 改并提交；推送、发布由用户做
 - needs: 无；发布要随下一次 owner 纯代码发布（`scripts/release plan` 先确认，推送与发布由用户做），W002 的持有会话看到本条后并进 W002
-- result: 2026-10-14 `make -C quant-service test-release-path` 3,232 条通过、2 条跳过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（本地 main，尚未推送）；未发布、未在线上验证
+- result: 2026-10-14 `make -C quant-service test-release-path` 3,232 条通过、2 条跳过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（已推送到 origin/main，2026-10-14；未发布）、未在线上验证
 - updated: 2026-10-14
 
 ### B064 周复盘的回归永远凑不够样本
@@ -773,5 +773,5 @@
 - how: 已改并提交（c94eb531）：报告仍展示自己的 7 天，回归读以报告日结尾的 28 个自然日（`REGRESSION_LOOKBACK_DAYS=27`），`summary.regression_window` 记下窗口，方法版本升到 `analyst-market-review-v2`（读取侧只回显版本，不按版本过滤）。这是我选的口径；要换成别的窗口（例如只用交易日、或 60 日）改一个常量
 - who: agent 改并提交；推送、发布由用户做
 - needs: 无；28 天窗口由用户确认，要换改 `REGRESSION_LOOKBACK_DAYS`；发布同 B063
-- result: 2026-10-14 同 B063 的全套测试通过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（本地 main，尚未推送）；未发布。回归仍是描述性的，`live_effect: none`
+- result: 2026-10-14 同 B063 的全套测试通过，输出 `docs/work/probes/2026-10-14-review-fixes-release-path.out.txt`；提交 c94eb531（已推送到 origin/main，2026-10-14；未发布）。回归仍是描述性的，`live_effect: none`
 - updated: 2026-10-14
