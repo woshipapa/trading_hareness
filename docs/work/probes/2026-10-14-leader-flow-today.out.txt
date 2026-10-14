@@ -1,0 +1,20 @@
+now: 2026-10-14 12:50:03.374540
+  2026-10-08 leader_flow=blocked    scans= 438 10:43..14:59 session trade limits unavailable
+  2026-10-08 leader_flow=skipped    scans=   3 13:51..14:41 no all-A cross-section in this scan
+  2026-10-09 leader_flow=skipped    scans=1290 09:15..14:59 no all-A cross-section in this scan
+  2026-10-09 leader_flow=completed  scans= 225 13:21..14:59 
+  2026-10-09 leader_flow=degraded   scans= 213 09:35..13:18 no configured provider supports stk_limit for preference auto
+  2026-10-12 leader_flow=completed  scans=1167 09:23..14:59 
+  2026-10-12 leader_flow=skipped    scans=  54 09:23..14:58 no all-A cross-section in this scan
+  2026-10-12 leader_flow=degraded   scans=   2 09:17..09:20 
+  2026-10-12 leader_flow=absent     scans=   1 14:51..14:51 
+  2026-10-13 leader_flow=completed  scans= 990 09:18..14:59 
+  2026-10-13 leader_flow=skipped    scans=  56 09:15..14:59 no all-A cross-section in this scan
+  2026-10-13 leader_flow=degraded   scans=   1 09:15..09:15 
+  2026-10-14 leader_flow=completed  scans= 112 11:06..11:29 
+  2026-10-14 leader_flow=skipped    scans=  13 10:45..11:29 no all-A cross-section in this scan
+  2026-10-14 leader_flow=degraded   scans=   2 09:15..09:18 
+  alerts 2026-10-09 sent: 12 (by created_at)
+  alerts 2026-10-12 disabled: 12 (by created_at)
+  alerts 2026-10-13 disabled: 10444 (by created_at)
+  alerts 2026-10-14 disabled: 691 (by created_at)
