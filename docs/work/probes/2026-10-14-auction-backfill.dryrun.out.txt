@@ -1,0 +1,6 @@
+pool 93 scored in pool 67 stored curves 93 existing tables 0
+provider state per call: {('closed', 'final'): 1} rows 93
+opening price against the curve's last point: 28/93 within a cent; differing (stock, open, curve, time): [('002917.SZ', 11.76, 12.09, '09:24:57'), ('002322.SZ', 13.11, 13.47, '09:24:57'), ('000995.SZ', 12.13, 12.89, '09:24:57'), ('002184.SZ', 11.0, 11.5, '09:24:57'), ('600802.SH', 6.98, 6.84, '09:24:57'), ('000833.SZ', 21.45, 21.72, '09:24:57'), ('603767.SH', 15.8, 15.83, '09:24:57'), ('003037.SZ', 6.66, 6.74, '09:24:57')]
+table coverage: {'scored': 67, 'accepted': 67, 'missing': 0} buckets: {'opens_at_limit': 8, '5..9%': 4, '0..2%': 15, '-2..0%': 16, '-5..-2%': 6, '2..5%': 12, '9%+_not_at_limit': 3, 'below_-5%': 3}
+sample rows: [{"symbol": "000668.SZ", "name": "荣丰控股", "open": 22.62, "gap": 0.10019455252918297, "opens_at_limit": true, "bucket": "opens_at_limit", "risk_rank": 4.477611940298507, "boards": 1.0, "sealed_from_open": true, "amount": 3141918.0, "volume": 1389.0, "unmatched": 13170.0}, {"symbol": "002917.SZ", "name": "金奥博", "open": 11.76, "gap": 0.06909090909090909, "opens_at_limit": false, "bucket": "5..9%", "risk_rank": 41.7910447761194, "boards": 1.0, "sealed_from_open": true, "amount": 26852784, "volume": 2
+dry run: nothing stored
