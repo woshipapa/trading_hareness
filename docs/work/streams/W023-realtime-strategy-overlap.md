@@ -78,6 +78,7 @@
 - 新一轮 focused overlay：12 tests passed（scan timing、watchlist service、runtime adapter）。全量 overlay 运行 3292 tests，仍只有工作区其他会话 `local_spool_*` 读取未登记环境变量的既有 settings failure；frontend `npm run typecheck && npm run build` 通过。
 - health handoff 变更后的 focused overlay：13 tests passed（含 runtime health-task join）。
 - health handoff 后的完整 overlay：3293 tests 运行，仍只有同一项 `test_settings.RegistryTests.test_every_key_read_in_the_app_is_declared` 失败；未出现 scan/runtime 新失败。
+- `scripts/release plan 7fa7c3f9` 只读结果：owner 因此前容量提交中 2 个 compose/env 路径仍被归类为 FULL（owner schema 已在 `20261015_ow0122`，窗口允许）；edge dashboard/adapter 也因目标范围内其他会话路径被列出。未执行任何 `--apply`，不能把该计划当作已发布。
 
 ## Open questions
 
