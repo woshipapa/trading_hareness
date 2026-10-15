@@ -22,12 +22,21 @@ const limits = ref<LimitDetailDay | null>(null);
 const health = ref<IndicatorHealth | null>(null);
 const errors = ref<Record<string, string>>({});
 let timer: ReturnType<typeof setInterval> | undefined;
+let readVersion = 0;
 
-async function read<T>(key: string, path: string): Promise<T | null> {
+async function read<T>(key: string, path: string, version: number): Promise<T | null> {
   try {
-    return await getJson<T>(path);
+    const result = await getJson<T>(path);
+    if (version === readVersion) {
+      const next = { ...errors.value };
+      delete next[key];
+      errors.value = next;
+    }
+    return result;
   } catch (error) {
-    errors.value = { ...errors.value, [key]: error instanceof Error ? error.message : String(error) };
+    if (version === readVersion) {
+      errors.value = { ...errors.value, [key]: error instanceof Error ? error.message : String(error) };
+    }
     return null;
   }
 }
@@ -36,41 +45,45 @@ function dayParam(): string {
   return encodeURIComponent(tradeDate.value);
 }
 
-async function loadRadar() {
+async function loadRadar(version: number) {
   const segments = segment.value === 'all' ? '' : '&segments=true';
-  const radarDay = await read<RadarDay>('radar', `/api/research/market/radar?trade_date=${dayParam()}${segments}`);
-  if (radarDay) radar.value = radarDay;
+  const radarDay = await read<RadarDay>('radar', `/api/research/market/radar?trade_date=${dayParam()}${segments}`, version);
+  if (version === readVersion) radar.value = radarDay;
 }
 
-async function loadCardsAndHealth() {
+async function loadCardsAndHealth(version: number) {
   const [cardDay, healthDay] = await Promise.all([
-    read<StrategyCardsDay>('cards', `/api/research/strategy/cards?trade_date=${dayParam()}&per_line=${perLine.value}`),
-    read<IndicatorHealth>('health', `/api/research/indicators/health?trade_date=${dayParam()}`),
+    read<StrategyCardsDay>('cards', `/api/research/strategy/cards?trade_date=${dayParam()}&per_line=${perLine.value}`, version),
+    read<IndicatorHealth>('health', `/api/research/indicators/health?trade_date=${dayParam()}`, version),
   ]);
-  if (cardDay) cards.value = cardDay;
-  if (healthDay) health.value = healthDay;
+  if (version === readVersion) {
+    cards.value = cardDay;
+    health.value = healthDay;
+  }
 }
 
 // Everything at once on open, a date change or the refresh button.
 async function load() {
+  const version = ++readVersion;
   loading.value = true;
   errors.value = {};
   const [, , limitDay] = await Promise.all([
-    loadRadar(), loadCardsAndHealth(),
-    read<LimitDetailDay>('limits', `/api/research/market/limit-detail?trade_date=${dayParam()}`),
+    loadRadar(version), loadCardsAndHealth(version),
+    read<LimitDetailDay>('limits', `/api/research/market/limit-detail?trade_date=${dayParam()}`, version),
   ]);
-  limits.value = limitDay;
-  loading.value = false;
+  if (version === readVersion) {
+    limits.value = limitDay;
+    loading.value = false;
+  }
 }
 
-// The owner database is busy with the minute capture: the radar refreshes every
-// minute, the cards and health every third minute, and the post-close limit detail
-// only on demand.
-let tick = 0;
+// The owner has enough capacity for the three independent read paths to run in
+// parallel. Every minute gets a fresh radar, strategy-card projection and health
+// snapshot; limit detail remains an explicit post-close read.
 async function autoRefresh_() {
-  tick += 1;
-  await loadRadar();
-  if (tick % 3 === 0) await loadCardsAndHealth();
+  if (loading.value) return;
+  const version = ++readVersion;
+  await Promise.all([loadRadar(version), loadCardsAndHealth(version)]);
 }
 
 const rows = computed(() => radarRows(radar.value, band.value, segment.value));
@@ -85,6 +98,13 @@ const latestFlow = computed(() => radar.value?.main_net?.[radar.value.main_net.l
 const gate = computed(() => cards.value?.direction_gate);
 const gateType = computed(() => ({ up: 'danger', down: 'success', mixed: 'warning' } as Record<string, string>)[gate.value?.label ?? ''] ?? 'info');
 const bandMeaning = computed(() => (BAND_LABELS[band.value] ?? band.value).replace(/^±/, ''));
+const cardsFreshness = computed(() => cards.value?.freshness);
+const freshnessType = (status: string | undefined): string => ({ fresh: 'success', available: 'success', historical_available: 'info', stale: 'warning', missing: 'danger' }[status ?? ''] ?? 'info');
+const freshnessLabel = (status: string | undefined): string => ({ fresh: '实时', available: '当日可用', historical_available: '历史可用', stale: '已变旧', missing: '缺失' }[status ?? ''] ?? '未知');
+const sourceTime = (key: string): string => {
+  const value = cardsFreshness.value?.live_sources?.[key]?.latest_observed_at;
+  return value ? shanghaiTime(value) : '-';
+};
 
 function deltaText(value: number | null): string {
   return value === null ? '-' : `${value >= 0 ? '+' : ''}${yi(value)}`;
@@ -121,7 +141,7 @@ function schedule() {
 }
 
 watch([tradeDate, perLine], () => { void load(); schedule(); });
-watch(segment, (value, previous) => { if (value === 'all' || previous === 'all') void loadRadar(); });
+watch(segment, (value, previous) => { if (value === 'all' || previous === 'all') void load(); });
 watch(autoRefresh, schedule);
 onMounted(() => { void load(); schedule(); });
 onBeforeUnmount(() => { if (timer) clearInterval(timer); });
@@ -141,7 +161,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
           <el-select v-model="segment" size="small" style="width: 110px">
             <el-option v-for="(label, key) in SEGMENT_LABELS" :key="key" :label="label" :value="key" />
           </el-select>
-          <el-switch v-model="autoRefresh" active-text="自动刷新（雷达每分钟，卡片与健康每 3 分钟）" />
+          <el-switch v-model="autoRefresh" active-text="自动刷新（雷达、策略卡片与健康每分钟）" />
         </el-space>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
       </div>
@@ -186,7 +206,9 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
           <el-tooltip :content="fieldHealthText(cards)" placement="top">
             <el-tag :type="cards?.data_health?.all_eligible ? 'success' : 'warning'">数据{{ cards?.data_health?.all_eligible ? '可作决策' : '未全部就绪' }}</el-tag>
           </el-tooltip>
-          <el-text type="info" size="small">上/下比 {{ gate?.up_down_ratio ?? '-' }} · 净额 {{ yi(gate?.main_net) }} · 昨收格局 {{ cards?.previous_close_regime?.regime_label ?? '-' }} · 选股日 {{ cards?.picks_as_of ?? '-' }}</el-text>
+          <el-tag size="small" :type="freshnessType(cardsFreshness?.overall)">实时源 {{ freshnessLabel(cardsFreshness?.overall) }}</el-tag>
+          <el-text type="info" size="small">上/下比 {{ gate?.up_down_ratio ?? '-' }} · 净额 {{ yi(gate?.main_net) }} · 昨收格局 {{ cards?.previous_close_regime?.regime_label ?? '-' }} · 台账基线 {{ cardsFreshness?.ledger_baseline?.as_of_date ?? cards?.picks_as_of ?? '-' }}</el-text>
+          <el-text type="info" size="small">读取 {{ cardsFreshness?.read_at ? `${shanghaiTime(cardsFreshness.read_at)}；竞价 ${sourceTime('auction_open_desk_daily')}；盘中信号 ${sourceTime('intraday_signal_events')}` : '-' }}</el-text>
         </el-space>
         <el-space>
           <el-text size="small">每路显示</el-text>

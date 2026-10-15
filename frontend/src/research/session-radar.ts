@@ -290,12 +290,18 @@ export type StrategyCard = {
              tickets: number; best?: { symbol: string; name?: string | null; since_open_pct: number } | null };
   picks: CardPick[]; leaderboard: Record<string, LeaderboardCell>;
 };
+export type StrategyCardsFreshness = {
+  read_at?: string | null; trade_date?: string | null; overall?: string;
+  live_sources?: Record<string, { latest_observed_at?: string | null; status?: string }>;
+  ledger_baseline?: { as_of_date?: string | null; status?: string };
+};
 export type DirectionGate = {
   label: string; up_down_ratio?: number | null; main_net?: number | null; main_net_source?: string | null;
   main_net_upstream?: string | null; radar_observed_at?: string | null; phase?: string | null; definition?: string;
 };
 export type StrategyCardsDay = {
   trade_date: string; status: string; reason?: string; picks_as_of?: string; direction_gate?: DirectionGate;
+  freshness?: StrategyCardsFreshness;
   previous_close_regime?: { regime_label?: string | null } | null; cards: StrategyCard[];
   data_health?: { all_eligible: boolean; fields: Record<string, { indicator: string; status: string; decision_eligible: boolean }> };
   leaderboard?: Record<string, ({ strategy_key: string; name: string } & LeaderboardCell)[]>;

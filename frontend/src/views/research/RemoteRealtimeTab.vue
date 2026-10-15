@@ -37,7 +37,7 @@ const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.
     <template #header><div class="card-header"><span>Owner 运行状态</span><el-button text :icon="Refresh" :loading="runtime.loading.value" @click="runtime.loadRemoteRuntimeCore">刷新</el-button></div></template>
     <el-alert v-if="runtime.error.value" :title="runtime.error.value" type="warning" :closable="false" show-icon class="section-gap" />
     <el-descriptions :column="mobileLayout ? 1 : 5" border size="small">
-      <el-descriptions-item label="客户端读取">{{ runtime.lastSuccessAt.value ? dateText(runtime.lastSuccessAt.value) : '尚未成功读取' }}</el-descriptions-item>
+      <el-descriptions-item label="最近读取">{{ runtime.lastAttemptAt.value ? dateText(runtime.lastAttemptAt.value) : '尚未发起读取' }}<small v-if="runtime.lastSuccessAt.value" class="block-note">成功 {{ dateText(runtime.lastSuccessAt.value) }}</small></el-descriptions-item>
       <el-descriptions-item label="远端网络">{{ runtime.runtimeHealth.value.network?.state ?? '-' }}</el-descriptions-item>
       <el-descriptions-item label="运行 SHA">{{ runtime.runtimeHealth.value.build?.running_sha ?? runtime.runtimeHealth.value.build?.git_sha ?? '-' }}</el-descriptions-item>
       <el-descriptions-item label="发布">{{ runtime.runtimeHealth.value.build?.release ?? '-' }}</el-descriptions-item>

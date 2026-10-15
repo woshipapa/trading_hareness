@@ -7,7 +7,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from app.strategy_cards_read_model import LINES, _auction_pick, _signal_strategy, strategy_cards
+from app.strategy_cards_read_model import LINES, _auction_pick, _freshness_source_status, _signal_strategy, strategy_cards
 
 CN = ZoneInfo("Asia/Shanghai")
 SESSION, AS_OF = date(2026, 10, 9), date(2026, 10, 8)
@@ -148,6 +148,22 @@ class StrategyCardTests(unittest.TestCase):
         self.assertEqual(self.cards["launch_radar"]["contract_key"], "launch_radar")
         self.assertEqual(self.cards["launch_radar"]["maturity"], "shadow")
         self.assertEqual(self.day["live_effect"], "none")
+
+    def test_cards_expose_read_time_live_sources_and_replay_baseline(self):
+        freshness = self.day["freshness"]
+        self.assertEqual(freshness["trade_date"], SESSION.isoformat())
+        self.assertEqual(freshness["ledger_baseline"], {"as_of_date": AS_OF.isoformat(), "status": "replay_baseline"})
+        self.assertIn("auction_open_desk_daily", freshness["live_sources"])
+        self.assertIn("intraday_signal_events", freshness["live_sources"])
+
+    def test_source_freshness_does_not_call_a_point_in_time_auction_stale(self):
+        observed = at(9, 25)
+        self.assertEqual(_freshness_source_status(observed, trade_date=SESSION, now=at(14, 30),
+                                                  source="auction_open_desk_daily"), "available")
+        self.assertEqual(_freshness_source_status(at(14, 25), trade_date=SESSION, now=at(14, 30),
+                                                  source="intraday_signal_events"), "fresh")
+        self.assertEqual(_freshness_source_status(at(13, 0), trade_date=SESSION, now=at(14, 30),
+                                                  source="intraday_signal_events"), "stale")
 
     def test_the_direction_gate_reads_the_radar_and_the_main_net(self):
         gate = self.day["direction_gate"]

@@ -29,6 +29,7 @@ export function useRemoteQuantRuntime() {
   const decisionCardLoading = ref(false);
   const error = ref('');
   const decisionCardError = ref('');
+  const lastAttemptAt = ref<string | null>(null);
   const lastSuccessAt = ref<string | null>(null);
   const polling = usePolling();
   let coreInFlight = false;
@@ -41,6 +42,7 @@ export function useRemoteQuantRuntime() {
     coreInFlight = true;
     loading.value = true;
     error.value = '';
+    lastAttemptAt.value = new Date().toISOString();
     const requests = [
       { label: '运行状态', promise: getJson<RemoteRuntimeHealth>('/api/research/runtime/health') },
       { label: '服务状态', promise: getJson<RemoteServices>('/api/research/intraday/services/status') },
@@ -68,11 +70,17 @@ export function useRemoteQuantRuntime() {
       (value: any) => { promotion.value = value; },
       (value: any) => { watchlistProposals.value = value; },
     ];
+    // A failed read must clear its panel. Retaining a previous successful
+    // payload makes a transient owner/relay failure look like current data.
+    const emptyValues = [
+      {}, { items: [] }, { items: [] }, { signals: [], deliveries: [] }, {},
+      { recommendations: [] }, {}, { candidates: [] }, {}, { strategies: [] }, { proposals: [] },
+    ];
     let succeeded = 0;
     const failures: string[] = [];
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') { succeeded += 1; setters[index](result.value); }
-      else failures.push(requests[index].label);
+      else { setters[index](emptyValues[index]); failures.push(requests[index].label); }
     });
     if (succeeded) lastSuccessAt.value = new Date().toISOString();
     if (failures.length) error.value = succeeded
@@ -111,6 +119,6 @@ export function useRemoteQuantRuntime() {
   return {
     runtimeHealth, services, watchlist, watchlistItems, latestScan, signals, strategyHealth, strategyDecision,
     closeReview, postClose, dailySummary, promotion, watchlistProposals, selectedSymbol, decisionCard,
-    loading, decisionCardLoading, error, decisionCardError, lastSuccessAt, loadRemoteRuntimeCore, loadDecisionCard,
+    loading, decisionCardLoading, error, decisionCardError, lastAttemptAt, lastSuccessAt, loadRemoteRuntimeCore, loadDecisionCard,
   };
 }

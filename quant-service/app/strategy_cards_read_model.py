@@ -87,6 +87,80 @@ def _day_bounds(day: date) -> tuple[datetime, datetime]:
     return start, start + timedelta(days=1)
 
 
+def _freshness_source_status(latest: datetime | None, *, trade_date: date, now: datetime,
+                             source: str) -> str:
+    """Describe source availability without treating a replay ledger as live data."""
+    if latest is None:
+        return "missing"
+    local_now = now.astimezone(CN_TZ)
+    if trade_date != local_now.date():
+        return "historical_available"
+    # The auction desk is a point-in-time 09:25 observation and is expected to
+    # stop changing after the match.  It remains valid for the day's cards.
+    if source == "auction_open_desk_daily":
+        return "available"
+    # During continuous trading an entry signal older than five minutes must
+    # be visible as stale.  Outside the session there is no live signal clock
+    # to satisfy, so an existing same-day signal is simply available evidence.
+    if local_now.time() < time(9, 30) or local_now.time() > time(15, 0):
+        return "available"
+    age = (local_now - latest.astimezone(CN_TZ)).total_seconds()
+    return "fresh" if age <= 300 else "stale"
+
+
+def _cards_freshness(connection: Any, trade_date: date, as_of: date | None,
+                     now: datetime) -> dict[str, Any]:
+    """Expose the read timestamp and every source timestamp shown by cards.
+
+    The ledger is deliberately labelled ``replay_baseline``.  This prevents a
+    previous-session candidate from looking like a current-session signal when
+    the live source has no row for a particular strategy line.
+    """
+    start, end = _day_bounds(trade_date)
+    auction = connection.execute(
+        """SELECT max(effective_at) AS latest_at
+             FROM quant.raw_market_observations
+            WHERE provider_key='local_derived' AND capability='auction_open_desk_daily'
+              AND effective_at>=%s AND effective_at<%s""", (start, end),
+    ).fetchone()
+    signals = connection.execute(
+        """SELECT max(observed_at) AS latest_at
+             FROM quant.intraday_signal_events
+            WHERE signal_type='entry' AND observed_at>=%s AND observed_at<%s""", (start, end),
+    ).fetchone()
+    auction_at = dict(auction).get("latest_at") if auction else None
+    signal_at = dict(signals).get("latest_at") if signals else None
+    source_status = {
+        "auction_open_desk_daily": {
+            "latest_observed_at": auction_at.isoformat() if auction_at else None,
+            "status": _freshness_source_status(auction_at, trade_date=trade_date, now=now,
+                                                source="auction_open_desk_daily"),
+        },
+        "intraday_signal_events": {
+            "latest_observed_at": signal_at.isoformat() if signal_at else None,
+            "status": _freshness_source_status(signal_at, trade_date=trade_date, now=now,
+                                                source="intraday_signal_events"),
+        },
+    }
+    live_statuses = [item["status"] for item in source_status.values()]
+    if "fresh" in live_statuses or "available" in live_statuses:
+        overall = "fresh" if "fresh" in live_statuses else "available"
+    elif "stale" in live_statuses:
+        overall = "stale"
+    else:
+        overall = "missing"
+    return {
+        "read_at": now.isoformat(),
+        "trade_date": trade_date.isoformat(),
+        "overall": overall,
+        "live_sources": source_status,
+        "ledger_baseline": {
+            "as_of_date": as_of.isoformat() if as_of else None,
+            "status": "replay_baseline" if as_of else "missing",
+        },
+    }
+
+
 def _json(value: Any) -> Any:
     if isinstance(value, (dict, list)) or value is None:
         return value
@@ -500,12 +574,15 @@ def data_health(connection: Any, trade_date: date, as_of: date, now: datetime) -
 
 
 def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now: datetime | None = None) -> dict[str, Any]:
+    now = now or datetime.now(CN_TZ)
     as_of = picks_as_of(connection, trade_date)
     base = {"trade_date": trade_date.isoformat(), "cards_version": CARDS_VERSION,
             "research_only": True, "live_effect": "none"}
+    freshness = _cards_freshness(connection, trade_date, as_of, now)
     live_by_line = _live_source_picks(connection, trade_date, per_line)
     if as_of is None and not live_by_line:
-        return {**base, "status": "missing", "reason": "no ledger candidates before the session", "cards": []}
+        return {**base, "status": "missing", "reason": "no ledger candidates before the session",
+                "freshness": freshness, "cards": []}
     tiered = tiered_sql_builder(connection)
     ledger = ledger_picks(connection, as_of) if as_of is not None else []
     resonance: dict[str, list[str]] = defaultdict(list)
@@ -565,6 +642,7 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
         "SELECT regime_label,model_version FROM quant.market_regime_daily WHERE trading_date=%s", (context_as_of,)).fetchone()
     return {
         **base, "status": "completed" if cards else "missing", "picks_as_of": as_of.isoformat() if as_of else None,
+        "freshness": freshness,
         "per_line": per_line, "direction_gate": direction_gate(connection, trade_date),
         "data_health": data_health(connection, trade_date, context_as_of, now or datetime.now(CN_TZ)),
         "previous_close_regime": dict(regime) if regime else None,
