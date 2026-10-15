@@ -39,6 +39,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("DROP INDEX IF EXISTS quant.canonical_bars_daily_symbol_count_idx")
     op.execute("DROP INDEX IF EXISTS quant.daily_trade_limits_symbol_count_idx")
     op.execute("DROP INDEX IF EXISTS quant.daily_fundamentals_symbol_count_idx")
-    op.execute("DROP INDEX IF EXISTS quant.canonical_bars_daily_symbol_count_idx")
+    # 0129 owns these two narrow symbol indexes.  Restore their pre-0130
+    # definitions so a downgrade leaves the schema at the 0129 contract.
+    op.execute("""
+        CREATE INDEX IF NOT EXISTS daily_fundamentals_symbol_count_idx
+            ON quant.daily_fundamentals(symbol)
+    """)
+    op.execute("""
+        CREATE INDEX IF NOT EXISTS daily_trade_limits_symbol_count_idx
+            ON quant.daily_trade_limits(symbol)
+    """)
