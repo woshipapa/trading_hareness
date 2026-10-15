@@ -1,0 +1,9 @@
+ Container n8n Running
+ Container n8n-quant-research-gateway Running
+ Container n8n-postgres Running
+ Container n8n-quant-research Running
+ Container n8n-feishu-adapter Running
+ Container n8n-runners Running
+ Container n8n-quant-research-run-7eedf571df3d Creating
+ Container n8n-quant-research-run-7eedf571df3d Created
+{"async_read_max": 16, "minute_batch_workers": 300, "pool_settings": {"max_size": 32, "min_size": 1, "timeout_seconds": 10}, "public_quote": {"batch_size": 80, "concurrency": 8, "enabled": false, "fallback_enabled": true}, "runtime": {"auction_capture": {"available_slots": 1, "occupied": 0, "queue_capacity": 0, "workers": 1}, "database": {"available_slots": 72, "occupied": 0, "queue_capacity": 64, "workers": 8}, "public_source": {"available_slots": 96, "occupied": 0, "queue_capacity": 64, "workers": 32}, "realtime_vendor": {"available_slots": 48, "occupied": 0, "queue_capacity": 32, "workers": 16}, "tdx_shadow": {"available_slots": 1, "occupied": 0, "queue_capacity": 0, "workers": 1}}}
