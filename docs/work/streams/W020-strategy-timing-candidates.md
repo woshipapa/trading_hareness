@@ -1,14 +1,14 @@
 # W020 策略分时候选板与盘后样本回流
 
-- state: building
+- state: released
 - holder: Codex 主会话，2026-10-15
 - goal: 让每套龙头/竞价/盘中/尾盘研究策略在对应时段展示候选票、参考买点、选股理由和缺失证据，并把当天候选保留给盘后结算与 AI 复盘
-- next: 等待用户按 owner code-only 流程发布；下一交易日核对竞价、盘中和尾盘实际样本
+- next: 下一交易日核对竞价、盘中和尾盘实际样本；收集样本后再做 AI 总结，不自动调整阈值
 - updated: 2026-10-15
 - plan: none
 - branch: main
-- head: d4ec93b5
-- release: none
+- head: f9db189e
+- release: owner-code-20261015-timing；edge-2026.10.15-timing；console-20261015T130233Z-f9db189e9287
 
 ## Requirements
 
@@ -30,7 +30,8 @@
 - [x] 4 为候选保留理由、参考价、缺失证据和盘后复盘字段；不改变 `live_effect=none`
 - [x] 5 在 Session Radar 页面展示分时策略候选、参考买点和选股理由；frontend typecheck/build 通过
 - [x] 6 focused release-path suite（14 tests）、边界检查、API contract 和 diff check 通过；全量 release-path suite 的既有 `test_settings` 因其他会话新增 local-spool 环境变量未声明而失败
-- [ ] 6 用户按 owner code-only 流程发布后，下一交易日核对竞价时段与盘中/尾盘阶段实际候选样本
+- [x] 7 owner code-only、edge adapter 和量化控制台均已发布；owner schema gate、健康检查、运行时摘要/PID 1 和 timing board 路由已核对
+- [ ] 8 下一交易日核对竞价时段与盘中/尾盘阶段实际候选样本
 
 ## Log
 
@@ -39,10 +40,11 @@
 - 2026-10-15 Codex：`scripts/release plan edce7d7a` 判定 owner 为 code-only overlay（2 个运行时代码文件），数据库已在所需 schema head；当前北京时间 20:04 落在 18:45-22:05 的 post-close-scheduler 禁重启窗口，未执行发布。
 - 2026-10-15 Codex：Session Radar 新增“分时策略候选 · 买点假设与理由”表格，直接消费 `timing_board`；前端发布属于独立 edge-quant-console 单元。
 - 2026-10-15 Codex：最终提交 `5d3daf17` 的只读发布计划仍显示 owner 在 18:45-22:05 禁重启窗口；owner overlay 和 edge console 均未执行发布。
+- 2026-10-15 Codex：用户确认北京时间已闭盘后执行发布。owner `owner-code-20261015-timing`（源 `f9db189e`）通过 schema gate 并切换；edge adapter `edge-2026.10.15-timing` 和控制台 `console-20261015T130233Z-f9db189e9287` 已激活。adapter/console 直接健康和源码指纹核对通过；bridge 保持独立的 `861ecbfa` 旧覆盖层。
+- 2026-10-15 Codex：发布后经 owner 路由读取 `timing_board`：`version=strategy-timing-board-v1`、16 行、`research_only=true`、`active_phase=post_close`；下一交易日只收集样本并交给 AI 复盘，不自动改阈值。
 
 ## Waiting on the user
 
-- [ ] 2026-10-15 owner code-only release 仍由用户按仓库发布流程执行；本线不自动写 owner 库或切换生产服务。
 
 ## Evidence
 
@@ -52,6 +54,8 @@
 - `quant-service/tests/test_strategy_cards_read_model.py`
 - `frontend/src/research/session-radar.ts`
 - `frontend/src/views/research/SessionRadarTab.vue`
+- `docs/RELEASE_SYNC_47.md` 附录 C
+- `docs/work/probes/2026-10-15-strategy-timing-release.out.txt`
 
 ## Running
 
@@ -66,4 +70,4 @@
 
 ## Resume here
 
-focused suite 已通过；全量 release-path suite 只剩其他会话的 settings 失败。发布后从 `/api/v1/strategies/cards` 读取 `timing_board`，再完成上面的交易日核对。
+focused suite 已通过；全量 release-path suite 只剩其他会话的 settings 失败。发布已完成，下一交易日从 `/api/v1/strategies/cards` 读取 `timing_board`，再完成上面的交易日核对。

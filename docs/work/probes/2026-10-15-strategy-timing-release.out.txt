@@ -1,0 +1,38 @@
+$ scripts/release status --sha f9db189e9287f78e65ea72329b30f2a677dc8922
+host   check                          observed                                                                                        result  expected
+edge   adapter /health                ok                                                                                              PASS    ok
+edge   adapter git_sha                f9db189e9287f78e65ea72329b30f2a677dc8922                                                        PASS    f9db189e9287
+edge   adapter release                edge-2026.10.15-timing                                                                          PASS    pinned (not hotfix*)
+edge   adapter runtime_source         image                                                                                           PASS    not source-overlay
+edge   runtime.env image              ghcr.io/woshipapa/trading-hareness-feishu-adapter:f9db189e9287f78e65ea72329b30f2a677dc8922      PASS    ...:f9db189e9287...
+edge   runtime.env overlay            false                                                                                           PASS    false/unset
+edge   larkagentx bridge              ok                                                                                              PASS    ok
+edge   bridge release                 hotfix-20261014T035902Z-861ecbfaa96e-3299                                                       FAIL    pinned from f9db189e9287
+edge   XHS collector /health          ok                                                                                              PASS    ok / Spider_XHS / cookie configured
+edge   XHS source commit              83132b3331d5d15bfcbc0092841c7faf576b5c75                                                        PASS    pinned external commit
+edge   XHS source digest              c83f859682403587f098f74ab8aea182421b186fdccdcb347281c189e5c7d9a1                                PASS    64-char SHA-256
+edge   XHS component manifest         edge-xhs                                                                                        PASS    edge-xhs / clean source
+edge   retired quant-intraday-edge    inactive/not-found                                                                              PASS    inactive/disabled
+owner  ~/trading_hareness             /home/stockpeer/.local/share/trading-hareness/releases/owner-full-20261012-20/trading_hareness  PASS    release symlink
+owner  quant-research :15682 /health  ok                                                                                              PASS    ok
+owner  quant-research :15682 git_sha  f9db189e9287f78e65ea72329b30f2a677dc8922                                                        PASS    f9db189e9287
+owner  scheduler :15683 /health       ok                                                                                              PASS    ok
+owner  scheduler :15683 git_sha       f9db189e9287f78e65ea72329b30f2a677dc8922                                                        PASS    f9db189e9287
+owner  main runtime profile           intraday_edge                                                                                   PASS    intraday_edge
+owner  alembic revision               20261010_ow0121                                                                                 PASS    20261010_ow0121
+owner  intraday-secrets.env           present                                                                                         PASS    present
+
+expected sha: f9db189e9287f78e65ea72329b30f2a677dc8922
+1 CHECK(S) FAILED
+release_status_exit=1 (bridge mismatch is expected because bridge is an independent old overlay)
+
+$ owner /health summary
+{"alembic": "20261010_ow0121", "git_sha": "f9db189e9287f78e65ea72329b30f2a677dc8922", "release": "owner-code-20261015-timing", "running_git_sha": "f9db189e9287f78e65ea72329b30f2a677dc8922", "schema_ready": true, "status": "ok"}
+$ strategy cards timing board summary
+{"active_phase": "post_close", "research_only": true, "status": "completed", "strategies": 16, "version": "strategy-timing-board-v1"}
+
+$ edge adapter /health summary
+{"git_sha": "f9db189e9287f78e65ea72329b30f2a677dc8922", "release": "edge-2026.10.15-timing", "runtime_source": "image", "status": "ok"}
+$ edge console pointers (relay release key)
+console_current=/opt/feishu-relay-edge/hotfix/quant-console/releases/console-20261015T130233Z-f9db189e9287
+console_sha=f9db189e9287f78e65ea72329b30f2a677dc8922
