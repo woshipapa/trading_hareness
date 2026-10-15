@@ -32,7 +32,8 @@
 - [x] 3 增加回归测试并完成 focused overlay 验证
 - [x] 4 完成全量 overlay、前端构建和发布计划（全量仅剩其他会话 `local_spool_*` 环境变量登记失败）
 - [x] 5 feature-readiness 并行读取、连接池生命周期锁、0130 覆盖索引迁移和 1/2/4/8 压力探针
-- [ ] 6 后续 owner 发布后回填线上耗时、statement count、连接池等待与隧道速率
+- [x] 6 盘后 Longhu 收盘请求去重、收盘 review overlap、日线补齐重复读收敛和有界 stage 并行探针
+- [ ] 7 后续 owner 发布后回填线上耗时、statement count、连接池等待与隧道速率
 
 ## Log
 
@@ -57,6 +58,8 @@
 - 2026-10-16：只读执行 `scripts/release plan a809ced7`：owner 当前库版本 `20261015_ow0122`，目标 `20261016_ow0130`，需先应用 0123--0130；计划因其他会话的 host-tree 路径判为 FULL，未执行 `--apply`。edge adapter/dashboard 与 xhs 也有其他会话改动，保持独立发布单元。
 - 2026-10-16：修正 0130 downgrade：删除覆盖索引后恢复 0129 的两个窄 `symbol` 索引；Alembic offline `20261016_ow0130:20261016_ow0129 --sql` 输出与 0129 schema 契约一致。focused overlay 145 项通过，head `2f26a916`。
 - 2026-10-16：更正 release plan 目标为最新提交 `2f26a916`：结论不变，owner 当前 `20261015_ow0122`，目标 `20261016_ow0130`，需先应用 0123--0130；因其他会话 host-tree 路径仍判 FULL，未执行 `--apply`。
+- 2026-10-16：盘后 Longhu 的 `all_a_universe` 与 `full_market_daily` 通过按交易日的成功短时 memo 共享一次底层 close；失败/blocked 不缓存且停机取消 in-flight。收盘 review 的指数上下文与 market snapshot 并行启动；daily close 的 roster+bars 改为一次 left join，并复用当日 bars，避免无变化时重复读取。
+- 2026-10-16：post-close orchestrator 对清理/日历/分析师文本、两类 analyst outcomes、四类温度/ETF/市场时点研究启用显式 bounded groups；当前源码合成探针 20 次中位 635.246 ms → 269.285 ms，峰值并发 1 → 4。探针只测编排层，不代表 owner/provider 吞吐；证据为 `docs/work/probes/2026-10-16-post-close-overlap.py` / `.out.txt`，决定记录为 `docs/decisions/0038-post-close-coalescing-and-bounded-overlap.md`。
 
 ## Waiting on the user
 
@@ -87,6 +90,8 @@
 - `docs/work/probes/2026-10-16-feature-readiness-overlap.py`
 - `docs/work/probes/2026-10-16-feature-readiness-overlap.out.txt`
 - `docs/work/probes/2026-10-16-feature-readiness-stress.py`
+- `docs/work/probes/2026-10-16-post-close-overlap.py`
+- `docs/decisions/0038-post-close-coalescing-and-bounded-overlap.md`
 - `docs/work/probes/2026-10-16-feature-readiness-stress.out.txt`
 - `quant-service/migrations/versions/20261016_ow0128_canonical_coverage_index.py`
 - `quant-service/migrations/versions/20261016_ow0129_coverage_symbol_indexes.py`
