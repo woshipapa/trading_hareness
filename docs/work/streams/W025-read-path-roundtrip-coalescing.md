@@ -60,6 +60,7 @@
 - 2026-10-16：更正 release plan 目标为最新提交 `2f26a916`：结论不变，owner 当前 `20261015_ow0122`，目标 `20261016_ow0130`，需先应用 0123--0130；因其他会话 host-tree 路径仍判 FULL，未执行 `--apply`。
 - 2026-10-16：盘后 Longhu 的 `all_a_universe` 与 `full_market_daily` 通过按交易日的成功短时 memo 共享一次底层 close；失败/blocked 不缓存且停机取消 in-flight。收盘 review 的指数上下文与 market snapshot 并行启动；daily close 的 roster+bars 改为一次 left join，并复用当日 bars，避免无变化时重复读取。
 - 2026-10-16：post-close orchestrator 对清理/日历/分析师文本、两类 analyst outcomes、四类温度/ETF/市场时点研究启用显式 bounded groups；当前源码合成探针 20 次中位 635.246 ms → 269.285 ms，峰值并发 1 → 4。探针只测编排层，不代表 owner/provider 吞吐；证据为 `docs/work/probes/2026-10-16-post-close-overlap.py` / `.out.txt`，决定记录为 `docs/decisions/0038-post-close-coalescing-and-bounded-overlap.md`。
+- 2026-10-16：远端观察台将轮询分成实时水位/扫描 15 秒和盘后研究/晋级结果 60 秒两档；手动刷新仍读取全部面板，任何失败仍清空对应面板，避免旧证据伪装成当前状态。定时读取从每 15 秒 11 个请求降为每 15 秒 5 个加每 60 秒 6 个，按调度频率计算平均请求量减少约 41%；前端 14 个测试文件、67 项通过，typecheck/build 通过，提交 `19ff8322`。
 
 ## Waiting on the user
 
