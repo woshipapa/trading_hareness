@@ -3,7 +3,7 @@ import { computed, inject, ref } from 'vue';
 import { Refresh, Link, Search } from '@element-plus/icons-vue';
 import { dashboardContextKey } from '../../dashboard-context';
 import { useRemoteQuantRuntime } from '../../composables/useRemoteQuantRuntime';
-import { freshnessOf, freshnessLabel, symbolFromRow } from '../../research/remote-runtime';
+import { freshnessOf, freshnessLabel, scanOverlapRows as buildScanOverlapRows, scanStageRows as buildScanStageRows, symbolFromRow } from '../../research/remote-runtime';
 
 const dashboard = inject(dashboardContextKey);
 if (!dashboard) throw new Error('research tab requires the dashboard shell context');
@@ -28,10 +28,8 @@ const openCardTonghuashun = () => {
 };
 const scanFreshness = computed(() => freshnessOf(runtime.latestScan.value?.scan?.observed_at));
 const scanPerformance = computed(() => runtime.latestScan.value?.scan?.source_status?.scan_performance ?? runtime.latestScan.value?.scan_performance ?? {});
-const scanStageRows = computed(() => Object.entries(scanPerformance.value.stage_ms ?? {}).map(([stage, milliseconds]) => ({
-  stage,
-  milliseconds: Number(milliseconds),
-})));
+const scanStageRows = computed(() => buildScanStageRows(scanPerformance.value.stage_ms, scanPerformance.value.total_ms));
+const scanOverlapRows = computed(() => buildScanOverlapRows(scanPerformance.value.overlap));
 const scanStageLabel = (stage: string) => ({
   session_and_watchlist: '会话与观察池',
   pre_capture: '采集前准备',
@@ -42,6 +40,20 @@ const scanStageLabel = (stage: string) => ({
   delivery_and_research: '提醒与研究分支',
   shadow_rotation: '轮换影子研究',
 }[stage] ?? stage);
+const scanOverlapLabel = (key: string) => ({
+  capture_and_memberships: '行情与成员关系',
+  capture_and_board_cache: '行情与板流状态',
+  enrichment_and_board_cache: '分钟增强与板流状态',
+  leader_flow_and_primary_persist: '全市场研究与主事务',
+  alert_delivery_and_leader_flow: '提醒投递与研究分支',
+  shadow_rotation_and_delivery: '影子轮换与投递',
+}[key] ?? key);
+const scanOverlapValue = (value: string) => ({
+  concurrent: '并行',
+  concurrent_after_watchlist: '观察池后并行',
+  concurrent_after_capture: '采集后并行',
+  concurrent_after_receipt: '回执后并行',
+}[value] ?? value);
 const healthState = (value: unknown) => value === 'healthy' || value === 'ready' ? 'success' : ['degraded', 'unavailable', 'disabled'].includes(String(value)) ? 'danger' : 'warning';
 const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.live_effect ?? runtime.promotion.value.live_effect ?? 'none');
 </script>
@@ -76,6 +88,22 @@ const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.
       <el-descriptions-item label="并行边界">{{ Object.keys(scanPerformance.overlap ?? {}).length || 0 }} 处</el-descriptions-item>
       <el-descriptions-item label="版本">{{ scanPerformance.schema_version ?? '-' }}</el-descriptions-item>
     </el-descriptions>
+    <div v-if="scanStageRows.length" class="scan-performance-visuals">
+      <div class="scan-stage-visual">
+        <div class="scan-visual-heading"><strong>阶段耗时比例</strong><small>相对本次扫描总耗时</small></div>
+        <div v-for="row in scanStageRows" :key="row.stage" class="scan-stage-visual-row">
+          <div class="scan-stage-visual-label"><span>{{ scanStageLabel(row.stage) }}</span><strong>{{ row.milliseconds }} ms</strong></div>
+          <div class="scan-stage-track" role="img" :aria-label="`${scanStageLabel(row.stage)} ${row.milliseconds} ms，占总耗时 ${row.share}%`"><span class="scan-stage-fill" :style="{ width: `${row.share}%` }" /></div>
+        </div>
+      </div>
+      <div class="scan-overlap-visual">
+        <div class="scan-visual-heading"><strong>Overlap 编排</strong><el-tag size="small" type="success">{{ scanOverlapRows.length }} 处</el-tag></div>
+        <el-space v-if="scanOverlapRows.length" wrap>
+          <el-tag v-for="row in scanOverlapRows" :key="row.key" size="small" type="info">{{ scanOverlapLabel(row.key) }} · {{ scanOverlapValue(row.value) }}</el-tag>
+        </el-space>
+        <el-empty v-else description="暂无并行遥测" :image-size="38" />
+      </div>
+    </div>
     <el-table v-if="scanStageRows.length" :data="scanStageRows" size="small" max-height="260">
       <el-table-column label="阶段" min-width="190"><template #default="{ row }">{{ scanStageLabel(row.stage) }}</template></el-table-column>
       <el-table-column prop="stage" label="内部键" min-width="220" show-overflow-tooltip />
@@ -121,3 +149,72 @@ const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.
     <el-empty v-else description="尚未读取决策卡" :image-size="64" />
   </el-dialog>
 </template>
+
+<style scoped>
+.scan-performance-visuals {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(240px, 0.75fr);
+  gap: 16px;
+  margin: 14px 0;
+}
+
+.scan-stage-visual,
+.scan-overlap-visual {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank);
+}
+
+.scan-visual-heading,
+.scan-stage-visual-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.scan-visual-heading {
+  margin-bottom: 12px;
+}
+
+.scan-visual-heading small {
+  color: var(--el-text-color-secondary);
+}
+
+.scan-stage-visual-row + .scan-stage-visual-row {
+  margin-top: 10px;
+}
+
+.scan-stage-visual-label {
+  margin-bottom: 5px;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+}
+
+.scan-stage-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+}
+
+.scan-stage-fill {
+  display: block;
+  min-width: 2px;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--el-color-primary), var(--el-color-success));
+}
+
+.scan-overlap-visual :deep(.el-space) {
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .scan-performance-visuals {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
