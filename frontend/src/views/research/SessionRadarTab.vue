@@ -7,7 +7,7 @@ import {
   BAND_LABELS, GATE_LABELS, HEALTH_LABELS, HEALTH_TYPES, SEGMENT_LABELS, auctionRows, bandCounts, boardText,
   breadthText, failingChecks, fieldHealthText, lineRankText,
   pctText, radarHeadline, radarOption, radarRows, shanghaiTime, shanghaiToday, stars, tone, yi,
-  type CardPick, type IndicatorHealth, type LimitDetailDay, type RadarDay, type StrategyCardsDay,
+  type CardPick, type IndicatorHealth, type LimitDetailDay, type RadarDay, type StrategyCardsDay, type StrategyTimingRow,
 } from '../../research/session-radar';
 
 const tradeDate = ref(shanghaiToday());
@@ -98,6 +98,22 @@ function eventText(pick: CardPick): string {
   return (pick.events ?? []).map((event) => event.label).join('；');
 }
 
+const PHASE_LABELS: Record<string, string> = {
+  auction: '竞价', intraday: '盘中', near_close: '尾盘', post_close: '盘后',
+};
+
+function phaseText(phase: string): string {
+  return PHASE_LABELS[phase] ?? phase;
+}
+
+function timingSymbols(row: StrategyTimingRow): string {
+  return row.candidates.map((candidate) => candidate.name ? `${candidate.name}（${candidate.symbol}）` : candidate.symbol).join('、') || '等待候选';
+}
+
+function timingReasons(row: StrategyTimingRow): string {
+  return row.candidates.flatMap((candidate) => candidate.selection_reasons).slice(0, 4).join('；') || row.timing_plans[0]?.why || '-';
+}
+
 function schedule() {
   if (timer) clearInterval(timer);
   timer = undefined;
@@ -149,7 +165,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
     </div>
     <el-empty v-else description="该日尚无雷达点（竞价撮合前只统计虚拟价分布）" :image-size="56" />
     <div class="radar-counts"><el-text size="small">{{ bandCounts(rows, band) }}</el-text><el-text size="small" type="info">{{ breadthText(rows) }}</el-text></div>
-    <el-text v-if="latestFlow" type="info" size="small">主力净额来源：{{ latestFlow.upstream ?? latestFlow.source ?? '-' }}（{{ latestFlow.boards }} 个行业板块，{{ shanghaiTime(latestFlow.observed_at) }}）；分板块视图不拆分主力净额。</el-text>
+    <el-text v-if="latestFlow" type="info" size="small">主力净额来源：{{ latestFlow.upstream ?? latestFlow.source ?? '-' }}（{{ latestFlow.boards }} 个行业板块，{{ shanghaiTime(latestFlow.observed_at) }}）；分板块视图不拆分主力净额。超过 3 分钟没有新的行业排行时这条线断开，不沿用旧值。</el-text>
     <el-table v-if="auction.length" :data="auction" size="small" max-height="220" class="section-gap">
       <el-table-column prop="time" label="竞价时刻" width="90" />
       <el-table-column prop="phase" label="阶段" width="120" />
@@ -233,6 +249,24 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
         </el-card>
       </el-col>
     </el-row>
+    <el-card shadow="never" class="section-gap" header="分时策略候选 · 买点假设与理由">
+      <el-alert type="info" :closable="false" show-icon
+        :title="`当前阶段：${phaseText(cards?.timing_board?.active_phase ?? '-') }。候选是研究样本，不是订单；缺失证据会留给盘后复盘。`" />
+      <el-table :data="cards?.timing_board?.strategies ?? []" size="small" class="section-gap" max-height="620">
+        <el-table-column label="策略" min-width="170">
+          <template #default="{ row }"><div>{{ row.name }}</div><el-text size="small" type="info">{{ row.strategy_key }} · {{ row.maturity }}</el-text></template>
+        </el-table-column>
+        <el-table-column label="阶段/状态" width="135">
+          <template #default="{ row }"><el-tag size="small" :type="row.status === 'candidates_available' ? 'success' : 'info'">{{ phaseText(row.active_phase) }}</el-tag><div><el-text size="small" type="info">{{ row.status === 'candidates_available' ? `${row.candidates.length} 个候选` : '等待候选' }}</el-text></div></template>
+        </el-table-column>
+        <el-table-column label="候选票" min-width="210"><template #default="{ row }">{{ timingSymbols(row) }}</template></el-table-column>
+        <el-table-column label="参考买点" min-width="300">
+          <template #default="{ row }"><div v-for="candidate in row.candidates" :key="`${row.strategy_key}-${candidate.symbol}`"><el-tag size="small" type="warning">{{ phaseText(candidate.phase) }} {{ candidate.window }}</el-tag> {{ candidate.buy_point }}<span v-if="candidate.missing_evidence.length" class="missing-evidence">（缺：{{ candidate.missing_evidence.join('、') }}）</span></div><span v-if="!row.candidates.length">{{ row.timing_plans[0]?.buy_point ?? '-' }}</span></template>
+        </el-table-column>
+        <el-table-column label="为什么选" min-width="250" show-overflow-tooltip><template #default="{ row }">{{ timingReasons(row) }}</template></el-table-column>
+      </el-table>
+      <el-text v-if="cards?.timing_board?.evening_review?.instruction" type="info" size="small">{{ cards.timing_board.evening_review.instruction }}</el-text>
+    </el-card>
     <el-collapse v-if="cards?.definitions" class="section-gap">
       <el-collapse-item title="口径说明" name="definitions">
         <el-descriptions :column="1" size="small" border>
@@ -317,6 +351,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .tone-down { color: #188038; }
 .card-return { font-size: 22px; font-weight: 700; }
 .event-stars { color: #e6a23c; letter-spacing: 1px; }
+.missing-evidence { color: #b88230; }
 .strategy-card :deep(.ticket-row) { background: #fff4f2; }
 @media (max-width: 720px) {
   .radar-visual { grid-template-columns: 1fr; }

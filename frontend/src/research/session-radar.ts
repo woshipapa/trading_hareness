@@ -67,15 +67,19 @@ function cellsOf(point: RadarPoint, band: string, segment: string): { pool: Cell
   return part && bands ? { pool: part.pool, bands, breadth: part.breadth ?? null } : null;
 }
 
-/** The main net as of a moment: the latest flow snapshot not after it. */
+/** A board-flow snapshot older than this is not carried forward. The capture runs once a minute. */
+const MAIN_NET_MAX_AGE_MS = 3 * 60 * 1000;
+
+/** The main net as of a moment: the latest flow snapshot not after it, and not a stale one. */
 function mainNetAsOf(flows: MainNetPoint[], observedAt: string): number | null {
   const at = Date.parse(observedAt);
-  let value: number | null = null;
+  let chosen: MainNetPoint | null = null;
   for (const flow of flows) {
     if (Date.parse(flow.observed_at) > at) break;
-    value = flow.main_net;
+    chosen = flow;
   }
-  return value;
+  if (!chosen || at - Date.parse(chosen.observed_at) > MAIN_NET_MAX_AGE_MS) return null;
+  return chosen.main_net;
 }
 
 export function radarRows(day: RadarDay | null | undefined, band: string, segment: string): RadarRow[] {
@@ -262,6 +266,19 @@ export type CardPick = {
   events?: { kind: string; label: string }[]; event_count?: number;
   resonance?: number; resonance_lines?: string[];
 };
+export type TimingCandidate = {
+  strategy_key: string; symbol: string; name?: string | null; status: string; research_action: string;
+  phase: string; window: string; entry_mode: string; buy_point: string; entry_reference?: number | null;
+  selection_reasons: string[]; missing_evidence: string[]; research_only: boolean; live_effect: string;
+};
+export type TimingPlan = {
+  phase: string; window: string; entry_mode: string; buy_point: string; why: string; evidence: string[];
+};
+export type StrategyTimingRow = {
+  strategy_key: string; name: string; model_version?: string | null; maturity: string; status: string;
+  active_phase: string; timing_plans: TimingPlan[]; candidates: TimingCandidate[];
+  research_only: boolean; live_effect: string;
+};
 export type LeaderboardCell = {
   days: number; picks: number; scored: number; mean_open_to_close_pct: number | null; rose_share: number | null;
   opened_at_limit: number; without_bar: number;
@@ -282,6 +299,8 @@ export type StrategyCardsDay = {
   previous_close_regime?: { regime_label?: string | null } | null; cards: StrategyCard[];
   data_health?: { all_eligible: boolean; fields: Record<string, { indicator: string; status: string; decision_eligible: boolean }> };
   leaderboard?: Record<string, ({ strategy_key: string; name: string } & LeaderboardCell)[]>;
+  timing_board?: { version: string; trade_date?: string | null; active_phase: string; strategies: StrategyTimingRow[];
+    research_only: boolean; live_effect: string; evening_review?: { instruction: string } };
   definitions?: Record<string, string>;
 };
 export type LimitStock = {

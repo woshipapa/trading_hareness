@@ -28,7 +28,8 @@
 - [x] 2 将竞价快照价格和成交量带入策略卡片，并输出每卡的 timing plan/candidates
 - [x] 3 在 `/api/v1/strategies/cards` 响应加入覆盖全部契约策略的 `timing_board`
 - [x] 4 为候选保留理由、参考价、缺失证据和盘后复盘字段；不改变 `live_effect=none`
-- [x] 5 focused release-path suite（14 tests）、边界检查、API contract 和 diff check 通过；全量 release-path suite 的既有 `test_settings` 因其他会话新增 local-spool 环境变量未声明而失败
+- [x] 5 在 Session Radar 页面展示分时策略候选、参考买点和选股理由；frontend typecheck/build 通过
+- [x] 6 focused release-path suite（14 tests）、边界检查、API contract 和 diff check 通过；全量 release-path suite 的既有 `test_settings` 因其他会话新增 local-spool 环境变量未声明而失败
 - [ ] 6 用户按 owner code-only 流程发布后，下一交易日核对竞价时段与盘中/尾盘阶段实际候选样本
 
 ## Log
@@ -36,6 +37,7 @@
 - 2026-10-15 Codex：现有 `strategy_cards` 已能读取前一交易日候选台账、09:25 竞价、盘中 entry 信号和盘后 leaderboard，因此将分时解释层接在这里，避免新增孤立采集链。
 - 2026-10-15 Codex：为全部 15 个 registry contract 添加至少一个时段计划；teacher、dragon、limit-up continuation、Longhu、ten-day rotation 明确提供竞价/盘中计划，base/pattern 明确提供尾盘/盘后计划。
 - 2026-10-15 Codex：`scripts/release plan edce7d7a` 判定 owner 为 code-only overlay（2 个运行时代码文件），数据库已在所需 schema head；当前北京时间 20:04 落在 18:45-22:05 的 post-close-scheduler 禁重启窗口，未执行发布。
+- 2026-10-15 Codex：Session Radar 新增“分时策略候选 · 买点假设与理由”表格，直接消费 `timing_board`；前端发布属于独立 edge-quant-console 单元。
 
 ## Waiting on the user
 
@@ -47,6 +49,8 @@
 - `quant-service/app/strategy_cards_read_model.py`
 - `quant-service/tests/test_strategy_timing_board.py`
 - `quant-service/tests/test_strategy_cards_read_model.py`
+- `frontend/src/research/session-radar.ts`
+- `frontend/src/views/research/SessionRadarTab.vue`
 
 ## Running
 
