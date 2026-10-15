@@ -41,6 +41,7 @@
 - 2026-10-16 02:41 Asia/Shanghai: primary signal receipt 提交后，ten-day shadow rotation 改为与 alert delivery/teacher research 并行；shadow 仍只写 research evidence，独立失败继续降级，响应前统一 join。新增事件型回归验证串行实现会等待死锁、并行实现可完成。
 - 2026-10-16 03:13 Asia/Shanghai: session gate 与 watchlist 读取、规则保留清理与 outbox retry 改为有界并行并在 capture 前统一 join。扫描事务先计算整个观察池，再批量读取事件状态；200 标的合成探针从 600 次状态 SQL 降为 3 次。报价证据、规则快照和拒绝原因也通过 cursor batch 写入，单写事件顺序保持不变。
 - 2026-10-16 03:42 Asia/Shanghai: 扫描准备复用同一事务刚写入的纸面持仓与组合快照，并把 cash/equity 的准备读合并为一个标量查询；市场事件非空分页用窗口计数消除第二次 count 往返，空页保留精确回退。策略形态页的 board 与龙虎榜上下文改为通过既有有界 runner 并行读取；新增 `20261016_ow0123` 读模型索引迁移。
+- 2026-10-16：影子轮换读取同一观察时刻的成员关系与影子行情改为有界并行，结果在特征构建前统一汇合；主扫描信号事务、研究表边界和失败降级语义不变。新增 overlap 回归，focused overlay 14 项通过；全量 overlay 3324 项仍只有共享工作树 `local_spool_*` 环境变量未登记导致的既有 settings failure。
 
 ## Waiting on the user
 
