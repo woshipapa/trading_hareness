@@ -23,6 +23,11 @@ _SOURCE_NAMES = {
     "tushare_super_rt_min_daily",
 }
 
+# The licensed owner/gateway tops out at eight Longhu minute calls in flight.
+# Keep local fan-out at that measured provider ceiling instead of creating one
+# executor submission per watch symbol.
+MINUTE_CAPTURE_MAX_IN_FLIGHT = 8
+
 
 def minute_row_datetime(raw_row: dict[str, Any], trading_date: date) -> datetime | None:
     """Resolve a minute row only if its explicit date matches the session.
@@ -207,6 +212,7 @@ class IntradayMinuteCaptureActions:
         parse_minute: Callable[[dict[str, Any]], dict[str, Any]],
         ensure_instrument: Callable[[Any, str], None],
         retention_days: Callable[[], int],
+        max_in_flight: int = MINUTE_CAPTURE_MAX_IN_FLIGHT,
     ) -> dict[str, Any]:
         """Capture current-session rows through an injected persistence seam."""
         active, reason = await realtime_session()
@@ -215,19 +221,22 @@ class IntradayMinuteCaptureActions:
         local_now = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai"))
         trading_date = local_now.date()
 
+        gate = asyncio.Semaphore(max(1, min(MINUTE_CAPTURE_MAX_IN_FLIGHT, int(max_in_flight))))
+
         async def fetch_one(symbol: str) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, str | None]:
-            try:
-                if fetch_minutes_with_source is not None:
-                    rows, source = await fetch_minutes_with_source(symbol)
-                else:
-                    rows = await fetch_minutes(symbol)
-                    source = {"provider": "tencent_free", "api_name": "minute/query", "status": "completed"}
-                return symbol, rows, source, None
-            # Transport ownership stays inside the injected provider adapter.
-            # This action only turns its bounded failure into per-symbol
-            # research evidence; it must not import or classify HTTP clients.
-            except Exception as error:  # noqa: BLE001 - one symbol must not stop the bounded basket
-                return symbol, [], None, str(error)[:300]
+            async with gate:
+                try:
+                    if fetch_minutes_with_source is not None:
+                        rows, source = await fetch_minutes_with_source(symbol)
+                    else:
+                        rows = await fetch_minutes(symbol)
+                        source = {"provider": "tencent_free", "api_name": "minute/query", "status": "completed"}
+                    return symbol, rows, source, None
+                # Transport ownership stays inside the injected provider adapter.
+                # This action only turns its bounded failure into per-symbol
+                # research evidence; it must not import or classify HTTP clients.
+                except Exception as error:  # noqa: BLE001 - one symbol must not stop the bounded basket
+                    return symbol, [], None, str(error)[:300]
 
         results = await asyncio.gather(*(fetch_one(symbol) for symbol in symbols), return_exceptions=True)
         keep_days = retention_days()

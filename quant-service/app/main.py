@@ -659,6 +659,7 @@ from .longhu_schema_profile_repository import schema_profile as longhu_schema_pr
 from .longhu_vendor_source import (
     configured as longhu_vendor_configured,
     intraday_source as longhu_intraday_source,
+    minute_batch_workers,
     tencent_quotes_blocking,
 )
 from .longhu_limits import intraday_longhu_max_symbols
@@ -2587,6 +2588,7 @@ async def capture_intraday_minute_sessions(symbols: list[str]) -> dict[str, Any]
         parse_minute=offline_minute_row,
         ensure_instrument=ensure_offline_instrument,
         retention_days=intraday_minute_profile_retention_days,
+        max_in_flight=minute_batch_workers(),
     )
 
 

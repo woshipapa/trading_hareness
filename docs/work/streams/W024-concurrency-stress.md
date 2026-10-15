@@ -51,6 +51,7 @@
 - 2026-10-16 01:34 Asia/Shanghai：`scripts/release plan c926ef67` 只读结果显示 owner 必须走 FULL release（compose/env 示例改变），当前窗口允许，owner schema gate 目标为 `20261015_ow0122`；未执行 `--apply`。
 - 2026-10-16 02:33 Asia/Shanghai：继续盘点研究读取门槛：盘口逻辑池软件 ceiling 从 160 提到 200，分钟横截面研究读取上限从 50 提到 200；Tencent 单次最多 80 只仍拆为 80/80/40，licensed Longhu 仍最多 8 路。200 只盘口/分钟池定向 overlay 回归 21 项通过，未改变 provider 或交易决策边界。
 - 2026-10-16 02:41 Asia/Shanghai：实时扫描的 Tencent 盘口批次改为复用已验证的 80 只上游合同；200 只观察池请求从 5 批降为 80/80/40 三批，Eastmoney 40 只批次和 licensed Longhu 8 路保持不变。新增 200 只 capture 回归与 scan overlap 定向 overlay 共 22 项通过。
+- 2026-10-16 02:48 Asia/Shanghai：盘末分钟 profile 的 per-symbol fan-out 增加 semaphore，复用 `LONGHU_MINUTE_BATCH_WORKERS` 的默认 8/硬上限 8；200 只不会再一次性向 realtime executor 提交并触发饱和后逐票误 fallback。定向 minute/provider overlay 86 项仅保留既有 W016 local-spool settings 登记失败。
 
 ## Waiting on the user
 

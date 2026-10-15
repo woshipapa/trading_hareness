@@ -6,7 +6,8 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from app.intraday_minute_capture_actions import (
-    fetch_longhu_first_minute_rows, minute_row_datetime, minute_storage_source, store_session_minutes,
+    MINUTE_CAPTURE_MAX_IN_FLIGHT, fetch_longhu_first_minute_rows, minute_row_datetime, minute_storage_source,
+    store_session_minutes,
 )
 
 
@@ -132,6 +133,49 @@ class IntradayMinuteCaptureActionTests(unittest.TestCase):
         self.assertEqual(insert_calls[0][1][10], "longhu_intraday_minutes")
         delete_sql = next(sql for sql, _params in connection.calls if "DELETE FROM quant.intraday_minute_sessions" in sql)
         self.assertIn("longhu_intraday_minutes", delete_sql)
+
+    def test_capture_limits_symbol_fanout_to_the_licensed_ceiling(self) -> None:
+        active = 0
+        maximum_seen = 0
+
+        async def fetch_source(_symbol: str):
+            nonlocal active, maximum_seen
+            active += 1
+            maximum_seen = max(maximum_seen, active)
+            await asyncio.sleep(0)
+            active -= 1
+            return [], {"storage_source": "longhu_intraday_minutes", "provider": "longhuvip"}
+
+        class Connection:
+            def execute(self, *_args, **_kwargs):
+                return None
+
+        class Database:
+            def transaction(self):
+                class Tx:
+                    def __enter__(self_inner):
+                        return Connection()
+
+                    def __exit__(self_inner, *exc):
+                        return False
+                return Tx()
+
+        async def run_database(fn, **_kwargs):
+            return fn()
+
+        action = __import__(
+            "app.intraday_minute_capture_actions", fromlist=["IntradayMinuteCaptureActions"],
+        ).IntradayMinuteCaptureActions(Database())
+        symbols = [f"{index:06d}.SZ" for index in range(1, 13)]
+        result = asyncio.run(action.capture(
+            symbols, realtime_session=lambda: asyncio.sleep(0, result=(True, "open")),
+            fetch_minutes=lambda _symbol: asyncio.sleep(0, result=[]), fetch_minutes_with_source=fetch_source,
+            run_database=run_database, parse_minute=lambda _row: {},
+            ensure_instrument=lambda *_args: None, retention_days=lambda: 7, max_in_flight=3,
+        ))
+        self.assertEqual(MINUTE_CAPTURE_MAX_IN_FLIGHT, 8)
+        self.assertLessEqual(maximum_seen, 3)
+        self.assertEqual(result["status"], "failed")
 
 
 
