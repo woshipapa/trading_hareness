@@ -145,6 +145,30 @@ class WatchQuoteCaptureTests(unittest.TestCase):
         self.assertEqual(capture.eastmoney_watch_flow_status["request_status"], "completed")
         self.assertTrue(capture.eastmoney_watch_flow_status["research_confirmation_only"])
 
+    def test_tencent_capture_uses_verified_eighty_symbol_batches(self):
+        async def all_a_snapshot():
+            return [], {"status": "unavailable"}
+
+        direct_batches = []
+
+        async def direct(symbols, *, max_symbols):
+            direct_batches.append((len(symbols), max_symbols))
+            return [{"symbol": symbol, "close": 10.0} for symbol in symbols]
+
+        async def empty(*_args, **_kwargs):
+            return []
+
+        symbols = [f"{index:06d}.SZ" for index in range(1, 201)]
+        capture = asyncio.run(capture_watch_quotes(
+            symbols, datetime(2026, 8, 22, 1, tzinfo=timezone.utc), 20.0,
+            self.dependencies(
+                all_a_snapshot=all_a_snapshot, tencent_watch_quotes=direct,
+                sina_quotes=empty, eastmoney_watch_flows=empty, calls=[],
+            ),
+        ))
+        self.assertEqual(direct_batches, [(80, 80), (80, 80), (40, 80)])
+        self.assertEqual(len(capture.fresh_watch_rows), 200)
+
     def test_licensed_quote_overlays_tencent_and_reports_independent_status(self):
         async def all_a_snapshot():
             return [], {"status": "unavailable"}

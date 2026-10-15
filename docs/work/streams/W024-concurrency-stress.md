@@ -50,6 +50,7 @@
 - 2026-10-16 01:33 Asia/Shanghai：提交 `c926ef67` `perf: expand software capacity ceilings`，包含代码 ceiling、owner overlay 参数、ADR 0028、压测证据与定向回归；当前仍未向 owner 发布。
 - 2026-10-16 01:34 Asia/Shanghai：`scripts/release plan c926ef67` 只读结果显示 owner 必须走 FULL release（compose/env 示例改变），当前窗口允许，owner schema gate 目标为 `20261015_ow0122`；未执行 `--apply`。
 - 2026-10-16 02:33 Asia/Shanghai：继续盘点研究读取门槛：盘口逻辑池软件 ceiling 从 160 提到 200，分钟横截面研究读取上限从 50 提到 200；Tencent 单次最多 80 只仍拆为 80/80/40，licensed Longhu 仍最多 8 路。200 只盘口/分钟池定向 overlay 回归 21 项通过，未改变 provider 或交易决策边界。
+- 2026-10-16 02:41 Asia/Shanghai：实时扫描的 Tencent 盘口批次改为复用已验证的 80 只上游合同；200 只观察池请求从 5 批降为 80/80/40 三批，Eastmoney 40 只批次和 licensed Longhu 8 路保持不变。新增 200 只 capture 回归与 scan overlap 定向 overlay 共 22 项通过。
 
 ## Waiting on the user
 

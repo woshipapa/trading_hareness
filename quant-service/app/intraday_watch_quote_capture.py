@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from .intraday_derived_flow_metrics import DERIVED_FLOW_LABELS
 from .platform.evidence_contracts import all_a_snapshot_contract_keys, materialize_evidence_status
-from .intraday_price_priority import fresh_price_rows
+from .intraday_price_priority import PUBLIC_ORDER_BOOK_BATCH_SIZE, fresh_price_rows
 
 
 def _parse_upstream_timestamp(value: Any, *, timezone_hint: timezone = timezone.utc) -> datetime | None:
@@ -79,10 +79,9 @@ async def _batched_provider_fetch(
 ) -> list[dict[str, Any]]:
     """Fetch an expanded observation pool using audited provider batch sizes.
 
-    Providers retain their independently verified request cap (currently 40)
-    while the user-facing observation pool can be expanded to 100.  Partial
-    batch failures are preserved as partial evidence; only an all-batch
-    failure is raised so the caller can activate its existing fallback path.
+    Each caller supplies its independently verified provider batch size. Partial
+    batch failures are preserved as partial evidence; only an all-batch failure
+    is raised so the caller can activate its existing fallback path.
     """
     unique = list(dict.fromkeys(str(symbol).upper() for symbol in symbols))
     if not unique:
@@ -248,7 +247,7 @@ async def capture_watch_quotes(
     # Tencent remains an independent cross-check, not the preferred price.
     # Start it in parallel so a slow public source cannot delay Longhu's call.
     public_task = asyncio.create_task(_batched_provider_fetch(
-        dependencies.tencent_watch_quotes, symbols, batch_size=40,
+        dependencies.tencent_watch_quotes, symbols, batch_size=PUBLIC_ORDER_BOOK_BATCH_SIZE,
     ))
     public_task.add_done_callback(dependencies.consume_background_exception)
     try:
