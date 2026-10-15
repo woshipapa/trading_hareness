@@ -311,17 +311,23 @@ async def _surge_and_board_evidence(
     mapped_peer_groups: dict[str, dict[str, Any]],
     anomaly_symbols: list[str],
     observed_at: datetime,
+    *,
+    board_cache_task: asyncio.Task[dict[str, Any]] | None = None,
 ) -> tuple[tuple[dict[str, dict[str, Any]], dict[str, Any]], dict[str, Any]]:
-    """Overlap minute enrichment with the already-cached board-flow read."""
+    """Overlap minute enrichment with a board-flow read started as early as possible.
+
+    The board snapshot has no dependency on quote capture or exact memberships.
+    A caller may therefore start it while those inputs are in flight; the
+    helper still owns both tasks until they are joined or cancelled.
+    """
     surge_task = asyncio.create_task(
         _surge_context_with_priority(
             dependencies.surge_context, watches, mapped_peer_groups, anomaly_symbols,
         ),
         name="intraday-scan-minute-enrichment",
     )
-    board_task = asyncio.create_task(
-        dependencies.board_cache_evidence(observed_at),
-        name="intraday-scan-board-cache",
+    board_task = board_cache_task or asyncio.create_task(
+        dependencies.board_cache_evidence(observed_at), name="intraday-scan-board-cache",
     )
     tasks = [surge_task, board_task]
     try:
@@ -512,34 +518,50 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     # scan start: the watch/membership reads above cross the database tunnel
     # and took >5 s at times on 2026-09-22, which made every fresh Longhu row a
     # "future_timestamp" and every Tencent row not-fresh in the same scan.
-    quote_capture, membership_rows = await _capture_with_memberships(
-        dependencies, selected_symbols, observed_at, quote_timestamp_slo_seconds,
+    # Board-flow freshness is an independent read. Start it before provider
+    # capture so a slow quote batch does not add another serial database wait.
+    # The task remains owned by this scan and is cancelled on every pre-join
+    # failure; it never becomes detached background work.
+    board_cache_task = asyncio.create_task(
+        dependencies.board_cache_evidence(observed_at), name="intraday-scan-board-cache",
     )
-    mark_stage("capture_and_memberships")
-    # The leader-flow branch can evaluate its all-A snapshot and local
-    # references while the primary scan is being persisted.  It must wait
-    # before its first scan_id foreign-key write; the event is released only
-    # after persist_signals returns from the committed transaction.
-    receipt_ready = asyncio.Event()
+    xiaojie_task: asyncio.Task[Any] | None = None
+    try:
+        quote_capture, membership_rows = await _capture_with_memberships(
+            dependencies, selected_symbols, observed_at, quote_timestamp_slo_seconds,
+        )
+        mark_stage("capture_and_memberships")
+        # The leader-flow branch can evaluate its all-A snapshot and local
+        # references while the primary scan is being persisted.  It must wait
+        # before its first scan_id foreign-key write; the event is released only
+        # after persist_signals returns from the committed transaction.
+        receipt_ready = asyncio.Event()
 
-    async def run_xiaojie_safely() -> dict[str, Any]:
-        try:
-            return await _leader_flow(
-                scan_id, observed_at, quote_capture, dependencies,
-                before_persist=receipt_ready.wait,
-            )
-        except Exception as error:  # noqa: BLE001 - never fail the primary scan
-            return {"status": "degraded", "reason": str(error)[:240]}
+        async def run_xiaojie_safely() -> dict[str, Any]:
+            try:
+                return await _leader_flow(
+                    scan_id, observed_at, quote_capture, dependencies,
+                    before_persist=receipt_ready.wait,
+                )
+            except Exception as error:  # noqa: BLE001 - never fail the primary scan
+                return {"status": "degraded", "reason": str(error)[:240]}
 
-    xiaojie_task = (
-        asyncio.create_task(run_xiaojie_safely(), name="intraday-scan-xiaojie-research")
-        if dependencies.xiaojie_leader_flow is not None else None
-    )
-    mapped_peer_groups = dependencies.mapped_peers(selected_symbols, membership_rows)
-    anomaly_symbols = quote_volume_anomaly_symbols(watches, quote_capture.quotes)
-    (surge_features, surge_source), board_cache_evidence = await _surge_and_board_evidence(
-        dependencies, watches, mapped_peer_groups, anomaly_symbols, observed_at,
-    )
+        xiaojie_task = (
+            asyncio.create_task(run_xiaojie_safely(), name="intraday-scan-xiaojie-research")
+            if dependencies.xiaojie_leader_flow is not None else None
+        )
+        mapped_peer_groups = dependencies.mapped_peers(selected_symbols, membership_rows)
+        anomaly_symbols = quote_volume_anomaly_symbols(watches, quote_capture.quotes)
+        (surge_features, surge_source), board_cache_evidence = await _surge_and_board_evidence(
+            dependencies, watches, mapped_peer_groups, anomaly_symbols, observed_at,
+            board_cache_task=board_cache_task,
+        )
+    except BaseException:
+        pending_tasks = [board_cache_task]
+        if xiaojie_task is not None:
+            pending_tasks.append(xiaojie_task)
+        await _cancel_tasks(pending_tasks)
+        raise
     surge_source["minute_enrichment_priority"] = {
         "symbols": anomaly_symbols,
         "reason": "quote_volume_anomaly",

@@ -190,6 +190,49 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
         result = asyncio.run(run_watchlist_scan(self.request(), dependencies))
         self.assertEqual(result["status"], "completed")
 
+    def test_board_cache_starts_while_quote_capture_is_in_flight(self):
+        observed_at = datetime(2026, 8, 24, 2, tzinfo=timezone.utc)
+        capture_started = asyncio.Event()
+        board_started = asyncio.Event()
+
+        async def session():
+            return True, "continuous auction"
+
+        async def watches(_):
+            return [{"symbol": "000001.SZ"}]
+
+        async def capture(symbols, _observed, _slo):
+            capture_started.set()
+            await board_started.wait()
+            return SimpleNamespace(
+                quotes={symbol: {"price": 10.0} for symbol in symbols}, all_a_rows=[],
+                fresh_watch_rows=[], sina_watch_rows=[], eastmoney_watch_flow_rows=[],
+                eastmoney_watch_flow_status={"status": "fresh"}, derived_flow_status={"status": "fresh"},
+                all_a_snapshot_status={"status": "unavailable"}, latency_ms=1,
+            )
+
+        async def board(_observed_at):
+            await capture_started.wait()
+            board_started.set()
+            return {"status": "cached"}
+
+        async def surge(*_args, **_kwargs):
+            return {}, {}
+
+        dependencies = self.dependencies(
+            now_utc=lambda: observed_at, realtime_session=session, load_watches=watches,
+            capture_quotes=capture, board_cache_evidence=board, surge_context=surge,
+            build_source_status=lambda **kwargs: {"eastmoney_board_flow": kwargs["board_cache_evidence"]},
+            persist_signals=lambda *_args, **_kwargs: asyncio.sleep(0, result=[]),
+        )
+
+        async def bounded_scan():
+            return await asyncio.wait_for(run_watchlist_scan(self.request(), dependencies), timeout=1.0)
+
+        result = asyncio.run(bounded_scan())
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["source_status"]["eastmoney_board_flow"], {"status": "cached"})
+
     def test_minute_enrichment_and_board_cache_overlap_after_capture(self):
         observed_at = datetime(2026, 8, 24, 2, tzinfo=timezone.utc)
         surge_started = asyncio.Event()

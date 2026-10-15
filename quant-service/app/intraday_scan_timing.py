@@ -61,6 +61,7 @@ def build_scan_performance(
         },
         "overlap": {
             "capture_and_memberships": "concurrent",
+            "capture_and_board_cache": "concurrent_after_watchlist",
             "enrichment_and_board_cache": "concurrent",
             "leader_flow_and_primary_persist": "concurrent_after_capture",
             "alert_delivery_and_leader_flow": "concurrent_after_receipt",

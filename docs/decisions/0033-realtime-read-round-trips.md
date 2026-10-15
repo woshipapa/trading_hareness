@@ -13,10 +13,13 @@
 2. 市场事件列表使用 `count(*) over()` 在非空页中携带总数并剥离内部列；超出末页的空页保留一次精确 `count(*)` 回退，因此分页契约不变。同步和异步读模型保持同一行为。
 3. 策略形态页的 board context 与龙虎榜 context 通过现有有界数据库 runner 并行读取；各自的事务、超时和错误传播边界不变。
 4. 为事件和策略形态读路径增加幂等索引迁移 `20261016_ow0123`。依赖该迁移的 owner 代码只能在 schema gate 确认库已到该版本后发布。
+5. 实时扫描在 session/watchlist gate 通过后立即启动只读 board-flow freshness 读取，让它与行情抓取和精确 membership 读取重叠；任务仍由当前 scan 持有，在 join 前失败会取消，不形成 detached background work。
 
 ## 后果
 
 正常事件分页从两次 SQL 往返降为一次；只有 offset 超出结果集时才执行回退 count。扫描准备省去同一事务中的持仓和快照重复读取。两个独立的策略上下文读共享等待时间，慢的一支仍受原有 30 秒 runner 超时约束。索引会增加少量写入维护成本，需结合 owner 的真实执行计划和锁等待复核。
+
+实时扫描的 board-flow 读不再等待 provider capture 完成；当行情抓取或 membership 读取较慢时，状态证据可以在同一等待窗口内完成。board 读取仍使用扫描时间点计算年龄，失败仍沿原有 scan failure path 传播，任务取消和重放边界不变。
 
 这些改动只优化研究读模型、证据落盘和纸面扫描准备，不改变策略资格、point-in-time 边界、事件幂等顺序、provider 并发上限或任何 live effect。
 
@@ -25,4 +28,5 @@
 - `test_intraday_scan_repository.py` 和 `test_paper_execution.py` 验证复用行不会改变持仓状态和持久化 payload。
 - `test_market_event_reads.py` 覆盖非空页单往返和空页精确计数回退。
 - `test_strategy_pattern_read_model.py` 用互相等待的 runner 验证两个上下文确实重叠，避免回归成串行调用。
+- `test_intraday_watchlist_scan_service.py` 用互相等待的 capture/board tasks 验证 board freshness 读取在行情抓取仍进行时已启动，并验证最终状态仍来自已 join 的结果。
 - overlay 回归、`py_compile`、组件边界检查和 `git diff --check` 在提交前运行；owner 当前仍需先应用 `20261016_ow0123`，线上收益需发布后用真实慢事务、执行计划和隧道等待复测。
