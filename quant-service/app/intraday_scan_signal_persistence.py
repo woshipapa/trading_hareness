@@ -20,6 +20,30 @@ from .stable_json import tolerant_json
 logger = logging.getLogger(__name__)
 
 
+_SCAN_REJECTION_SQL = """INSERT INTO quant.intraday_scan_rejections(
+       scan_id,symbol,model_version,observed_at,outcome,reason_codes,evidence)
+   VALUES(%s,%s,%s,%s,%s,%s,%s)
+   ON CONFLICT(scan_id,symbol,model_version) DO UPDATE SET
+     outcome=EXCLUDED.outcome,reason_codes=EXCLUDED.reason_codes,evidence=EXCLUDED.evidence"""
+
+_QUOTE_OBSERVATION_SQL = """INSERT INTO quant.intraday_quote_observations(
+       scan_id,symbol,observed_at,source_name,price,pct_change,volume_ratio,turnover_rate,main_net_inflow,raw)
+   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+
+
+def _executemany_or_execute(connection: Any, statement: str, params: list[tuple[Any, ...]]) -> None:
+    """Use one cursor batch while retaining the small replay connection seam."""
+    if not params:
+        return
+    cursor_factory = getattr(connection, "cursor", None)
+    if callable(cursor_factory):
+        with cursor_factory() as cursor:
+            cursor.executemany(statement, params)
+        return
+    for values in params:
+        connection.execute(statement, values)
+
+
 def scan_rejection_reasons(
     quote: dict[str, Any] | None,
     daily_factors: dict[str, Any] | None,
@@ -70,6 +94,10 @@ class IntradayScanSignalPersistenceDependencies:
     load_event_state: Callable[..., Any]
     persist_generated_signals: Callable[..., list[dict[str, Any]]]
     signal_event_persistence_dependencies: Any
+    persist_rule_input_snapshots: Callable[..., Any] | None = None
+    # Production scans use the basket form below. Keep the single-symbol
+    # callback as a compatibility fallback for replay and small test adapters.
+    load_event_states: Callable[..., dict[str, Any]] | None = None
     # Heavy per-stock evidence (raw quote row, rule-input snapshot) at most every
     # N seconds unless the stock produced a signal; ``None`` keeps every scan.
     evidence_throttle: Any = None
@@ -169,6 +197,14 @@ def persist_scan_signals(
     )
     signals: list[dict[str, Any]] = []
     tape_rows: dict[str, dict[str, Any]] = {}
+    # Freeze and evaluate the complete watch basket before reading event state.
+    # Rule generation is pure; the production repository can therefore fetch
+    # the three event-state projections once instead of once per symbol.
+    prepared_rows: list[dict[str, Any]] = []
+    signal_keys_by_symbol: dict[str, list[str]] = {}
+    rejection_params: list[tuple[Any, ...]] = []
+    heavy_quote_params: list[tuple[Any, ...]] = []
+    heavy_snapshot_rows: list[dict[str, Any]] = []
     for watch in watches:
         symbol = str(watch["symbol"])
         quote = quotes.get(symbol)
@@ -193,13 +229,30 @@ def persist_scan_signals(
         }
 
         def persist_heavy_evidence() -> None:
+            if dependencies.persist_rule_input_snapshots is not None:
+                if quote:
+                    quote_raw = dict(quote.get("raw") or {})
+                    quote_raw["_observation_source"] = quote_source_name
+                    quote_raw["_price_source"] = quote.get("price_source")
+                    heavy_quote_params.append((
+                        scan_id, symbol, observed_at, quote_source_name, quote.get("price"), quote.get("pct_change"),
+                        quote.get("volume_ratio"), quote.get("turnover_rate"), quote.get("main_net_inflow"),
+                        tolerant_json(dependencies.json_safe(quote_raw)),
+                    ))
+                heavy_snapshot_rows.append({
+                    "scan_id": scan_id, "observed_at": observed_at, "watch": watch, "quote": quote,
+                    "previous_quote": previous_quote, "daily_factors": daily_factors,
+                    "minute_features": minute_feature, "peer_context": peer_context,
+                    "model_version": signal_model_version, "market_context": market_context,
+                    "fast_confirmation": fast_confirmation, "portfolio_context": portfolio_context,
+                })
+                return
             if quote:
                 quote_raw = dict(quote.get("raw") or {})
                 quote_raw["_observation_source"] = quote_source_name
                 quote_raw["_price_source"] = quote.get("price_source")
                 connection.execute(
-                    """INSERT INTO quant.intraday_quote_observations(scan_id,symbol,observed_at,source_name,price,pct_change,volume_ratio,turnover_rate,main_net_inflow,raw)
-                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    _QUOTE_OBSERVATION_SQL,
                     (
                         scan_id, symbol, observed_at, quote_source_name, quote.get("price"), quote.get("pct_change"),
                         quote.get("volume_ratio"), quote.get("turnover_rate"), quote.get("main_net_inflow"),
@@ -214,9 +267,9 @@ def persist_scan_signals(
                 portfolio_context=portfolio_context,
             )
 
-        # Freeze the inputs before generating.  Heavy evidence is sampled per
-        # stock (the compact tape covers every scan); a stock that produces a
-        # signal outside its sample still gets its unchanged inputs stored.
+        # Freeze the inputs before generating. Heavy evidence is sampled per
+        # stock; a stock that produces a signal outside its sample still gets
+        # its unchanged inputs stored.
         sampled = dependencies.evidence_throttle is None or dependencies.evidence_throttle.due(symbol, observed_at)
         if sampled:
             persist_heavy_evidence()
@@ -230,10 +283,43 @@ def persist_scan_signals(
         if generated_signals and not sampled:
             dependencies.evidence_throttle.due(symbol, observed_at, force=True)
             persist_heavy_evidence()
-        event_state = dependencies.load_event_state(
-            connection, [str(signal["signal_key"]) for signal in generated_signals], symbol,
-            session_start=prepared.session_start,
+        prepared_rows.append({
+            "symbol": symbol, "watch": watch, "quote": quote, "daily_factors": daily_factors,
+            "minute_feature": minute_feature, "peer_context": peer_context,
+            "market_context": market_context, "fast_confirmation": fast_confirmation,
+            "order_book_feature": order_book_feature, "previous_quote": previous_quote,
+            "generated_signals": generated_signals,
+        })
+        if generated_signals:
+            signal_keys_by_symbol[symbol] = [str(signal["signal_key"]) for signal in generated_signals]
+
+    if dependencies.persist_rule_input_snapshots is not None:
+        _executemany_or_execute(connection, _QUOTE_OBSERVATION_SQL, heavy_quote_params)
+        dependencies.persist_rule_input_snapshots(connection, heavy_snapshot_rows)
+
+    batch_event_states: dict[str, Any] = {}
+    if dependencies.load_event_states is not None and signal_keys_by_symbol:
+        batch_event_states = dependencies.load_event_states(
+            connection, signal_keys_by_symbol, session_start=prepared.session_start,
         )
+
+    for row in prepared_rows:
+        symbol = row["symbol"]
+        watch = row["watch"]
+        quote = row["quote"]
+        daily_factors = row["daily_factors"]
+        minute_feature = row["minute_feature"]
+        peer_context = row["peer_context"]
+        market_context = row["market_context"]
+        fast_confirmation = row["fast_confirmation"]
+        order_book_feature = row["order_book_feature"]
+        generated_signals = row["generated_signals"]
+        event_state = batch_event_states.get(symbol) if dependencies.load_event_states is not None else None
+        if event_state is None:
+            event_state = dependencies.load_event_state(
+                connection, [str(signal["signal_key"]) for signal in generated_signals], symbol,
+                session_start=prepared.session_start,
+            )
         persisted = dependencies.persist_generated_signals(
             connection, scan_id=scan_id, observed_at=observed_at, symbol=symbol, watch=watch,
             quote=quote, daily_factors=daily_factors, minute_feature=minute_feature,
@@ -254,18 +340,24 @@ def persist_scan_signals(
         outcome = "candidate" if persisted else "rejected"
         if persisted and all(str(item.get("state") or "") == "suppressed" for item in persisted):
             outcome = "suppressed"
-        connection.execute(
-            """INSERT INTO quant.intraday_scan_rejections(
-                   scan_id,symbol,model_version,observed_at,outcome,reason_codes,evidence)
-               VALUES(%s,%s,%s,%s,%s,%s,%s)
-               ON CONFLICT(scan_id,symbol,model_version) DO UPDATE SET
-                 outcome=EXCLUDED.outcome,reason_codes=EXCLUDED.reason_codes,evidence=EXCLUDED.evidence""",
-            (scan_id, symbol, signal_model_version, observed_at, outcome,
-             tolerant_json(scan_rejection_reasons(quote, daily_factors, minute_feature, generated_signals)),
-             tolerant_json({"generated_signal_count": len(generated_signals), "persisted_signal_count": len(persisted),
-                            "quote_available": bool(quote), "daily_status": daily_factors.get("status"),
-                            "minute_status": minute_feature.get("status") if isinstance(minute_feature, dict) else None})),
-        )
+        rejection_params.append((
+            scan_id, symbol, signal_model_version, observed_at, outcome,
+            tolerant_json(scan_rejection_reasons(quote, daily_factors, minute_feature, generated_signals)),
+            tolerant_json({"generated_signal_count": len(generated_signals), "persisted_signal_count": len(persisted),
+                           "quote_available": bool(quote), "daily_status": daily_factors.get("status"),
+                           "minute_status": minute_feature.get("status") if isinstance(minute_feature, dict) else None}),
+        ))
+    if rejection_params:
+        cursor_factory = getattr(connection, "cursor", None)
+        if callable(cursor_factory):
+            # psycopg sends the whole rejection projection through one cursor
+            # round trip; lightweight test/replay connections without cursors
+            # retain the old execute fallback below.
+            with cursor_factory() as cursor:
+                cursor.executemany(_SCAN_REJECTION_SQL, rejection_params)
+        else:
+            for params in rejection_params:
+                connection.execute(_SCAN_REJECTION_SQL, params)
     if tape_rows and dependencies.persist_scan_tape is not None:
         # Research evidence in a savepoint: a failed tape insert must never
         # roll back the scan's signals.

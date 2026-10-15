@@ -350,6 +350,55 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
         self.assertEqual(result["ten_day_leader_rotation_shadow"]["status"], "standby")
         self.assertEqual(shadow_statuses, [{"status": "standby", "reason": "no_completed_daily_shadow_cohort"}])
 
+    def test_session_watchlist_and_maintenance_tasks_overlap(self):
+        observed_at = datetime(2026, 8, 24, 2, tzinfo=timezone.utc)
+        session_started = asyncio.Event()
+        watchlist_started = asyncio.Event()
+        prune_started = asyncio.Event()
+        retry_started = asyncio.Event()
+
+        async def session():
+            session_started.set()
+            await watchlist_started.wait()
+            return True, "continuous auction"
+
+        async def watches(_symbols):
+            watchlist_started.set()
+            await session_started.wait()
+            return [{"symbol": "000001.SZ"}]
+
+        async def prune(_observed_at):
+            prune_started.set()
+            await retry_started.wait()
+
+        async def retry():
+            retry_started.set()
+            await prune_started.wait()
+            return {"retried": 0}
+
+        async def capture(symbols, _observed_at, _slo):
+            return SimpleNamespace(
+                quotes={symbol: {"price": 10.0} for symbol in symbols}, all_a_rows=[],
+                fresh_watch_rows=[], sina_watch_rows=[], eastmoney_watch_flow_rows=[],
+                eastmoney_watch_flow_status={"status": "fresh"}, derived_flow_status={"status": "fresh"},
+                all_a_snapshot_status={"status": "unavailable"}, latency_ms=1,
+            )
+
+        async def surge(*_args, **_kwargs):
+            return {}, {}
+
+        dependencies = self.dependencies(
+            now_utc=lambda: observed_at, realtime_session=session, load_watches=watches,
+            prune_rule_inputs=prune, retry_pending_alerts=retry, capture_quotes=capture,
+            surge_context=surge, persist_signals=lambda *_args, **_kwargs: asyncio.sleep(0, result=[]),
+        )
+
+        async def bounded_scan():
+            return await asyncio.wait_for(run_watchlist_scan(self.request(), dependencies), timeout=1.0)
+
+        result = asyncio.run(bounded_scan())
+        self.assertEqual(result["status"], "completed")
+
     @staticmethod
     def dependencies(**overrides):
         async def default_async(*_args, **_kwargs):

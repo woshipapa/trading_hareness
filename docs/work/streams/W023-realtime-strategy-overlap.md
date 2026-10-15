@@ -7,7 +7,7 @@
 - updated: 2026-10-16
 - plan: docs/work/plans/realtime-strategy-overlap.md
 - branch: main
-- head: d8c5b520
+- head: 97bf881d
 - release: none
 
 ## Requirements
@@ -39,6 +39,7 @@
 - 2026-10-16 01:56 Asia/Shanghai: 200 次确定性本地 probe 显示 capture/membership overlap 中位数约 1.808x、p95 约 2.377x；minute/board overlap 中位数约 1.765x、p95 约 2.345x。该 probe 只验证编排层的有界 I/O overlap，不冒充 provider 吞吐或 owner 线上收益。
 - 2026-10-16 02:00 Asia/Shanghai: provider health 写入从 capture 返回前移出主等待点，改为每个 scan 一个有界 task 集合；策略链路立即消费 immutable capture，runtime 在响应前统一 join，失败不会留下 detached task，也不会改变 scan eligibility。
 - 2026-10-16 02:41 Asia/Shanghai: primary signal receipt 提交后，ten-day shadow rotation 改为与 alert delivery/teacher research 并行；shadow 仍只写 research evidence，独立失败继续降级，响应前统一 join。新增事件型回归验证串行实现会等待死锁、并行实现可完成。
+- 2026-10-16 03:13 Asia/Shanghai: session gate 与 watchlist 读取、规则保留清理与 outbox retry 改为有界并行并在 capture 前统一 join。扫描事务先计算整个观察池，再批量读取事件状态；200 标的合成探针从 600 次状态 SQL 降为 3 次。报价证据、规则快照和拒绝原因也通过 cursor batch 写入，单写事件顺序保持不变。
 
 ## Waiting on the user
 
@@ -57,6 +58,8 @@
 - `quant-service/tests/test_intraday_watchlist_scan_service.py`: 三个互相等待的并发回归测试，串行实现会死锁，覆盖批内 overlap 和研究分支 overlap。
 - `quant-service/app/intraday_scan_timing.py` 与 `quant-service/tests/test_intraday_scan_timing.py`: 阶段键、毫秒归一化和只读边界的纯函数契约。
 - `docs/work/probes/2026-10-16-realtime-overlap-benchmark.out.txt`: 200 次本地 overlap 编排测量输出。
+- `docs/work/probes/2026-10-16-intraday-event-state-batch.out.txt`: 200 标的事件状态 repository statement-count 探针。
+- `docs/decisions/0032-batched-realtime-scan-evidence.md`: 批量读取/写入与回退边界。
 
 ## Findings
 
@@ -86,6 +89,7 @@
 - watchlist 规则使用 capture 后的内存行情，但其 point-in-time local inputs 和 event state 仍在 `persist_scan_signals` 的同步事务中读取；B093 负责拆分前的测量和协议。
 - capture 的精确 membership、board cache 使用 bounded async read pool；signal persistence 使用 bounded database executor；当前没有提高任一上限。
 - 主 watchlist signals 必须等 durable receipt 和 event write 完成后才可投递；xiaojie 可先做纯评估，但其 `scan_id` 写入等 receipt barrier，随后与投递并行，仍在响应前 join。
+- 本地批量化只减少数据库往返；线上收益仍需 owner 发布后按同一交易日核对 statement count、事务耗时、锁等待、隧道速率和 provider 拒绝率。
 
 ## Resume here
 

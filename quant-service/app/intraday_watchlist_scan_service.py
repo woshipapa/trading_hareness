@@ -426,8 +426,20 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         return value
 
     observed_at = dependencies.now_utc()
-    active, reason = await dependencies.realtime_session()
-    watches = await dependencies.load_watches(list(request.symbols))
+    # Session gating and the bounded watchlist read have no data dependency;
+    # overlap their tunnel/clock work so a slow watch query does not delay the
+    # decision that the session is open (or the terminal receipt if it is not).
+    session_task = asyncio.create_task(
+        dependencies.realtime_session(), name="intraday-scan-session-gate",
+    )
+    watches_task = asyncio.create_task(
+        dependencies.load_watches(list(request.symbols)), name="intraday-scan-watchlist",
+    )
+    try:
+        (active, reason), watches = await asyncio.gather(session_task, watches_task)
+    except BaseException:
+        await _cancel_tasks([session_task, watches_task])
+        raise
     selected_symbols = [str(row["symbol"]) for row in watches]
     scan_id = dependencies.new_scan_id()
     capacity = dependencies.watchlist_capacity(len(watches))
@@ -453,8 +465,20 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
             "status": "blocked", "scan_id": str(scan_id), "observed_at": observed_at.isoformat(),
             "reason": reason, "alerts": [], "scan_performance": scan_performance,
         }
-    await dependencies.prune_rule_inputs(observed_at)
-    retry_summary = await dependencies.retry_pending_alerts()
+    # Retention cleanup and outbox retry touch independent tables. Run them in
+    # parallel, but join both before the capture so a failure cannot leave an
+    # auxiliary task writing into the next scan.
+    prune_task = asyncio.create_task(
+        dependencies.prune_rule_inputs(observed_at), name="intraday-scan-retention-prune",
+    )
+    retry_task = asyncio.create_task(
+        dependencies.retry_pending_alerts(), name="intraday-scan-alert-retry",
+    )
+    try:
+        _prune_result, retry_summary = await asyncio.gather(prune_task, retry_task)
+    except BaseException:
+        await _cancel_tasks([prune_task, retry_task])
+        raise
     mark_stage("pre_capture")
     if not watches:
         # An empty observation pool means there is nothing to *watch*, not that

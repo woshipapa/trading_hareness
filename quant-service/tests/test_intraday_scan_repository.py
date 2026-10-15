@@ -10,6 +10,7 @@ from app.intraday_scan_repository import (
     first_eac_breakout_events,
     load_intraday_scan_local_state,
     load_intraday_signal_event_state,
+    load_intraday_signal_event_states,
     normalize_provider_failures,
     persist_intraday_scan_terminal,
     previous_quote_frames,
@@ -155,6 +156,48 @@ class IntradayScanRepositoryTests(unittest.TestCase):
         self.assertEqual(state.latest_by_key, {})
         self.assertIsNone(state.last_symbol_watch_alerted)
         connection.execute.assert_not_called()
+
+    def test_signal_states_read_the_whole_basket_in_three_queries(self) -> None:
+        class Result:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def fetchall(self):
+                return self.rows
+
+        at = datetime(2026, 8, 17, 1, 0, tzinfo=timezone.utc)
+
+        class Connection:
+            def __init__(self):
+                self.calls = []
+                self.results = iter([
+                    Result([{"signal_key": "000001.SZ:watch:one", "observed_at": at}]),
+                    Result([{"signal_key": "600000.SH:entry:test", "observed_at": at, "score": 80,
+                             "conditions": {"price": 10.0}}]),
+                    Result([{"symbol": "000001.SZ", "observed_at": at}]),
+                ])
+
+            def execute(self, sql, params=None):
+                self.calls.append((str(sql), params))
+                return next(self.results)
+
+        connection = Connection()
+        states = load_intraday_signal_event_states(
+            connection,
+            {
+                "000001.SZ": ["000001.SZ:watch:one"],
+                "600000.SH": ["600000.SH:entry:test"],
+            },
+            session_start=datetime(2026, 8, 17, 0, 0, tzinfo=timezone.utc),
+        )
+        self.assertEqual(len(connection.calls), 3)
+        self.assertEqual(sorted(states), ["000001.SZ", "600000.SH"])
+        self.assertIn("000001.SZ:watch:one", states["000001.SZ"].latest_by_key)
+        self.assertIn("600000.SH:entry:test", states["600000.SH"].last_alerted_by_key)
+        self.assertEqual(states["000001.SZ"].last_symbol_watch_alerted["observed_at"], at)
+        self.assertEqual(connection.calls[0][1], (["000001.SZ:watch:one", "600000.SH:entry:test"],))
+        self.assertEqual(connection.calls[2][1], (["000001.SZ", "600000.SH"],))
+        self.assertIn("DISTINCT ON(symbol)", connection.calls[2][0])
 
     def test_daily_factors_for_watch_basket_use_one_ranked_query(self) -> None:
         rows = []

@@ -120,6 +120,10 @@ class IntradayScanSignalPersistenceTests(unittest.TestCase):
             calls.append(("state", args[1], kwargs))
             return {"latest_by_key": {}}
 
+        def load_states(*args, **kwargs):
+            calls.append(("states", args[1], kwargs))
+            return {"000001.SZ": {"latest_by_key": {}}}
+
         def persist(*args, **kwargs):
             calls.append(("persist", kwargs))
             return [{"symbol": kwargs["symbol"], "state": "confirming"}]
@@ -134,6 +138,7 @@ class IntradayScanSignalPersistenceTests(unittest.TestCase):
             generate_signals=generate, signal_generation_dependencies=object(),
             load_event_state=load_state, persist_generated_signals=persist,
             signal_event_persistence_dependencies=object(),
+            load_event_states=load_states,
         )
         result = persist_scan_signals(
             connection, scan_id=uuid.uuid4(), observed_at=observed_at, selected_symbols=["000001.SZ"],
@@ -150,7 +155,8 @@ class IntradayScanSignalPersistenceTests(unittest.TestCase):
         self.assertIn("intraday_scan_rejections", connection.executed[-1][0])
         self.assertEqual(calls[0][0], "snapshot")
         self.assertEqual(calls[1][0], "generate")
-        self.assertEqual(calls[2][1], ["000001.SZ:watch:test"])
+        self.assertEqual(calls[2][0], "states")
+        self.assertEqual(calls[2][1], {"000001.SZ": ["000001.SZ:watch:test"]})
         self.assertEqual(calls[3][0], "persist")
         self.assertEqual(calls[3][1]["order_book_feature"], {"frames": 1})
         self.assertEqual(calls[3][1]["candidate_sector_keys"], ["sector-a"])

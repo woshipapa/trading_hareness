@@ -1,0 +1,1 @@
+{"basket_queries": 3, "per_symbol_queries": 600, "query_reduction_factor": 200.0, "scope": "synthetic repository statement count; no owner DB/provider access", "symbols": 200}

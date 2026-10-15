@@ -434,6 +434,7 @@ from .intraday_scan_repository import (
     first_eac_breakout_events,
     load_intraday_scan_local_state,
     load_intraday_signal_event_state,
+    load_intraday_signal_event_states,
     persist_intraday_scan_terminal,
     previous_quote_frames,
 )
@@ -441,7 +442,9 @@ from .intraday_market_context_repository import (
     market_context_from_board_report as read_market_context_from_board_report,
     point_in_time_market_context_batch as read_point_in_time_market_context_batch,
 )
-from .intraday_rule_snapshot_repository import persist_rule_input_snapshot, prune_rule_input_evidence
+from .intraday_rule_snapshot_repository import (
+    persist_rule_input_snapshot, persist_rule_input_snapshots, prune_rule_input_evidence,
+)
 from .watch_scan_tape import EvidenceThrottle, persist_scan_tape as persist_watch_scan_tape, tape_record as watch_tape_record
 
 # Raw quote rows and rule-input snapshots per stock: on a signal, else every 30 s.
@@ -2654,6 +2657,7 @@ def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceD
                 ),
                 quote_source=intraday_quote_observation_source, json_safe=strategy_json_safe,
                 persist_rule_input_snapshot=persist_rule_input_snapshot,
+                persist_rule_input_snapshots=persist_rule_input_snapshots,
                 evidence_throttle=watch_evidence_throttle, tape_record=watch_tape_record,
                 persist_scan_tape=persist_watch_scan_tape,
                 attach_volume_time_profile=pure_attach_volume_time_profile, number=intraday_number,
@@ -2669,6 +2673,7 @@ def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceD
                                                             market_book=teacher_market_book),
                 ),
                 load_event_state=load_intraday_signal_event_state,
+                load_event_states=load_intraday_signal_event_states,
                 persist_generated_signals=persist_generated_signals,
                 signal_event_persistence_dependencies=IntradaySignalEventPersistenceDependencies(
                     paper_risk_gate=paper_risk_gate, live_policy_gate=live_policy_gate,
