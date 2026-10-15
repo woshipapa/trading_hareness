@@ -18,6 +18,7 @@ class IntradayScanTimingTests(unittest.TestCase):
         self.assertEqual(value["total_ms"], 18.8)
         self.assertEqual(value["stage_ms"], {"capture_and_memberships": 0.0, "signal_persist": 12.3})
         self.assertEqual(value["overlap"]["capture_and_memberships"], "concurrent")
+        self.assertEqual(value["overlap"]["shadow_rotation_and_delivery"], "concurrent_after_receipt")
 
 
 if __name__ == "__main__":

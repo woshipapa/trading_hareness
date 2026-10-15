@@ -64,6 +64,7 @@ def build_scan_performance(
             "enrichment_and_board_cache": "concurrent",
             "leader_flow_and_primary_persist": "concurrent_after_capture",
             "alert_delivery_and_leader_flow": "concurrent_after_receipt",
+            "shadow_rotation_and_delivery": "concurrent_after_receipt",
         },
     }
 
