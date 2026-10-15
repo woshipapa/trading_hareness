@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .intraday_evidence_read_model import LATEST_SCAN_SNAPSHOT_SQL, _json_value
+
 
 async def watchlists(async_database: Any) -> dict[str, Any]:
     """Return the persisted watchlist without contacting a market provider."""
@@ -27,27 +29,16 @@ async def latest_scan(async_database: Any, *, limit: int = 100) -> dict[str, Any
     """Return one bounded, already-persisted scan and its outbox evidence."""
     bounded_limit = max(1, min(limit, 200))
     async with async_database.transaction() as connection:
-        scan_result = await connection.execute(
-            "SELECT * FROM quant.intraday_scan_runs ORDER BY observed_at DESC LIMIT 1"
-        )
-        scan = await scan_result.fetchone()
-        if not scan:
-            return {"scan": None, "signals": [], "deliveries": []}
-        scan = dict(scan)
-        signals_result = await connection.execute(
-            "SELECT * FROM quant.intraday_signal_events WHERE scan_id=%s "
-            "ORDER BY severity DESC,created_at LIMIT %s",
-            (scan["scan_id"], bounded_limit),
-        )
-        deliveries_result = await connection.execute(
-            """SELECT d.* FROM quant.intraday_alert_deliveries d
-                 JOIN quant.intraday_signal_events s ON s.signal_event_id=d.signal_event_id
-                WHERE s.scan_id=%s ORDER BY d.created_at LIMIT %s""",
-            (scan["scan_id"], bounded_limit),
-        )
-        signals = [dict(row) for row in await signals_result.fetchall()]
-        deliveries = [dict(row) for row in await deliveries_result.fetchall()]
-    return {"scan": scan, "signals": signals, "deliveries": deliveries}
+        result = await connection.execute(LATEST_SCAN_SNAPSHOT_SQL, (bounded_limit, bounded_limit))
+        row = await result.fetchone()
+    if not row:
+        return {"scan": None, "signals": [], "deliveries": []}
+    row = dict(row)
+    return {
+        "scan": _json_value(row.get("scan"), None),
+        "signals": _json_value(row.get("signals"), []),
+        "deliveries": _json_value(row.get("deliveries"), []),
+    }
 
 
 __all__ = ["latest_scan", "watchlists"]

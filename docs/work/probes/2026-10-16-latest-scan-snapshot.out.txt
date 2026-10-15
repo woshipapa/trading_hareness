@@ -1,0 +1,1 @@
+{"statement_count": 1, "snapshot_elapsed_ms": [16.031, 5.564, 4.778, 4.612, 4.54], "legacy_elapsed_ms": [16.194, 4.959, 4.203, 3.933, 3.966], "snapshot_median_ms": 4.778, "legacy_median_ms": 4.203, "has_scan": true, "signal_rows": 3, "delivery_rows": 0, "scope": "local compose PostgreSQL; no owner tunnel/provider access"}

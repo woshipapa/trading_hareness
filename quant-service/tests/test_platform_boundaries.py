@@ -982,14 +982,14 @@ class PlatformBoundaryTests(unittest.TestCase):
         database = MagicMock()
         database.transaction.return_value.__enter__.return_value = connection
         connection.execute.side_effect = [
-            MagicMock(fetchone=MagicMock(return_value={"scan_id": "scan-1"})),
-            MagicMock(fetchall=MagicMock(return_value=[])),
-            MagicMock(fetchall=MagicMock(return_value=[])),
+            MagicMock(fetchone=MagicMock(return_value={
+                "scan": {"scan_id": "scan-1"}, "signals": [], "deliveries": [],
+            })),
         ]
         payload = read_latest_intraday_scan(database, limit=10_000)
         self.assertEqual(payload["scan"]["scan_id"], "scan-1")
-        self.assertEqual(connection.execute.call_args_list[1].args[1], ("scan-1", 200))
-        self.assertEqual(connection.execute.call_args_list[2].args[1], ("scan-1", 200))
+        self.assertEqual(connection.execute.call_count, 1)
+        self.assertEqual(connection.execute.call_args.args[1], (200, 200))
         router = build_intraday_evidence_reads_router(database, lambda _connection, symbol: {"symbol": symbol})
         methods_by_path = {route.path: route.methods for route in router.routes}
         self.assertEqual(methods_by_path["/api/v1/intraday/watchlists"], {"GET"})

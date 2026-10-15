@@ -24,9 +24,11 @@ class AsyncIntradayAndAnalystReadTests(unittest.IsolatedAsyncioTestCase):
                 if "intraday_watchlists" in sql:
                     return Result(rows=[{"symbol": "600176.SH"}])
                 if "intraday_scan_runs" in sql:
-                    return Result(row={"scan_id": "scan-1"})
-                if "intraday_signal_events WHERE" in sql:
-                    return Result(rows=[{"signal_event_id": "signal-1"}])
+                    return Result(row={
+                        "scan": {"scan_id": "scan-1"},
+                        "signals": [{"signal_event_id": "signal-1"}],
+                        "deliveries": [{"delivery_id": "delivery-1"}],
+                    })
                 return Result(rows=[{"delivery_id": "delivery-1"}])
 
         class Transaction:
@@ -44,8 +46,8 @@ class AsyncIntradayAndAnalystReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["scan"]["scan_id"], "scan-1")
         self.assertEqual(payload["signals"][0]["signal_event_id"], "signal-1")
         self.assertEqual(payload["deliveries"][0]["delivery_id"], "delivery-1")
-        self.assertEqual(database.connection.calls[-2][1], ("scan-1", 200))
-        self.assertEqual(database.connection.calls[-1][1], ("scan-1", 200))
+        self.assertEqual(len(database.connection.calls), 2)
+        self.assertEqual(database.connection.calls[-1][1], (200, 200))
 
     async def test_intraday_outcome_projection_uses_native_async_connection(self) -> None:
         observed_at = __import__("datetime").datetime(2026, 8, 14, 2, 0, tzinfo=__import__("datetime").timezone.utc)
