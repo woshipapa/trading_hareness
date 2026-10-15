@@ -1,9 +1,10 @@
-"""One-transaction orchestration for persisting intraday scan evidence.
+"""Bounded orchestration for persisting intraday scan evidence.
 
-The caller owns the database transaction.  This module deliberately has no
-database, provider, clock, or alert-delivery ownership: it freezes the inputs
-already gathered by the scan, emits candidates, and delegates their durable
-event state to injected collaborators.
+The caller owns the database transaction(s).  This module deliberately has no
+provider, clock, or alert-delivery ownership: it freezes the inputs already
+gathered by the scan, evaluates candidates without a held connection when the
+live split path is enabled, and delegates durable event state to injected
+collaborators.
 """
 
 from __future__ import annotations
@@ -111,11 +112,12 @@ class IntradayScanPersistenceServiceDependencies:
     """Application-owned collaborators for the scan persistence boundary.
 
     ``persist_scan_signals`` deliberately receives an already-open connection
-    so it remains straightforward to unit-test.  The live service, however,
-    must never accidentally split its scan receipt, point-in-time inputs and
-    event de-duplication across transactions.  Keep that transaction boundary
-    in this small adapter rather than re-implementing it in the FastAPI
-    composition module.
+    so it remains straightforward to unit-test.  The live service may opt
+    into the split path below: the scan receipt and frozen point-in-time
+    inputs commit first, pure rule evaluation runs without a held connection,
+    and event de-duplication plus signal writes commit in a second transaction.
+    The receipt is marked ``partial`` between the two phases and ``failed`` on
+    a recovery write if the second phase cannot complete.
     """
 
     database: Any
@@ -123,6 +125,21 @@ class IntradayScanPersistenceServiceDependencies:
     confirmation_window: Any
     signal_model_version: str
     factor_contract_version: str
+    # Production enables this after composing the full batch-evidence graph.
+    # Small replay/test adapters retain the original one-transaction contract.
+    split_transaction: bool = False
+
+
+@dataclass
+class _IntradayScanEvaluation:
+    """Frozen strategy inputs and pure outputs carried between scan phases."""
+
+    prepared: Any
+    prepared_rows: list[dict[str, Any]]
+    signal_keys_by_symbol: dict[str, list[str]]
+    rejection_params: list[tuple[Any, ...]]
+    heavy_quote_params: list[tuple[Any, ...]]
+    heavy_snapshot_rows: list[dict[str, Any]]
 
 
 def persist_scan_transaction(
@@ -141,31 +158,88 @@ def persist_scan_transaction(
     peer_contexts: dict[str, dict[str, Any]],
     fast_confirmations: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Persist a live scan under its one required local transaction.
+    """Persist a live scan with an optional connection-free evaluation gap.
 
-    This function performs no provider, clock or delivery I/O.  It only owns
-    the durable transaction boundary used by the bounded database executor.
+    The compatibility path keeps the historical one-transaction contract.
+    Production opts into two phases: the first transaction commits the scan
+    receipt and frozen local inputs, pure rule evaluation runs while no
+    database connection is held, and the second transaction reads event state
+    and writes signals/evidence.  A partial receipt is made explicit between
+    phases and converted to ``failed`` if the second phase cannot finish.
     """
-    with dependencies.database.transaction() as connection:
-        return persist_scan_signals(
-            connection,
-            scan_id=scan_id,
-            observed_at=observed_at,
-            selected_symbols=selected_symbols,
-            source_status=source_status,
-            watches=watches,
-            quotes=quotes,
-            all_a_rows=all_a_rows,
-            quote_latency_ms=quote_latency_ms,
-            realtime_minutes=realtime_minutes,
-            surge_features=surge_features,
-            peer_contexts=peer_contexts,
-            fast_confirmations=fast_confirmations,
-            confirmation_window=dependencies.confirmation_window,
-            signal_model_version=dependencies.signal_model_version,
-            factor_contract_version=dependencies.factor_contract_version,
-            dependencies=dependencies.signal_dependencies,
-        )
+    common = {
+        "scan_id": scan_id, "observed_at": observed_at, "selected_symbols": selected_symbols,
+        "source_status": source_status, "watches": watches, "quotes": quotes,
+        "all_a_rows": all_a_rows, "quote_latency_ms": quote_latency_ms,
+        "realtime_minutes": realtime_minutes, "surge_features": surge_features,
+        "peer_contexts": peer_contexts, "fast_confirmations": fast_confirmations,
+        "confirmation_window": dependencies.confirmation_window,
+        "signal_model_version": dependencies.signal_model_version,
+        "factor_contract_version": dependencies.factor_contract_version,
+        "dependencies": dependencies.signal_dependencies,
+    }
+    # The pure evaluation phase cannot run without a connection unless the
+    # complete batch evidence writer is present.  Treat an incomplete adapter
+    # graph as a compatibility adapter so a config mistake cannot turn every
+    # scan into a ``None.execute`` failure.
+    split_transaction = (
+        dependencies.split_transaction
+        and dependencies.signal_dependencies.persist_rule_input_snapshots is not None
+    )
+    if not split_transaction:
+        with dependencies.database.transaction() as connection:
+            return persist_scan_signals(connection, **common)
+
+    prepared_committed = False
+    try:
+        with dependencies.database.transaction() as connection:
+            prepared = dependencies.signal_dependencies.prepare_inputs(
+                connection,
+                scan_id=scan_id,
+                observed_at=observed_at,
+                selected_symbols=selected_symbols,
+                source_status=source_status,
+                watches=watches,
+                quotes=quotes,
+                all_a_rows=all_a_rows,
+                quote_latency_ms=quote_latency_ms,
+                realtime_minutes=realtime_minutes,
+                surge_features=surge_features,
+                confirmation_window=dependencies.confirmation_window,
+                dependencies=dependencies.signal_dependencies.preparation_dependencies,
+            )
+            # The receipt is visible to the second phase and to recovery/read
+            # models, but cannot be mistaken for a completed signal scan.
+            connection.execute(
+                "UPDATE quant.intraday_scan_runs SET status='partial' WHERE scan_id=%s",
+                (scan_id,),
+            )
+        prepared_committed = True
+
+        # No connection is held across this call.  In particular, the pure
+        # rule functions and tape-independent feature projections can use the
+        # process CPU without occupying a PostgreSQL/tunnel slot.
+        evaluation = _build_scan_evaluation(None, **common, prepared=prepared)
+        with dependencies.database.transaction() as connection:
+            signals = _commit_scan_evaluation(connection, **common, evaluation=evaluation)
+            connection.execute(
+                "UPDATE quant.intraday_scan_runs SET status='completed' WHERE scan_id=%s",
+                (scan_id,),
+            )
+        return signals
+    except BaseException:
+        if prepared_committed:
+            try:
+                with dependencies.database.transaction() as connection:
+                    connection.execute(
+                        """UPDATE quant.intraday_scan_runs
+                              SET status='failed', summary=summary || %s::jsonb
+                            WHERE scan_id=%s""",
+                        (tolerant_json({"signal_persistence": {"status": "failed"}}), scan_id),
+                    )
+            except Exception:  # noqa: BLE001 - retain the original scan error
+                logger.warning("could not mark scan %s failed after split persistence error", scan_id, exc_info=True)
+        raise
 
 
 def persist_scan_signals(
@@ -188,15 +262,59 @@ def persist_scan_signals(
     factor_contract_version: str,
     dependencies: IntradayScanSignalPersistenceDependencies,
 ) -> list[dict[str, Any]]:
-    """Persist one scan using the caller's already-open transaction."""
-    prepared = dependencies.prepare_inputs(
+    """Persist one scan using the caller's already-open transaction.
+
+    This is the stable compatibility seam for replay and lightweight adapters.
+    The live two-phase adapter calls the same prepare/commit helpers from two
+    separate transactions.
+    """
+    evaluation = _build_scan_evaluation(
         connection, scan_id=scan_id, observed_at=observed_at, selected_symbols=selected_symbols,
         source_status=source_status, watches=watches, quotes=quotes, all_a_rows=all_a_rows,
         quote_latency_ms=quote_latency_ms, realtime_minutes=realtime_minutes, surge_features=surge_features,
-        confirmation_window=confirmation_window, dependencies=dependencies.preparation_dependencies,
+        peer_contexts=peer_contexts, fast_confirmations=fast_confirmations,
+        confirmation_window=confirmation_window, signal_model_version=signal_model_version,
+        factor_contract_version=factor_contract_version, dependencies=dependencies,
     )
-    signals: list[dict[str, Any]] = []
-    tape_rows: dict[str, dict[str, Any]] = {}
+    return _commit_scan_evaluation(
+        connection, scan_id=scan_id, observed_at=observed_at, selected_symbols=selected_symbols,
+        source_status=source_status, watches=watches, quotes=quotes, all_a_rows=all_a_rows,
+        quote_latency_ms=quote_latency_ms, realtime_minutes=realtime_minutes, surge_features=surge_features,
+        peer_contexts=peer_contexts, fast_confirmations=fast_confirmations,
+        confirmation_window=confirmation_window, signal_model_version=signal_model_version,
+        factor_contract_version=factor_contract_version, dependencies=dependencies, evaluation=evaluation,
+    )
+
+
+def _build_scan_evaluation(
+    connection: Any,
+    *,
+    scan_id: uuid.UUID,
+    observed_at: datetime,
+    selected_symbols: list[str],
+    source_status: dict[str, Any],
+    watches: list[dict[str, Any]],
+    quotes: dict[str, dict[str, Any]],
+    all_a_rows: list[dict[str, Any]],
+    quote_latency_ms: int,
+    realtime_minutes: dict[str, dict[str, Any]],
+    surge_features: dict[str, dict[str, Any]],
+    peer_contexts: dict[str, dict[str, Any]],
+    fast_confirmations: dict[str, dict[str, Any]],
+    confirmation_window: Any,
+    signal_model_version: str,
+    factor_contract_version: str,
+    dependencies: IntradayScanSignalPersistenceDependencies,
+    prepared: Any | None = None,
+) -> _IntradayScanEvaluation:
+    """Freeze local state and evaluate rules without reading event state."""
+    if prepared is None:
+        prepared = dependencies.prepare_inputs(
+            connection, scan_id=scan_id, observed_at=observed_at, selected_symbols=selected_symbols,
+            source_status=source_status, watches=watches, quotes=quotes, all_a_rows=all_a_rows,
+            quote_latency_ms=quote_latency_ms, realtime_minutes=realtime_minutes, surge_features=surge_features,
+            confirmation_window=confirmation_window, dependencies=dependencies.preparation_dependencies,
+        )
     # Freeze and evaluate the complete watch basket before reading event state.
     # Rule generation is pure; the production repository can therefore fetch
     # the three event-state projections once instead of once per symbol.
@@ -293,9 +411,42 @@ def persist_scan_signals(
         if generated_signals:
             signal_keys_by_symbol[symbol] = [str(signal["signal_key"]) for signal in generated_signals]
 
+    return _IntradayScanEvaluation(
+        prepared=prepared, prepared_rows=prepared_rows,
+        signal_keys_by_symbol=signal_keys_by_symbol, rejection_params=rejection_params,
+        heavy_quote_params=heavy_quote_params, heavy_snapshot_rows=heavy_snapshot_rows,
+    )
+
+
+def _commit_scan_evaluation(
+    connection: Any,
+    *,
+    scan_id: uuid.UUID,
+    observed_at: datetime,
+    selected_symbols: list[str],
+    source_status: dict[str, Any],
+    watches: list[dict[str, Any]],
+    quotes: dict[str, dict[str, Any]],
+    all_a_rows: list[dict[str, Any]],
+    quote_latency_ms: int,
+    realtime_minutes: dict[str, dict[str, Any]],
+    surge_features: dict[str, dict[str, Any]],
+    peer_contexts: dict[str, dict[str, Any]],
+    fast_confirmations: dict[str, dict[str, Any]],
+    confirmation_window: Any,
+    signal_model_version: str,
+    factor_contract_version: str,
+    dependencies: IntradayScanSignalPersistenceDependencies,
+    evaluation: _IntradayScanEvaluation,
+) -> list[dict[str, Any]]:
+    """Read event state and commit evidence/signals for a frozen evaluation."""
+    prepared = evaluation.prepared
+    prepared_rows = evaluation.prepared_rows
+    signal_keys_by_symbol = evaluation.signal_keys_by_symbol
+    rejection_params = evaluation.rejection_params
     if dependencies.persist_rule_input_snapshots is not None:
-        _executemany_or_execute(connection, _QUOTE_OBSERVATION_SQL, heavy_quote_params)
-        dependencies.persist_rule_input_snapshots(connection, heavy_snapshot_rows)
+        _executemany_or_execute(connection, _QUOTE_OBSERVATION_SQL, evaluation.heavy_quote_params)
+        dependencies.persist_rule_input_snapshots(connection, evaluation.heavy_snapshot_rows)
 
     batch_event_states: dict[str, Any] = {}
     if dependencies.load_event_states is not None and signal_keys_by_symbol:
@@ -303,6 +454,8 @@ def persist_scan_signals(
             connection, signal_keys_by_symbol, session_start=prepared.session_start,
         )
 
+    signals: list[dict[str, Any]] = []
+    tape_rows: dict[str, dict[str, Any]] = {}
     for row in prepared_rows:
         symbol = row["symbol"]
         watch = row["watch"]

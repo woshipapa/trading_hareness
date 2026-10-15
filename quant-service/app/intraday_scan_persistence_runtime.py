@@ -1,4 +1,4 @@
-"""Runtime adapter for one atomic intraday scan evidence write."""
+"""Runtime adapter for one bounded intraday scan evidence write."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ class IntradayScanPersistenceRuntime:
         peer_contexts: dict[str, dict[str, Any]],
         fast_confirmations: dict[str, dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Keep all scan evidence under the pre-composed single transaction."""
+        """Keep the scan's two-phase persistence protocol behind one callback."""
         return self.persist_transaction(
             self.dependencies,
             scan_id=scan_id,

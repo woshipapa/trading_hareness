@@ -15,6 +15,7 @@ from app.intraday_scan_signal_persistence import (
 class _Connection:
     def __init__(self):
         self.executed = []
+        self.phase = 0
 
     def execute(self, query, params):
         self.executed.append((query, params))
@@ -25,6 +26,7 @@ class _Database:
         self.connection = connection
         self.entered = 0
         self.exited = 0
+        self.active = False
 
     def transaction(self):
         database = self
@@ -32,10 +34,13 @@ class _Database:
         class _Transaction:
             def __enter__(self):
                 database.entered += 1
+                database.connection.phase = database.entered
+                database.active = True
                 return database.connection
 
             def __exit__(self, *args):
                 database.exited += 1
+                database.active = False
 
         return _Transaction()
 
@@ -51,7 +56,7 @@ class IntradayScanSignalPersistenceTests(unittest.TestCase):
         self.assertIn("minute_confirmation_missing", reasons)
         self.assertIn("no_rule_condition_met", reasons)
 
-    def test_live_adapter_preserves_one_transaction_for_entire_scan(self):
+    def test_incomplete_split_graph_falls_back_to_one_transaction(self):
         connection = _Connection()
         database = _Database(connection)
         observed_at = datetime(2026, 8, 22, 2, tzinfo=timezone.utc)
@@ -75,6 +80,7 @@ class IntradayScanSignalPersistenceTests(unittest.TestCase):
             IntradayScanPersistenceServiceDependencies(
                 database=database, signal_dependencies=signal_dependencies,
                 confirmation_window=300, signal_model_version="v1", factor_contract_version="v2",
+                split_transaction=True,
             ),
             scan_id=uuid.uuid4(), observed_at=observed_at, selected_symbols=["000001.SZ"],
             source_status={}, watches=[{"symbol": "000001.SZ"}], quotes={}, all_a_rows=[],
@@ -160,6 +166,96 @@ class IntradayScanSignalPersistenceTests(unittest.TestCase):
         self.assertEqual(calls[3][0], "persist")
         self.assertEqual(calls[3][1]["order_book_feature"], {"frames": 1})
         self.assertEqual(calls[3][1]["candidate_sector_keys"], ["sector-a"])
+
+    def test_split_transaction_releases_connection_before_rule_evaluation(self):
+        connection = _Connection()
+        database = _Database(connection)
+        observed_at = datetime(2026, 8, 22, 2, tzinfo=timezone.utc)
+        calls = []
+        prepared = SimpleNamespace(
+            previous_by_symbol={}, daily_factors_by_symbol={}, raw_minute_features_by_symbol={},
+            minute_volume_profiles_by_symbol={}, order_book_by_symbol={}, market_contexts={},
+            paper_positions={}, snapshot_payload={}, candidate_sector_keys={}, shadow_priors={},
+            rebound_priors={}, first_eac_by_symbol={}, probability_profiles={}, session_start=observed_at,
+        )
+
+        def prepare(connection_arg, **_kwargs):
+            calls.append(("prepare", connection_arg.phase))
+            return prepared
+
+        def generate(**_kwargs):
+            calls.append(("generate", database.active))
+            return []
+
+        def snapshots(connection_arg, rows):
+            calls.append(("snapshots", connection_arg.phase, len(rows)))
+
+        dependencies = IntradayScanSignalPersistenceDependencies(
+            prepare_inputs=prepare, preparation_dependencies=object(),
+            quote_source=lambda _quote: "tencent_watch_batch", json_safe=lambda value: value,
+            persist_rule_input_snapshot=lambda *_args, **_kwargs: None,
+            persist_rule_input_snapshots=snapshots,
+            attach_volume_time_profile=lambda *_args, **_kwargs: None, number=lambda value: value,
+            aggregate_order_book_observations=lambda *_args, **_kwargs: None,
+            generate_signals=generate, signal_generation_dependencies=object(),
+            load_event_state=lambda *_args, **_kwargs: {},
+            persist_generated_signals=lambda *_args, **_kwargs: [], signal_event_persistence_dependencies=object(),
+        )
+        result = persist_scan_transaction(
+            IntradayScanPersistenceServiceDependencies(
+                database=database, signal_dependencies=dependencies,
+                confirmation_window=300, signal_model_version="v1", factor_contract_version="v2",
+                split_transaction=True,
+            ),
+            scan_id=uuid.uuid4(), observed_at=observed_at, selected_symbols=["000001.SZ"],
+            source_status={}, watches=[{"symbol": "000001.SZ"}], quotes={}, all_a_rows=[],
+            quote_latency_ms=0, realtime_minutes={}, surge_features={}, peer_contexts={}, fast_confirmations={},
+        )
+
+        self.assertEqual(result, [])
+        self.assertEqual((database.entered, database.exited), (2, 2))
+        self.assertEqual(calls[0], ("prepare", 1))
+        self.assertEqual(calls[1], ("generate", False))
+        self.assertEqual(calls[2], ("snapshots", 2, 1))
+        self.assertIn("status='partial'", connection.executed[0][0])
+        self.assertIn("status='completed'", connection.executed[-1][0])
+
+    def test_split_transaction_marks_receipt_failed_when_commit_fails(self):
+        connection = _Connection()
+        database = _Database(connection)
+        observed_at = datetime(2026, 8, 22, 2, tzinfo=timezone.utc)
+        prepared = SimpleNamespace(
+            previous_by_symbol={}, daily_factors_by_symbol={}, raw_minute_features_by_symbol={},
+            minute_volume_profiles_by_symbol={}, order_book_by_symbol={}, market_contexts={},
+            paper_positions={}, snapshot_payload={}, candidate_sector_keys={}, shadow_priors={},
+            rebound_priors={}, first_eac_by_symbol={}, probability_profiles={}, session_start=observed_at,
+        )
+        dependencies = IntradayScanSignalPersistenceDependencies(
+            prepare_inputs=lambda *_args, **_kwargs: prepared, preparation_dependencies=object(),
+            quote_source=lambda _quote: "tencent_watch_batch", json_safe=lambda value: value,
+            persist_rule_input_snapshot=lambda *_args, **_kwargs: None,
+            persist_rule_input_snapshots=lambda *_args, **_kwargs: None,
+            attach_volume_time_profile=lambda *_args, **_kwargs: None, number=lambda value: value,
+            aggregate_order_book_observations=lambda *_args, **_kwargs: None,
+            generate_signals=lambda **_kwargs: [{"signal_key": "000001.SZ:watch:test"}],
+            signal_generation_dependencies=object(), load_event_state=lambda *_args, **_kwargs: {},
+            persist_generated_signals=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("commit boom")),
+            signal_event_persistence_dependencies=object(),
+        )
+        with self.assertRaisesRegex(RuntimeError, "commit boom"):
+            persist_scan_transaction(
+                IntradayScanPersistenceServiceDependencies(
+                    database=database, signal_dependencies=dependencies,
+                    confirmation_window=300, signal_model_version="v1", factor_contract_version="v2",
+                    split_transaction=True,
+                ),
+                scan_id=uuid.uuid4(), observed_at=observed_at, selected_symbols=["000001.SZ"],
+                source_status={}, watches=[{"symbol": "000001.SZ"}], quotes={}, all_a_rows=[],
+                quote_latency_ms=0, realtime_minutes={}, surge_features={}, peer_contexts={}, fast_confirmations={},
+            )
+
+        self.assertEqual((database.entered, database.exited), (3, 3))
+        self.assertIn("status='failed'", connection.executed[-1][0])
 
 
 if __name__ == "__main__":

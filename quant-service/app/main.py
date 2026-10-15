@@ -2658,12 +2658,13 @@ async def intraday_board_cache_evidence(observed_at: datetime) -> dict[str, Any]
 
 
 def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceDependencies:
-    """Compose the declared atomic signal-evidence graph at the ASGI boundary."""
+    """Compose the bounded two-phase signal-evidence graph at the ASGI boundary."""
     return IntradayScanPersistenceServiceDependencies(
             database=db,
             confirmation_window=INTRADAY_CONFIRMATION_WINDOW,
             signal_model_version=INTRADAY_SIGNAL_MODEL_VERSION,
             factor_contract_version=INTRADAY_FACTOR_CONTRACT_VERSION,
+            split_transaction=True,
             signal_dependencies=IntradayScanSignalPersistenceDependencies(
                 prepare_inputs=prepare_intraday_scan_inputs,
                 preparation_dependencies=IntradayScanPreparationDependencies(

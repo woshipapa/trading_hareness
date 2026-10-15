@@ -3,11 +3,11 @@
 - state: building
 - holder: Codex 主会话，2026-10-15
 - goal: 审查并在不改变点时语义、研究只读边界和 owner 单写规则的前提下，让实时行情采集、持久化和策略计算形成有界的异步流水线，减少等待数据库写入后才计算的空档
-- next: 在下一个 owner 代码发布后读取同一交易日的 scan_performance 阶段耗时与事务审计，再决定是否拆分策略纯计算与扫描写事务
+- next: 完成本地发布路径回归并生成 owner code/config 计划；发布后按同一交易日核对两阶段事务耗时、partial/failed 计数和 scan_performance
 - updated: 2026-10-16
 - plan: docs/work/plans/realtime-strategy-overlap.md
 - branch: main
-- head: 97bf881d
+- head: 980f08c9
 - release: none
 
 ## Requirements
@@ -44,6 +44,7 @@
 - 2026-10-16：影子轮换读取同一观察时刻的成员关系与影子行情改为有界并行，结果在特征构建前统一汇合；主扫描信号事务、研究表边界和失败降级语义不变。新增 overlap 回归，focused overlay 14 项通过；全量 overlay 3324 项仍只有共享工作树 `local_spool_*` 环境变量未登记导致的既有 settings failure。
 - 2026-10-16：最新扫描只读投影在原单条 SQL 内增加最多 30 条 `scan_performance` 历史，前端新增最近扫描总耗时趋势图；不改变信号/策略输入。local compose 五次中位约 6.315 ms → 7.166 ms，statement count 仍为 1，证据为 `docs/work/probes/2026-10-16-latest-scan-history.py` / `.out.txt`。
 - 2026-10-16：扫描历史读模型同步/异步边界 focused overlay 85 项通过，前端 14 个测试文件、68 项通过，typecheck/build 和 `node scripts/verify-api-contract.mjs` 通过；全量 quant overlay 3324 项仍只剩共享工作树 `local_spool_*` settings 登记失败。
+- 2026-10-16：主扫描启用有界 prepare/evaluate/commit 两阶段协议。第一事务提交扫描 receipt、组合快照和点时输入并标记 `partial`；释放数据库连接后执行纯规则评估；第二事务重新读取事件状态、批量写入研究证据和信号，成功标记 `completed`，失败通过独立恢复事务标记 `failed`。轻量 replay/test adapter 继续使用原单事务回退；新增 5 项 focused overlay 回归。
 
 ## Waiting on the user
 
@@ -76,7 +77,8 @@
 - provider health 只属于观测面，不参与信号资格；它现在与 capture 后的成员映射、分钟增强和策略准备重叠，最后统一回收，避免辅助数据库写入抵消 capture overlap。
 - `scan_performance` 是 research-only、`live_effect=none` 的版本化证据；初始 scan receipt 先保存已知阶段，主事务提交后用一次轻量 JSONB merge 保存最终阶段，避免把遥测等待引入主信号事务。
 - receipt barrier 被取消时恢复小杰的进程内评估游标，避免主事务回滚留下未落库的状态。
-- `persist_scan_signals` 仍在同一 DB transaction 内执行 `prepare_inputs`、纯 `generate_signals`、事件去重与写入。拆成 prepare/evaluate/commit 三阶段会改变 scan receipt、foreign-key 可见性和失败恢复，需要独立设计与测量，暂不以提高并发换取语义风险。
+- 生产 `persist_scan_transaction` 已拆为 prepare/evaluate/commit：scan receipt 在纯计算前先提交为 `partial`，所以第二阶段的 FK 可见性成立；事件去重仍在提交事务内重新读取，单写事件顺序保持不变；纯规则评估期间不占用数据库连接。若提交失败，receipt 明确变为 `failed`，不会留下伪 `completed` 扫描。
+- 该拆分只在完整批量证据依赖图上启用；兼容 replay/test adapter 保留单事务路径，避免弱适配器在没有 durable scan receipt 时误用两阶段协议。
 - 新任务没有增加 provider worker 或 DB executor 上限；它们复用现有 bounded async read pool、provider deadlines 和 database boundary，避免把 200 Mbps 带宽误当成 provider quota。
 
 ## Verification
@@ -89,10 +91,11 @@
 - health handoff 变更后的 focused overlay：13 tests passed（含 runtime health-task join）。
 - health handoff 后的完整 overlay：3293 tests 运行，仍只有同一项 `test_settings.RegistryTests.test_every_key_read_in_the_app_is_declared` 失败；未出现 scan/runtime 新失败。
 - `scripts/release plan 7fa7c3f9` 只读结果：owner 因此前容量提交中 2 个 compose/env 路径仍被归类为 FULL（owner schema 已在 `20261015_ow0122`，窗口允许）；edge dashboard/adapter 也因目标范围内其他会话路径被列出。未执行任何 `--apply`，不能把该计划当作已发布。
+- 两阶段协议 focused overlay：`tests.test_intraday_scan_signal_persistence` 5 项通过；扩展 quant focused overlay 95 项通过；`py_compile` 与 `git diff --check` 通过。尚未发布 owner，线上事务审计和 partial/failed 计数仍待 release 后复测。
 
 ## Open questions
 
-- watchlist 规则使用 capture 后的内存行情，但其 point-in-time local inputs 和 event state 仍在 `persist_scan_signals` 的同步事务中读取；B093 负责拆分前的测量和协议。
+- watchlist 规则使用 capture 后的内存行情；point-in-time local inputs 在第一阶段读取并冻结，event state 在第二阶段提交事务内重新读取。若 owner 发布后出现 partial 增长或第二阶段失败，需先回滚该开关并保留兼容单事务路径。
 - capture 的精确 membership、board cache 使用 bounded async read pool；signal persistence 使用 bounded database executor；当前没有提高任一上限。
 - 主 watchlist signals 必须等 durable receipt 和 event write 完成后才可投递；xiaojie 可先做纯评估，但其 `scan_id` 写入等 receipt barrier，随后与投递并行，仍在响应前 join。
 - 本地批量化只减少数据库往返；线上收益仍需 owner 发布后按同一交易日核对 statement count、事务耗时、锁等待、隧道速率和 provider 拒绝率。
