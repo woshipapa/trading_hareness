@@ -460,15 +460,19 @@ class PlatformBoundaryTests(unittest.TestCase):
             MagicMock(fetchall=MagicMock(return_value=[])),
             MagicMock(fetchall=MagicMock(return_value=[])),
             MagicMock(fetchone=MagicMock(return_value={"last_observed_at": None, "rows": 0, "latest_trading_date": None})),
-            MagicMock(fetchone=MagicMock(return_value=None)),
-            MagicMock(fetchone=MagicMock(return_value=None)),
+            MagicMock(fetchall=MagicMock(return_value=[
+                {"kind": "latest", "status": "partial", "observed_at": "latest", "source_status": {}, "summary": {}},
+                {"kind": "latest_completed", "status": "completed", "observed_at": "completed", "source_status": {}, "summary": {}},
+            ])),
             MagicMock(fetchone=MagicMock(return_value={"total": 0, "v2": 0, "v1": 0, "latest_observed_at": None})),
-            MagicMock(fetchone=MagicMock(return_value=None)),
-            MagicMock(fetchone=MagicMock(return_value=None)),
-            MagicMock(fetchone=MagicMock(return_value=None)),
-            MagicMock(fetchall=MagicMock(return_value=[])),
-            MagicMock(fetchone=MagicMock(return_value={"count": 0})),
-            MagicMock(fetchone=MagicMock(return_value={"count": 0})),
+            MagicMock(fetchall=MagicMock(return_value=[
+                {"kind": "board", "status": "completed", "observed_at": "board", "source_status": {}, "summary": {}, "coverage": None},
+                {"kind": "curve", "status": "partial", "observed_at": "curve", "source_status": {}, "summary": None, "coverage": {}},
+            ])),
+            MagicMock(fetchall=MagicMock(return_value=[
+                {"kind": "signal", "status": "failed", "sent_at": None, "created_at": "delivery", "error_message": "down"},
+            ])),
+            MagicMock(fetchone=MagicMock(return_value={"signal_count": 0, "rotation_count": 0})),
             MagicMock(fetchone=MagicMock(return_value=None)),
             MagicMock(fetchone=MagicMock(return_value=None)),
             MagicMock(fetchone=MagicMock(return_value={"enabled": 2})),
@@ -481,9 +485,15 @@ class PlatformBoundaryTests(unittest.TestCase):
         self.assertEqual(evidence["pending_rotation_delivery_count"], 0)
         self.assertEqual(evidence["watch_row"], {"enabled": 2})
         self.assertIsNone(evidence["latest_health_event"])
-        self.assertEqual(connection.execute.call_count, 16)
+        self.assertEqual(evidence["latest_scan"]["status"], "partial")
+        self.assertEqual(evidence["latest_completed_scan"]["status"], "completed")
+        self.assertEqual(evidence["latest_board_curve"]["status"], "partial")
+        self.assertEqual(evidence["latest_delivery"]["status"], "failed")
+        self.assertEqual(evidence["delivery_history"], [{"status": "failed"}])
+        self.assertEqual(connection.execute.call_count, 12)
         self.assertEqual(evidence["minute_profile"]["rows"], 0)
-        self.assertIn("attempt_count<%s", connection.execute.call_args_list[11].args[0])
+        self.assertIn("UNION ALL", connection.execute.call_args_list[4].args[0])
+        self.assertIn("attempt_count<%s", connection.execute.call_args_list[8].args[0])
 
     def test_intraday_status_read_model_is_local_and_dependency_injected(self):
         evidence = {

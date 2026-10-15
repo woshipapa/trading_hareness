@@ -40,6 +40,12 @@ export interface JsonClient {
 export function createJsonClient(options: { maxConcurrentReads?: number } = {}): JsonClient {
   const limit = options.maxConcurrentReads ?? 0;
   let activeReads = 0;
+  // Multiple mounted panels can request the same read during one refresh
+  // tick. Share only the in-flight promise: after it settles the next read
+  // still reaches the server, so status data is never served from a stale
+  // client cache. Requests with an AbortSignal stay independent because one
+  // caller's cancellation must not cancel another caller's read.
+  const inFlightReads = new Map<string, Promise<unknown>>();
   const pendingReads: Array<{
     task: () => Promise<unknown>;
     resolve: (value: unknown) => void;
@@ -74,9 +80,19 @@ export function createJsonClient(options: { maxConcurrentReads?: number } = {}):
 
   return {
     getJson<T>(path: string, requestOptions: { signal?: AbortSignal } = {}): Promise<T> {
-      return scheduleRead(async () => decodeJson<T>(await fetch(path, {
+      const task = async () => decodeJson<T>(await fetch(path, {
         headers: { accept: 'application/json' }, cache: 'no-store', signal: requestOptions.signal,
-      }), path));
+      }), path);
+      if (requestOptions.signal) return scheduleRead(task);
+      const existing = inFlightReads.get(path);
+      if (existing) return existing as Promise<T>;
+      const request = scheduleRead(task);
+      inFlightReads.set(path, request);
+      request.then(
+        () => { if (inFlightReads.get(path) === request) inFlightReads.delete(path); },
+        () => { if (inFlightReads.get(path) === request) inFlightReads.delete(path); },
+      );
+      return request;
     },
     postJson<T>(path: string, body: Record<string, unknown> = {}): Promise<T> {
       return writeJson<T>('POST', path, body);

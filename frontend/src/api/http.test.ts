@@ -55,4 +55,23 @@ describe('frontend HTTP boundary', () => {
       expect.objectContaining({ signal: controller.signal }),
     );
   });
+
+  it('coalesces identical in-flight reads and releases the entry after settling', async () => {
+    let release: ((response: Response) => void) | undefined;
+    const response = new Response(JSON.stringify({ value: 1 }), { headers: { 'content-type': 'application/json' } });
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }))
+      .mockResolvedValueOnce(response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = getJson<{ value: number }>('/api/repeated-status');
+    const second = getJson<{ value: number }>('/api/repeated-status');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    release?.(new Response(JSON.stringify({ value: 1 }), { headers: { 'content-type': 'application/json' } }));
+    await expect(Promise.all([first, second])).resolves.toEqual([{ value: 1 }, { value: 1 }]);
+
+    await expect(getJson<{ value: number }>('/api/repeated-status')).resolves.toEqual({ value: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
