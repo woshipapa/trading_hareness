@@ -3,11 +3,11 @@
 - state: building
 - holder: Codex 主会话，2026-10-16
 - goal: 在不缓存旧证据、不改变状态语义和取消语义的前提下，减少研究台刷新造成的重复 HTTP 请求与 owner 数据库状态读往返
-- next: owner 需先按 schema gate 应用 `20261016_ow0127`，再按同一交易日复核状态、策略健康、最新扫描和市场量能接口耗时、statement count、索引命中、锁等待和隧道速率；生产发布仍待用户执行
+- next: owner 需先按 schema gate 应用 `20261016_ow0128`、`20261016_ow0129`，再按同一交易日复核状态、策略健康、最新扫描、市场量能和研究概览接口耗时、statement count、索引命中、锁等待和隧道速率；生产发布仍待用户执行
 - updated: 2026-10-16
 - plan: none
 - branch: main
-- head: 5e8c615a
+- head: 60c860cc
 - release: none
 
 ## Requirements
@@ -44,6 +44,9 @@
 - 2026-10-16 04:12 Asia/Shanghai：最新扫描信号读取新增 `20261016_ow0127` 的 `(scan_id,severity DESC,created_at)` 索引；本地 5 次探针中位约 5.587 ms 降至 0.769 ms，仍保留投递表原有索引。
 - 2026-10-16 04:15 Asia/Shanghai：最新扫描的 scan/signals/deliveries 由同步与异步读路径共用的一条 JSONB 快照 SQL 返回，statement count 从 3 降为 1；本地五次中位 4.778 ms，旧三条查询 4.203 ms，线上收益待 owner 隧道复测。远端观察台新增阶段耗时比例条和 overlap 标签，前端全量 66 项通过、构建通过。
 - 2026-10-16 04:40 Asia/Shanghai：市场量能复盘的分钟特征、日摘要、板块日流、结果汇总和研究门禁由 `MARKET_FLOW_SNAPSHOT_SQL` 合并为一次 JSONB 快照；同步/异步路径 statement count 从 5 降到 1。结果计数、研究门禁、状态计数和来源标签与旧路径一致；本地五次中位约 788.019 ms，旧五条约 790.734 ms，owner 需用真实隧道复测少四次往返的收益。代码提交 `5e8c615a`，探针 `docs/work/probes/2026-10-16-market-flow-snapshot.py`。
+- 2026-10-16 04:49 Asia/Shanghai：定位 `/api/v1/research/overview` 的主要慢点为历史容量估算；本地旧路径约 8 秒，其中 canonical bars 按日去重约 7.7 秒。新增 `20261016_ow0128` 的有效 bars 覆盖索引、`20261016_ow0129` 的 fundamentals/limits 窄 symbol 索引，并利用 canonical `(symbol,trading_date)` 主键将覆盖统计的 `count(DISTINCT symbol)` 改为等价 `count(*)`。原生 async 历史估算的七个独立只读聚合与概览快照并发；本地三次历史估算约 2.88--3.40 秒中位 2.935 秒，coverage 与同步 estimator、dataset 行数逐项相等；探针为 `docs/work/probes/2026-10-16-research-overview-history.py`。
+- 2026-10-16 04:49 Asia/Shanghai：重启本地 quant 服务后 `/api/v1/research/overview` 三次返回 200，耗时约 2.45--2.77 秒；这是本地 compose 证据，owner 隧道收益、p95 和锁等待仍需发布后复核。
+- 2026-10-16 04:50 Asia/Shanghai：本线 focused overlay 回归 86 项通过；全量 quant overlay 3314 项中唯一失败仍是其他会话 `local_spool_*` 读取未登记 `DOCKER_HOST`、`OFFICIAL_HEALTH_URL`、`SPOOL_*`、`XDG_RUNTIME_DIR` 等环境变量；前端 14 个测试文件、66 项通过，typecheck/build 通过；未执行生产发布。
 
 ## Waiting on the user
 
@@ -69,6 +72,11 @@
 - `docs/work/probes/2026-10-16-latest-scan-snapshot.out.txt`
 - `docs/work/probes/2026-10-16-market-flow-snapshot.py`
 - `docs/work/probes/2026-10-16-market-flow-snapshot.out.txt`
+- `docs/work/probes/2026-10-16-research-overview-history.py`
+- `docs/work/probes/2026-10-16-research-overview-history.out.txt`
+- `quant-service/migrations/versions/20261016_ow0128_canonical_coverage_index.py`
+- `quant-service/migrations/versions/20261016_ow0129_coverage_symbol_indexes.py`
+- `docs/decisions/0036-research-overview-history-overlap.md`
 - `docs/decisions/0034-runtime-status-snapshot.md`
 - `docs/decisions/0035-strategy-health-quote-freshness-index.md`
 - `frontend/src/views/research/RemoteRealtimeTab.vue`
