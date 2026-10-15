@@ -1,0 +1,1 @@
+{"statement_count": 1, "baseline_elapsed_ms": [38.672, 7.031, 5.587, 4.993, 3.646], "indexed_elapsed_ms": [1.522, 0.806, 0.769, 0.734, 0.717], "baseline_median_ms": 5.587, "indexed_median_ms": 0.769, "scope": "local compose PostgreSQL; temporary local index is removed; no owner tunnel/provider access"}

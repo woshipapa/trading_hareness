@@ -14,12 +14,15 @@
 3. 策略形态页的 board context 与龙虎榜 context 通过现有有界数据库 runner 并行读取；各自的事务、超时和错误传播边界不变。
 4. 为事件和策略形态读路径增加幂等索引迁移 `20261016_ow0123`。依赖该迁移的 owner 代码只能在 schema gate 确认库已到该版本后发布。
 5. 实时扫描在 session/watchlist gate 通过后立即启动只读 board-flow freshness 读取，让它与行情抓取和精确 membership 读取重叠；任务仍由当前 scan 持有，在 join 前失败会取消，不形成 detached background work。
+6. 最新扫描控制台读取增加迁移 `20261016_ow0127` 的 `(scan_id, severity DESC, created_at)` 索引，避免按最新 scan 读取信号时扫描整张事件表；持久化写入顺序和返回排序保持不变。
 
 ## 后果
 
 正常事件分页从两次 SQL 往返降为一次；只有 offset 超出结果集时才执行回退 count。扫描准备省去同一事务中的持仓和快照重复读取。两个独立的策略上下文读共享等待时间，慢的一支仍受原有 30 秒 runner 超时约束。索引会增加少量写入维护成本，需结合 owner 的真实执行计划和锁等待复核。
 
 实时扫描的 board-flow 读不再等待 provider capture 完成；当行情抓取或 membership 读取较慢时，状态证据可以在同一等待窗口内完成。board 读取仍使用扫描时间点计算年龄，失败仍沿原有 scan failure path 传播，任务取消和重放边界不变。
+
+最新扫描的信号读取只需要扫描目标 scan 的索引范围；本地 `EXPLAIN (ANALYZE)` 的执行时间由约 4.7 ms 降至约 0.2 ms，5 次实际查询探针的中位数由 5.587 ms 降至 0.769 ms。索引会增加每条信号写入的维护成本，owner 必须结合实际写入吞吐、锁等待和索引命中率复核。
 
 这些改动只优化研究读模型、证据落盘和纸面扫描准备，不改变策略资格、point-in-time 边界、事件幂等顺序、provider 并发上限或任何 live effect。
 
@@ -29,4 +32,6 @@
 - `test_market_event_reads.py` 覆盖非空页单往返和空页精确计数回退。
 - `test_strategy_pattern_read_model.py` 用互相等待的 runner 验证两个上下文确实重叠，避免回归成串行调用。
 - `test_intraday_watchlist_scan_service.py` 用互相等待的 capture/board tasks 验证 board freshness 读取在行情抓取仍进行时已启动，并验证最终状态仍来自已 join 的结果。
+- `test_scan_signal_read_index_migration.py` 验证最新扫描信号索引的迁移链和可逆 downgrade；本地 `EXPLAIN (ANALYZE, BUFFERS)` 作为计划证据保存在工作记录中。
+- `docs/work/probes/2026-10-16-latest-scan-read.py` 在本地临时建立并删除等价索引，记录 5 次查询中位数；输出不代表 owner 隧道或交易日高峰。
 - overlay 回归、`py_compile`、组件边界检查和 `git diff --check` 在提交前运行；owner 当前仍需先应用 `20261016_ow0123`，线上收益需发布后用真实慢事务、执行计划和隧道等待复测。
