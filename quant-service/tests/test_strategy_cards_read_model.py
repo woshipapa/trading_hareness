@@ -103,7 +103,8 @@ class _Connection:
 class StrategyCardTests(unittest.TestCase):
     def setUp(self):
         self.connection = _Connection()
-        self.day = strategy_cards(self.connection, SESSION, per_line=10, now=at(10, 31))
+        self.day = strategy_cards(self.connection, SESSION, per_line=10,
+                                  now=datetime(2026, 10, 10, 10, 31, tzinfo=CN))
         self.cards = {card["strategy_key"]: card for card in self.day["cards"]}
 
     def test_the_large_percentage_is_the_return_from_the_open(self):
@@ -187,6 +188,16 @@ class StrategyCardTests(unittest.TestCase):
                 return [{"as_of": None}] if "max(as_of_date)" in sql else []
         day = strategy_cards(Empty(), SESSION)
         self.assertEqual((day["status"], day["cards"]), ("missing", []))
+
+    def test_current_session_does_not_replay_a_prior_ledger_without_live_source(self):
+        class NoLive(_Connection):
+            def _rows(self, sql, params):
+                if "raw_market_observations" in sql or "intraday_signal_events" in sql:
+                    return []
+                return super()._rows(sql, params)
+
+        day = strategy_cards(NoLive(), SESSION, per_line=10, now=at(10, 31))
+        self.assertEqual((day["status"], day["cards"], day["picks_as_of"]), ("missing", [], AS_OF.isoformat()))
 
     def test_live_source_mapping_keeps_strategy_identity_and_research_reason(self):
         self.assertEqual(_signal_strategy("002696.SZ:entry:teacher_review:relay_break_reseal"),

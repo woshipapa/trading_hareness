@@ -578,6 +578,7 @@ def data_health(connection: Any, trade_date: date, as_of: date, now: datetime) -
 def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now: datetime | None = None) -> dict[str, Any]:
     now = now or datetime.now(CN_TZ)
     as_of = picks_as_of(connection, trade_date)
+    current_session = trade_date == now.astimezone(CN_TZ).date()
     base = {"trade_date": trade_date.isoformat(), "cards_version": CARDS_VERSION,
             "research_only": True, "live_effect": "none"}
     freshness = _cards_freshness(connection, trade_date, as_of, now)
@@ -586,7 +587,9 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
         return {**base, "status": "missing", "reason": "no ledger candidates before the session",
                 "freshness": freshness, "cards": []}
     tiered = tiered_sql_builder(connection)
-    ledger = ledger_picks(connection, as_of) if as_of is not None else []
+    # A current-session read must never fall back to an old ledger as today's
+    # candidates. Historical dates retain the ledger for replay comparison.
+    ledger = ledger_picks(connection, as_of) if as_of is not None and not current_session else []
     resonance: dict[str, list[str]] = defaultdict(list)
     by_line: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in ledger:
@@ -631,7 +634,7 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
             "strategy_key": line, "name": name, "style": style, "direction": "short" if direction < 0 else "long",
             "contract_key": contract_key, "model_version": contract.model_version if contract else None,
             "maturity": contract.maturity if contract else "ledger_only",
-            "candidates": sum(row["strategy_key"] == line for row in ledger),
+            "candidates": sum(row["strategy_key"] == line for row in ledger) + (len(live_by_line.get(line, [])) if current_session else 0),
             "live_candidate_count": len(live_by_line.get(line, [])),
             "timing_plans": timing["timing_plans"], "timing_candidates": timing["candidates"],
             "summary": _card_summary(picks, direction), "picks": picks, "leaderboard": board.get(line, {}),
