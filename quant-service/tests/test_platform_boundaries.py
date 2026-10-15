@@ -455,29 +455,30 @@ class PlatformBoundaryTests(unittest.TestCase):
         connection = MagicMock()
         database = MagicMock()
         database.transaction.return_value.__enter__.return_value = connection
-        query_results = [
-            MagicMock(fetchall=MagicMock(return_value=[])),
-            MagicMock(fetchall=MagicMock(return_value=[])),
-            MagicMock(fetchall=MagicMock(return_value=[])),
-            MagicMock(fetchone=MagicMock(return_value={"last_observed_at": None, "rows": 0, "latest_trading_date": None})),
-            MagicMock(fetchall=MagicMock(return_value=[
+        snapshot_rows = [
+            {"kind": "health_rows", "value": []},
+            {"kind": "quote_rows", "value": []},
+            {"kind": "raw_rows", "value": []},
+            {"kind": "minute_profile", "value": {"last_observed_at": None, "rows": 0, "latest_trading_date": None}},
+            {"kind": "scan_rows", "value": [
                 {"kind": "latest", "status": "partial", "observed_at": "latest", "source_status": {}, "summary": {}},
                 {"kind": "latest_completed", "status": "completed", "observed_at": "completed", "source_status": {}, "summary": {}},
-            ])),
-            MagicMock(fetchone=MagicMock(return_value={"total": 0, "v2": 0, "v1": 0, "latest_observed_at": None})),
-            MagicMock(fetchall=MagicMock(return_value=[
+            ]},
+            {"kind": "rule_input_snapshots", "value": {"total": 0, "v2": 0, "v1": 0, "latest_observed_at": None}},
+            {"kind": "board_rows", "value": [
                 {"kind": "board", "status": "completed", "observed_at": "board", "source_status": {}, "summary": {}, "coverage": None},
                 {"kind": "curve", "status": "partial", "observed_at": "curve", "source_status": {}, "summary": None, "coverage": {}},
-            ])),
-            MagicMock(fetchall=MagicMock(return_value=[
-                {"kind": "signal", "status": "failed", "sent_at": None, "created_at": "delivery", "error_message": "down"},
-            ])),
-            MagicMock(fetchone=MagicMock(return_value={"signal_count": 0, "rotation_count": 0})),
-            MagicMock(fetchone=MagicMock(return_value=None)),
-            MagicMock(fetchone=MagicMock(return_value=None)),
-            MagicMock(fetchone=MagicMock(return_value={"enabled": 2})),
+            ]},
+            {"kind": "delivery_rows", "value": [
+                {"kind": "signal", "status": "failed", "sent_at": None,
+                 "created_at": "2026-10-16T03:04:05+00:00", "error_message": "down"},
+            ]},
+            {"kind": "pending_delivery_counts", "value": {"signal_count": 0, "rotation_count": 0}},
+            {"kind": "latest_daily_summary", "value": None},
+            {"kind": "latest_health_event", "value": None},
+            {"kind": "watch_row", "value": {"enabled": 2}},
         ]
-        connection.execute.side_effect = query_results
+        connection.execute.return_value = MagicMock(fetchall=MagicMock(return_value=snapshot_rows))
 
         evidence = load_intraday_runtime_evidence(database, 3)
 
@@ -489,11 +490,62 @@ class PlatformBoundaryTests(unittest.TestCase):
         self.assertEqual(evidence["latest_completed_scan"]["status"], "completed")
         self.assertEqual(evidence["latest_board_curve"]["status"], "partial")
         self.assertEqual(evidence["latest_delivery"]["status"], "failed")
+        self.assertEqual(evidence["latest_delivery"]["created_at"], datetime(2026, 10, 16, 3, 4, 5, tzinfo=timezone.utc))
         self.assertEqual(evidence["delivery_history"], [{"status": "failed"}])
-        self.assertEqual(connection.execute.call_count, 12)
+        self.assertEqual(connection.execute.call_count, 1)
         self.assertEqual(evidence["minute_profile"]["rows"], 0)
-        self.assertIn("UNION ALL", connection.execute.call_args_list[4].args[0])
-        self.assertIn("attempt_count<%s", connection.execute.call_args_list[8].args[0])
+        self.assertIn("UNION ALL", connection.execute.call_args_list[0].args[0])
+        self.assertIn("attempt_count<%s", connection.execute.call_args_list[0].args[0])
+
+    def test_async_intraday_runtime_status_uses_the_same_single_snapshot_statement(self):
+        from app.intraday_runtime_status import load_intraday_runtime_evidence_async
+
+        class Result:
+            def __init__(self, rows):
+                self.rows = rows
+
+            async def fetchall(self):
+                return self.rows
+
+        class Connection:
+            def __init__(self, rows):
+                self.rows = rows
+                self.calls = []
+
+            async def execute(self, sql, params=()):
+                self.calls.append((sql, params))
+                return Result(self.rows)
+
+        class Transaction:
+            def __init__(self, connection):
+                self.connection = connection
+
+            async def __aenter__(self):
+                return self.connection
+
+            async def __aexit__(self, *_args):
+                return False
+
+        class Database:
+            def __init__(self, rows):
+                self.connection = Connection(rows)
+
+            def transaction(self):
+                return Transaction(self.connection)
+
+        rows = [
+            {"kind": "health_rows", "value": []}, {"kind": "quote_rows", "value": []},
+            {"kind": "raw_rows", "value": []}, {"kind": "minute_profile", "value": {}},
+            {"kind": "scan_rows", "value": []}, {"kind": "rule_input_snapshots", "value": {}},
+            {"kind": "board_rows", "value": []}, {"kind": "delivery_rows", "value": []},
+            {"kind": "pending_delivery_counts", "value": {}}, {"kind": "latest_daily_summary", "value": None},
+            {"kind": "latest_health_event", "value": None}, {"kind": "watch_row", "value": {"enabled": 0}},
+        ]
+        database = Database(rows)
+        evidence = asyncio.run(load_intraday_runtime_evidence_async(database, 3))
+        self.assertEqual(evidence["watch_row"], {"enabled": 0})
+        self.assertEqual(len(database.connection.calls), 1)
+        self.assertEqual(database.connection.calls[0][1], (3, 3))
 
     def test_intraday_status_read_model_is_local_and_dependency_injected(self):
         evidence = {

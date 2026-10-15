@@ -3,7 +3,7 @@
 - state: building
 - holder: Codex 主会话，2026-10-16
 - goal: 在不缓存旧证据、不改变状态语义和取消语义的前提下，减少研究台刷新造成的重复 HTTP 请求与 owner 数据库状态读往返
-- next: 完成本地 overlay 全量回归、前端 typecheck/build，并在后续 owner 发布后按同一交易日复核状态接口耗时、数据库 statement count 和隧道速率
+- next: 完成本地 overlay 全量回归、前端 typecheck/build，并在后续 owner 发布后按同一交易日复核状态接口耗时、数据库 statement count 和隧道速率；owner 需先应用 `20261016_ow0125`
 - updated: 2026-10-16
 - plan: none
 - branch: main
@@ -38,6 +38,7 @@
 - 2026-10-16 02:21 Asia/Shanghai：最新 focused release-path 回归运行 71 项通过；前端 14 个测试文件、64 项通过，typecheck/build 通过；共享前端同步守卫和组件边界检查通过；尚未执行生产发布。
 - 2026-10-16 02:21 Asia/Shanghai：全量 quant overlay 运行 3293 项，唯一失败仍是其他会话 `local_spool_*` 读取未登记 `DOCKER_HOST`、`SPOOL_*`、`XDG_RUNTIME_DIR` 等环境变量；本线状态读和 HTTP 测试未失败。
 - 2026-10-16 02:30 Asia/Shanghai：Provider 实时面板新增本地执行器水位展示，直接显示活跃数、worker 上限、排队余量和可用槽位；前端 typecheck/build 通过，未改任何运行上限。
+- 2026-10-16 04:18 Asia/Shanghai：运行状态看板的 12 个串行读合并为一个同事务 `RUNTIME_STATUS_SNAPSHOT_SQL`；JSONB envelope 只在进程内恢复约定时间字段，不跨请求缓存。执行计划定位到 rule-input schema 统计的 JSONB 解析，新增 v1/v2 partial indexes 迁移 `20261016_ow0124`，再为 quote source 聚合新增 `20261016_ow0125` source-leading index。本地 compose 探针在等价索引下由约 9.7 秒降至中位 0.095 秒，statement count 为 1。
 
 ## Waiting on the user
 
@@ -51,6 +52,11 @@
 - `frontend/src/api/http.test.ts`
 - `quant-service/app/intraday_runtime_status.py`
 - `quant-service/tests/test_platform_boundaries.py`
+- `quant-service/migrations/versions/20261016_ow0124_rule_input_status_indexes.py`
+- `quant-service/migrations/versions/20261016_ow0125_runtime_quote_status_index.py`
+- `docs/work/probes/2026-10-16-runtime-status-snapshot.py`
+- `docs/work/probes/2026-10-16-runtime-status-snapshot.out.txt`
+- `docs/decisions/0034-runtime-status-snapshot.md`
 
 ## Open questions
 
