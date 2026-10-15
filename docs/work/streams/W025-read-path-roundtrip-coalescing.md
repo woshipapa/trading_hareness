@@ -3,11 +3,11 @@
 - state: building
 - holder: Codex 主会话，2026-10-16
 - goal: 在不缓存旧证据、不改变状态语义和取消语义的前提下，减少研究台刷新造成的重复 HTTP 请求与 owner 数据库状态读往返
-- next: owner 需先按 schema gate 应用 `20261016_ow0128`、`20261016_ow0129`，再按同一交易日复核状态、策略健康、最新扫描、市场量能和研究概览接口耗时、statement count、索引命中、锁等待和隧道速率；生产发布仍待用户执行
+- next: owner 需先按 schema gate 应用 `20261016_ow0128`、`20261016_ow0129`、`20261016_ow0130`，再按同一交易日复核状态、策略健康、最新扫描、市场量能、研究概览和 feature-readiness 接口耗时、statement count、索引命中、锁等待和隧道速率；生产发布仍待用户执行
 - updated: 2026-10-16
 - plan: none
 - branch: main
-- head: 49cc9e2f
+- head: a809ced7
 - release: none
 
 ## Requirements
@@ -16,12 +16,14 @@
 - 研究状态必须保持只读、点时证据和 fail-closed 语义；不能用旧缓存掩盖服务故障。
 - 带 `AbortSignal` 的请求必须保持独立，取消一个页面不能取消另一个页面的请求。
 - owner 生产发布和数据库写入仍由用户按发布窗口执行，本线只修改源码和测试。
+- 2026-10-16：用户要求：“如果是当前软件的限制的，全都可以提高，只要不是硬件的硬限制相关的全部提升！！！”；软件 ceiling 可以提高，但仍须受 owner 硬件、数据库预算、隧道和上游合同约束，并以正确性和可用性压力证据为准。
 
 ## Plan
 
 1. 在共享前端 JSON GET 层只合并同一路径的 in-flight promise，响应结束后立即清除。
 2. 在 intraday runtime status 的同一只读事务内合并可保持行类型的查询：最新扫描与最新 completed 扫描、最新板块报告与曲线、最新投递与最近 20 条投递历史、两类待重试计数。
 3. 用 overlay 测试验证结果形状、查询数量和取消边界；不引入 TTL 或跨请求旧数据缓存。
+4. 对 feature-readiness 的独立聚合做 native async fanout，并修复 sync/async pool 生命周期的 single-flight 竞态。
 
 ## Steps
 
@@ -29,7 +31,8 @@
 - [x] 2 实现共享 GET in-flight 合并及状态查询合并
 - [x] 3 增加回归测试并完成 focused overlay 验证
 - [x] 4 完成全量 overlay、前端构建和发布计划（全量仅剩其他会话 `local_spool_*` 环境变量登记失败）
-- [ ] 5 后续 owner 发布后回填线上耗时、statement count、连接池等待与隧道速率
+- [x] 5 feature-readiness 并行读取、连接池生命周期锁、0130 覆盖索引迁移和 1/2/4/8 压力探针
+- [ ] 6 后续 owner 发布后回填线上耗时、statement count、连接池等待与隧道速率
 
 ## Log
 
@@ -47,6 +50,10 @@
 - 2026-10-16 04:49 Asia/Shanghai：定位 `/api/v1/research/overview` 的主要慢点为历史容量估算；本地旧路径约 8 秒，其中 canonical bars 按日去重约 7.7 秒。新增 `20261016_ow0128` 的有效 bars 覆盖索引、`20261016_ow0129` 的 fundamentals/limits 窄 symbol 索引，并利用 canonical `(symbol,trading_date)` 主键将覆盖统计的 `count(DISTINCT symbol)` 改为等价 `count(*)`。原生 async 历史估算的七个独立只读聚合与概览快照并发；本地三次历史估算约 2.88--3.40 秒中位 2.935 秒，coverage 与同步 estimator、dataset 行数逐项相等；探针为 `docs/work/probes/2026-10-16-research-overview-history.py`。
 - 2026-10-16 04:49 Asia/Shanghai：重启本地 quant 服务后 `/api/v1/research/overview` 三次返回 200，耗时约 2.45--2.77 秒；这是本地 compose 证据，owner 隧道收益、p95 和锁等待仍需发布后复核。
 - 2026-10-16 04:50 Asia/Shanghai：本线 focused overlay 回归 86 项通过；全量 quant overlay 3314 项中唯一失败仍是其他会话 `local_spool_*` 读取未登记 `DOCKER_HOST`、`OFFICIAL_HEALTH_URL`、`SPOOL_*`、`XDG_RUNTIME_DIR` 等环境变量；前端 14 个测试文件、66 项通过，typecheck/build 通过；未执行生产发布。
+- 2026-10-16：发现多个首屏请求可同时触发 psycopg sync/async pool `open()`，在 async pool 上复现 `AssertionError: _pool_full_event`；加入 sync `threading.Lock`、async `asyncio.Lock`，并让 `replace_pool` 持锁完成新池首次打开。focused overlay 回归 145 项通过。
+- 2026-10-16：`feature_readiness` 拆为 8 个 feature 聚合加 1 个 universe 统计并发读取；本地 overlay 三次中位 1,532.029 ms，legacy UNION 对照 1,716.112 ms，返回 8 项且 `decision_ready=true`。证据脚本和输出为 `docs/work/probes/2026-10-16-feature-readiness-overlap.py` / `.out.txt`，owner 还未套用 0130 索引迁移。
+- 2026-10-16：当前源码 ASGI 压力矩阵 `/api/v1/data-readiness/features` 的 1/2/4/8 并发均 200；p50 分别约 1,672/2,248/3,704/7,514 ms，8 并发 p95 约 7,855 ms，慢事务日志达到 5--8 秒。async pool 达到 16 个连接但无等待，说明继续提高 owner 默认池会先放大 4 核数据库竞争；证据为 `docs/work/probes/2026-10-16-feature-readiness-stress.py` / `.out.txt`。
+- 2026-10-16：更正上一条“重启本地 quant 服务后 curl 2.45--2.77 秒”的记录：该长驻容器使用 baked image，未执行当前源码 overlay，不能作为当前代码证据。当前源码 overlay 直接测得 history/overview 并行约 1,715 ms、runtime status snapshot 约 244 ms；后续报告均以 overlay 或明确标注的 baked image 为准。
 
 ## Waiting on the user
 
@@ -74,6 +81,10 @@
 - `docs/work/probes/2026-10-16-market-flow-snapshot.out.txt`
 - `docs/work/probes/2026-10-16-research-overview-history.py`
 - `docs/work/probes/2026-10-16-research-overview-history.out.txt`
+- `docs/work/probes/2026-10-16-feature-readiness-overlap.py`
+- `docs/work/probes/2026-10-16-feature-readiness-overlap.out.txt`
+- `docs/work/probes/2026-10-16-feature-readiness-stress.py`
+- `docs/work/probes/2026-10-16-feature-readiness-stress.out.txt`
 - `quant-service/migrations/versions/20261016_ow0128_canonical_coverage_index.py`
 - `quant-service/migrations/versions/20261016_ow0129_coverage_symbol_indexes.py`
 - `docs/decisions/0036-research-overview-history-overlap.md`
@@ -83,9 +94,9 @@
 
 ## Open questions
 
-- owner 数据库经反向隧道的真实收益要在新源码运行后测量，不能用本地 mock 查询次数替代线上延迟。
+- owner 数据库经反向隧道的真实收益要在新源码运行后测量，不能用本地 mock 查询次数替代线上延迟；0130 迁移应用后还要复核索引命中和写入开销。
 - 如果同一状态接口仍是首屏热点，下一步应按 tab 读取或增加只读聚合读模型；在没有线上 statement/锁等待证据前不增加 TTL。
 
 ## Resume here
 
-先跑全量 quant overlay 和前端 typecheck/build，再检查组件边界与 git diff；发布计划必须把 owner quant 和 edge dashboard 的 release unit 分开。
+先跑全量 quant overlay 和前端 typecheck/build，再检查组件边界与 git diff；发布计划必须把 owner quant 和 edge dashboard 的 release unit 分开。0130 迁移和本轮生命周期/feature-readiness 改动仍待用户按 release plan 发布后做线上验证。

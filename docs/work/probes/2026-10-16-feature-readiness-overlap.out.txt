@@ -1,0 +1,1 @@
+{'parallel_read_count': 9, 'parallel_statement_calls': 27, 'parallel_elapsed_ms': [1642.23, 1532.029, 1468.094], 'parallel_median_ms': 1532.029, 'legacy_statement_count': 2, 'legacy_elapsed_ms': [2052.446, 1716.112, 1596.56], 'legacy_median_ms': 1716.112, 'items': 8, 'decision_ready': True, 'scope': 'local compose PostgreSQL; no owner tunnel/provider access'}

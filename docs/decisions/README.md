@@ -30,6 +30,7 @@
 | [0024](0024-owner-paths-are-classified-not-built.md) | owner 的改动按路径分类；不认识的路径是缺一条规则，不是去构建镜像；迁移随覆盖层发布并每次过库版本闸门 | 生效 |
 | [0025](0025-relay-stack-shares-the-owner-host.md) | 中继栈（feishu-relay、xhs、itougu、paper）与量化在同一台主机上，仍是两个独立发布单元：各自的 Docker 守护进程、目录、凭据和发布工具；靠名字而不是地址隔离 | 生效 |
 | [0028](0028-software-capacity-ceilings.md) | 软件资源 ceiling 提高，硬件、上游合同、数据库预算和正确性边界保留 | 生效 |
+| [0037](0037-feature-readiness-fanout-and-pool-lifecycle.md) | feature-readiness 并行只读与连接池生命周期 single-flight | 生效 |
 
 格式：
 
