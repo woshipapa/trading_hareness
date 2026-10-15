@@ -3,11 +3,11 @@
 - state: building
 - holder: Codex 主会话，2026-10-16
 - goal: 在不缓存旧证据、不改变状态语义和取消语义的前提下，减少研究台刷新造成的重复 HTTP 请求与 owner 数据库状态读往返
-- next: owner 需先按 schema gate 应用 `20261016_ow0126`，再按同一交易日复核状态与策略健康接口耗时、数据库 statement count、索引命中、锁等待和隧道速率；生产发布仍待用户执行
+- next: owner 需先按 schema gate 应用 `20261016_ow0127`，再按同一交易日复核状态、策略健康和最新扫描接口耗时、statement count、索引命中、锁等待和隧道速率；生产发布仍待用户执行
 - updated: 2026-10-16
 - plan: none
 - branch: main
-- head: 75a7bcb0
+- head: 0f04d59f
 - release: none
 
 ## Requirements
@@ -41,6 +41,8 @@
 - 2026-10-16 04:18 Asia/Shanghai：运行状态看板的 12 个串行读合并为一个同事务 `RUNTIME_STATUS_SNAPSHOT_SQL`；JSONB envelope 只在进程内恢复约定时间字段，不跨请求缓存。执行计划定位到 rule-input schema 统计的 JSONB 解析，新增 v1/v2 partial indexes 迁移 `20261016_ow0124`，再为 quote source 聚合新增 `20261016_ow0125` source-leading index。本地 compose 探针在等价索引下由约 9.7 秒降至中位 0.095 秒，statement count 为 1。
 - 2026-10-16 04:32 Asia/Shanghai：策略健康快照保持单条 SQL；全局行情新鲜度的 `max(observed_at)` 与 90 秒计数新增迁移 `20261016_ow0126` 时间索引。本地同名索引探针中位约 3.7 ms，未使用索引时热身后约 37 ms；仅为本地 PostgreSQL 计划证据，owner 需复测写入成本和锁等待。
 - 2026-10-16 04:35 Asia/Shanghai：全量 quant overlay 运行 3311 项，唯一失败仍是其他会话 `local_spool_*` 读取未登记 `DOCKER_HOST`、`SPOOL_*`、`XDG_RUNTIME_DIR` 等环境变量；本线 focused 80 项通过，前端 typecheck/build 和容器内组件边界检查通过；未执行生产发布。
+- 2026-10-16 04:12 Asia/Shanghai：最新扫描信号读取新增 `20261016_ow0127` 的 `(scan_id,severity DESC,created_at)` 索引；本地 5 次探针中位约 5.587 ms 降至 0.769 ms，仍保留投递表原有索引。
+- 2026-10-16 04:15 Asia/Shanghai：最新扫描的 scan/signals/deliveries 由同步与异步读路径共用的一条 JSONB 快照 SQL 返回，statement count 从 3 降为 1；本地五次中位 4.778 ms，旧三条查询 4.203 ms，线上收益待 owner 隧道复测。远端观察台新增阶段耗时比例条和 overlap 标签，前端全量 66 项通过、构建通过。
 
 ## Waiting on the user
 
@@ -60,8 +62,13 @@
 - `docs/work/probes/2026-10-16-runtime-status-snapshot.out.txt`
 - `docs/work/probes/2026-10-16-strategy-health-read.py`
 - `docs/work/probes/2026-10-16-strategy-health-read.out.txt`
+- `docs/work/probes/2026-10-16-latest-scan-read.py`
+- `docs/work/probes/2026-10-16-latest-scan-read.out.txt`
+- `docs/work/probes/2026-10-16-latest-scan-snapshot.py`
+- `docs/work/probes/2026-10-16-latest-scan-snapshot.out.txt`
 - `docs/decisions/0034-runtime-status-snapshot.md`
 - `docs/decisions/0035-strategy-health-quote-freshness-index.md`
+- `frontend/src/views/research/RemoteRealtimeTab.vue`
 
 ## Open questions
 
