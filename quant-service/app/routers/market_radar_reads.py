@@ -84,7 +84,7 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
 
     @router.get("/api/v1/market/minute-panel")
     async def minute_panel_route(trade_date: date, symbols: str, fields: str | None = None) -> dict[str, Any]:
-        """Minute series of up to 50 symbols for one session (decision 0009); research, not polling."""
+        """Minute series of up to 200 symbols for one session (decision 0009); research, not polling."""
         wanted = [item for item in symbols.split(",") if item.strip()]
         chosen = [item.strip() for item in fields.split(",") if item.strip()] if fields else None
 

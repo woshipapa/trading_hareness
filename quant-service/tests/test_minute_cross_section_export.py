@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from app import minute_cross_section as mcs
-from app.minute_cross_section_export import export_day, panel, panel_path
+from app.minute_cross_section_export import MAX_SYMBOLS, export_day, panel, panel_path
 
 CN = ZoneInfo("Asia/Shanghai")
 DAY = date(2026, 10, 12)
@@ -68,6 +68,14 @@ class ExportTests(unittest.TestCase):
     def test_a_session_stored_only_per_symbol_is_missing_not_an_error(self):
         with tempfile.TemporaryDirectory() as directory:
             self.assertEqual(export_day(_Database([]), DAY, root=Path(directory))["status"], "missing")
+
+    def test_panel_accepts_the_expanded_research_read_cap(self):
+        symbols = [f"{index:06d}.SZ" for index in range(1, 251)]
+        with tempfile.TemporaryDirectory() as directory:
+            read = panel(_Database([]), DAY, symbols, ["price"], root=Path(directory))
+        self.assertEqual(MAX_SYMBOLS, 200)
+        self.assertEqual(len(read["series"]), 200)
+        self.assertEqual(read["symbols_capped_at"], 200)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -49,6 +49,7 @@
 - 2026-10-16 01:28 Asia/Shanghai：又对照运行时默认值收紧不一致：观察池默认 160（小部署仍可降到 40）、盘口默认 80、分钟画像默认 80、收盘分类补齐默认 8；Tencent 单次 80 与 Longhu licensed 8 仍为上游硬边界。扩容相关定向 overlay 244 项仅保留同一条既有 W016 local-spool 环境注册失败。
 - 2026-10-16 01:33 Asia/Shanghai：提交 `c926ef67` `perf: expand software capacity ceilings`，包含代码 ceiling、owner overlay 参数、ADR 0028、压测证据与定向回归；当前仍未向 owner 发布。
 - 2026-10-16 01:34 Asia/Shanghai：`scripts/release plan c926ef67` 只读结果显示 owner 必须走 FULL release（compose/env 示例改变），当前窗口允许，owner schema gate 目标为 `20261015_ow0122`；未执行 `--apply`。
+- 2026-10-16 02:33 Asia/Shanghai：继续盘点研究读取门槛：盘口逻辑池软件 ceiling 从 160 提到 200，分钟横截面研究读取上限从 50 提到 200；Tencent 单次最多 80 只仍拆为 80/80/40，licensed Longhu 仍最多 8 路。200 只盘口/分钟池定向 overlay 回归 21 项通过，未改变 provider 或交易决策边界。
 
 ## Waiting on the user
 

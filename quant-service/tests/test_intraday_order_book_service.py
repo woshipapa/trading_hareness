@@ -20,7 +20,7 @@ class IntradayOrderBookServiceTests(unittest.TestCase):
         self.assertEqual(interval_seconds({"INTRADAY_ORDER_BOOK_INTERVAL_SECONDS": "bad"}), 3.0)
         self.assertEqual(retention_days({"INTRADAY_ORDER_BOOK_RETENTION_DAYS": "100"}), 30)
         self.assertEqual(max_symbols({}), 80)
-        self.assertEqual(max_symbols({"INTRADAY_ORDER_BOOK_MAX_SYMBOLS": "1000"}), 160)
+        self.assertEqual(max_symbols({"INTRADAY_ORDER_BOOK_MAX_SYMBOLS": "1000"}), 200)
 
     def test_mixed_batch_keeps_provider_health_separate(self) -> None:
         self.assertEqual(

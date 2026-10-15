@@ -56,6 +56,15 @@ class PricePriorityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), len(symbols))
         self.assertEqual([call.kwargs["max_symbols"] for call in public.await_args_list], [80, 1])
 
+    async def test_public_order_book_fallback_keeps_two_hundred_symbol_logical_pool(self):
+        symbols = [f"{index:06d}.SZ" for index in range(1, 201)]
+        public = AsyncMock(side_effect=lambda batch, *, max_symbols: [row(symbol) for symbol in batch])
+        rows = await primary_order_books(
+            symbols, max_symbols=200, licensed=AsyncMock(return_value=[]), fallback=public, now=lambda: NOW,
+        )
+        self.assertEqual(len(rows), 200)
+        self.assertEqual([call.kwargs["max_symbols"] for call in public.await_args_list], [80, 80, 40])
+
     async def test_primary_outage_uses_fallback_but_never_old_books(self):
         rows = await primary_order_books(
             ["000001.SZ", "000002.SZ"], max_symbols=2,

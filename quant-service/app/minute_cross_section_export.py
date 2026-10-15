@@ -8,7 +8,7 @@ one read instead of 240 database round trips.
 
 ``panel`` answers "these symbols, these fields, this session" for research. It
 reads the Parquet file when the day has one and the documents otherwise (the
-session in progress). It is bounded to 50 symbols and is not for polling.
+session in progress). It is bounded to 200 symbols and is not for polling.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
     "open": ("raw.open_price",), "high": ("raw.high_price",), "low": ("raw.low_price",),
     "prev_close": ("raw.prev_price",),
 }
-MAX_SYMBOLS = 50
+MAX_SYMBOLS = 200
 
 
 def panel_path(day: date, root: Path | None = None) -> Path:
