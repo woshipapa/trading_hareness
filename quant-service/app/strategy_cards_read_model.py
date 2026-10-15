@@ -68,6 +68,9 @@ LINES: dict[str, tuple[str, str | None, str]] = {
     "teacher_review_trend": ("老师复盘·趋势", "teacher_review_playbooks", "趋势"),
     "xiaojie_leader_flow": ("小杰龙头资金", "xiaojie_leader_flow", "龙头"),
     "launch_radar": ("启动雷达", "launch_radar", "启动"),
+    "longhu_multifactor_shadow": ("龙虎多因子·竞价", "longhu_multifactor_shadow", "竞价"),
+    "limit_up_continuation": ("涨停接力候选", "limit_up_continuation", "接力"),
+    "dragon_leader_research": ("连板龙头研究", "dragon_leader_research", "龙头"),
 }
 BENCHMARK = "000001.SH"
 SNAPSHOT_CAPABILITY = "a_share_prices_snapshot"
@@ -91,6 +94,118 @@ def _json(value: Any) -> Any:
         return json.loads(value)
     except (TypeError, ValueError):
         return None
+
+
+def _signal_strategy(signal_key: Any) -> str:
+    """Map an entry event to its registered research line.
+
+    Signal keys are point-in-time evidence (``symbol:type:model``), not an
+    order instruction.  Unknown models stay on the bounded watchlist line so
+    a new signal is visible without silently being attributed to a different
+    strategy.
+    """
+    key = str(signal_key or "").lower()
+    if "teacher_review" in key:
+        return "teacher_review_playbooks"
+    if "launch" in key:
+        return "launch_radar"
+    if "xiaojie" in key or "leader_flow" in key:
+        return "xiaojie_leader_flow"
+    if "countertrend" in key or "rebound" in key:
+        return "countertrend_rebound_shadow"
+    if "board" in key or "sector" in key:
+        return "board_flow_drill"
+    return "intraday_watchlist_confirmation"
+
+
+def _auction_pick(row: Mapping[str, Any], rank: int, observed_at: datetime | None) -> dict[str, Any]:
+    """Turn one stored auction-desk row into the common card pick shape."""
+    gap = _float(row.get("gap"))
+    opening = _float(row.get("open"))
+    previous = opening / (1 + gap) if opening is not None and gap is not None and gap != -1 else None
+    risk_rank = _float(row.get("risk_rank"))
+    return {
+        "symbol": str(row.get("symbol")), "name": row.get("name"), "rank": rank,
+        "raw_score": -risk_rank if risk_rank is not None else None,
+        "score_scale": "auction_risk_rank_inverse", "liquidity_eligible": True, "liquidity_flags": [],
+        "evidence": {
+            "source": "auction_open_desk_daily", "source_observed_at": observed_at.isoformat() if observed_at else None,
+            "bucket": row.get("bucket"), "boards": row.get("boards"), "risk_rank": risk_rank,
+            "sealed_from_open": row.get("sealed_from_open"),
+        },
+        "auction": {
+            "price": opening, "open": opening, "prev_close": previous,
+            "pct_change": gap * 100 if gap is not None else None,
+            "turnover": _float(row.get("amount")), "volume": _float(row.get("volume")),
+            "unmatched": _float(row.get("unmatched")),
+            "opens_at_limit": bool(row.get("opens_at_limit")),
+            "observed_at": observed_at.isoformat() if observed_at else None,
+        },
+    }
+
+
+def _live_source_picks(connection: Any, trade_date: date, per_line: int) -> dict[str, list[dict[str, Any]]]:
+    """Read today's persisted auction and entry evidence for the card view.
+
+    This is deliberately a projection.  It does not promote a provider value
+    into an execution path and it does not invent candidates when the source
+    table is absent.
+    """
+    start, end = _day_bounds(trade_date)
+    source: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    auction_rows = _rows(connection, """
+        SELECT normalized,effective_at
+          FROM quant.raw_market_observations
+         WHERE provider_key='local_derived' AND capability='auction_open_desk_daily'
+           AND effective_at>=%s AND effective_at<%s
+         ORDER BY effective_at DESC LIMIT 1""", (start, end))
+    desk_rows: list[Mapping[str, Any]] = []
+    desk_at: datetime | None = None
+    if auction_rows:
+        payload = _json(auction_rows[0].get("normalized")) or {}
+        desk_rows = [item for item in payload.get("rows", []) if isinstance(item, Mapping) and item.get("symbol")]
+        desk_at = auction_rows[0].get("effective_at")
+    ordered = sorted(desk_rows, key=lambda item: (
+        -(_float(item.get("boards")) or 0), _float(item.get("risk_rank")) or 9999, str(item.get("symbol"))))
+    # The same tape is intentionally exposed to the two contracts that own
+    # auction/continuation evidence; each line's ranking remains explicit in
+    # the evidence fields and is settled separately after the close.
+    for key, predicate in (
+        ("longhu_multifactor_shadow", lambda item: True),
+        ("limit_up_continuation", lambda item: (_float(item.get("boards")) or 0) >= 1),
+        ("dragon_leader_research", lambda item: (_float(item.get("boards")) or 0) >= 2),
+    ):
+        chosen = [item for item in ordered if predicate(item)][:per_line]
+        source[key] = [_auction_pick(item, index, desk_at) for index, item in enumerate(chosen, 1)]
+
+    signal_rows = _rows(connection, """
+        SELECT symbol,signal_key,score,state,observed_at
+          FROM quant.intraday_signal_events
+         WHERE signal_type='entry' AND observed_at>=%s AND observed_at<%s
+         ORDER BY observed_at DESC""", (start, end))
+    # Keep the strongest/latest event per strategy and symbol.  Repeated state
+    # transitions are still available through entry_signals on the pick.
+    best: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in signal_rows:
+        strategy = _signal_strategy(row.get("signal_key"))
+        state = str(row.get("state") or "")
+        if state not in TICKET_STATES:
+            continue
+        key = (strategy, str(row.get("symbol")))
+        current = best.get(key)
+        score = _float(row.get("score"))
+        if current is None or (score is not None and (_float(current.get("score")) is None or score > _float(current.get("score")))):
+            best[key] = row
+    for (strategy, symbol), row in best.items():
+        source[strategy].append({
+            "symbol": symbol, "name": None, "rank": len(source[strategy]) + 1,
+            "raw_score": _float(row.get("score")), "score_scale": "intraday_signal_score",
+            "liquidity_eligible": True, "liquidity_flags": [],
+            "evidence": {"source": "intraday_signal_events", "signal_key": row.get("signal_key"),
+                         "state": row.get("state"), "source_observed_at": row.get("observed_at").isoformat()
+                         if row.get("observed_at") else None},
+        })
+    return {key: rows[:per_line] for key, rows in source.items() if rows}
 
 
 def _float(value: Any) -> float | None:
@@ -388,28 +503,43 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
     as_of = picks_as_of(connection, trade_date)
     base = {"trade_date": trade_date.isoformat(), "cards_version": CARDS_VERSION,
             "research_only": True, "live_effect": "none"}
-    if as_of is None:
+    live_by_line = _live_source_picks(connection, trade_date, per_line)
+    if as_of is None and not live_by_line:
         return {**base, "status": "missing", "reason": "no ledger candidates before the session", "cards": []}
     tiered = tiered_sql_builder(connection)
-    ledger = ledger_picks(connection, as_of)
+    ledger = ledger_picks(connection, as_of) if as_of is not None else []
     resonance: dict[str, list[str]] = defaultdict(list)
     by_line: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in ledger:
         resonance[row["symbol"]].append(row["strategy_key"])
         if len(by_line[row["strategy_key"]]) < per_line:
             by_line[row["strategy_key"]].append(row)
+    for line, rows in live_by_line.items():
+        for row in rows:
+            symbol = str(row["symbol"])
+            if line not in resonance[symbol]:
+                resonance[symbol].append(line)
+            # Current session evidence is shown first.  A previous-session
+            # ledger row for the same symbol is retained only once.
+            if not any(str(item.get("symbol")) == symbol for item in by_line[line]):
+                by_line[line].insert(0, row)
+        by_line[line] = by_line[line][:per_line]
     shown = sorted({row["symbol"] for rows in by_line.values() for row in rows})
     names = {row["symbol"]: row["name"] for row in _rows(
         connection, "SELECT symbol,name FROM quant.instruments WHERE symbol=ANY(%s)", (shown,))}
+    for row in (item for rows in live_by_line.values() for item in rows):
+        if row.get("name") and not names.get(row["symbol"]):
+            names[row["symbol"]] = row["name"]
     quotes = session_quotes(connection, trade_date, shown)
     limits = session_limits(connection, trade_date, shown, tiered)
+    context_as_of = as_of or trade_date
     context = {
         "names": names, "resonance": resonance, "signals": entry_signals(connection, trade_date, shown),
-        "themes": concept_themes(connection, as_of, shown),
-        "events": symbol_events(connection, trade_date, as_of, shown),
-        "review": {stock["symbol"]: stock for stock in limit_detail_day(connection, as_of)["stocks"]},
+        "themes": concept_themes(connection, context_as_of, shown),
+        "events": symbol_events(connection, trade_date, context_as_of, shown),
+        "review": {stock["symbol"]: stock for stock in limit_detail_day(connection, context_as_of)["stocks"]},
     }
-    board = leaderboard(connection, as_of, per_line, tiered)
+    board = leaderboard(connection, as_of, per_line, tiered) if as_of is not None else {}
     cards = []
     for line in sorted(by_line, key=lambda key: (list(LINES).index(key) if key in LINES else len(LINES), key)):
         name, contract_key, style = LINES.get(line, (line, None, ""))
@@ -422,6 +552,7 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
             "contract_key": contract_key, "model_version": contract.model_version if contract else None,
             "maturity": contract.maturity if contract else "ledger_only",
             "candidates": sum(row["strategy_key"] == line for row in ledger),
+            "live_candidate_count": len(live_by_line.get(line, [])),
             "timing_plans": timing["timing_plans"], "timing_candidates": timing["candidates"],
             "summary": _card_summary(picks, direction), "picks": picks, "leaderboard": board.get(line, {}),
         })
@@ -430,11 +561,11 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
          for card in cards if card["leaderboard"].get(str(window), {}).get("mean_open_to_close_pct") is not None),
         key=lambda item: -item["mean_open_to_close_pct"]) for window in WINDOWS}
     regime = connection.execute(
-        "SELECT regime_label,model_version FROM quant.market_regime_daily WHERE trading_date=%s", (as_of,)).fetchone()
+        "SELECT regime_label,model_version FROM quant.market_regime_daily WHERE trading_date=%s", (context_as_of,)).fetchone()
     return {
-        **base, "status": "completed" if cards else "missing", "picks_as_of": as_of.isoformat(),
+        **base, "status": "completed" if cards else "missing", "picks_as_of": as_of.isoformat() if as_of else None,
         "per_line": per_line, "direction_gate": direction_gate(connection, trade_date),
-        "data_health": data_health(connection, trade_date, as_of, now or datetime.now(CN_TZ)),
+        "data_health": data_health(connection, trade_date, context_as_of, now or datetime.now(CN_TZ)),
         "previous_close_regime": dict(regime) if regime else None,
         "cards": cards, "leaderboard": ranking,
         "timing_board": build_timing_board(cards, observed_at=now, trade_date=trade_date),

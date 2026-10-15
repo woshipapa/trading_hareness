@@ -7,7 +7,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from app.strategy_cards_read_model import LINES, strategy_cards
+from app.strategy_cards_read_model import LINES, _auction_pick, _signal_strategy, strategy_cards
 
 CN = ZoneInfo("Asia/Shanghai")
 SESSION, AS_OF = date(2026, 10, 9), date(2026, 10, 8)
@@ -171,6 +171,20 @@ class StrategyCardTests(unittest.TestCase):
                 return [{"as_of": None}] if "max(as_of_date)" in sql else []
         day = strategy_cards(Empty(), SESSION)
         self.assertEqual((day["status"], day["cards"]), ("missing", []))
+
+    def test_live_source_mapping_keeps_strategy_identity_and_research_reason(self):
+        self.assertEqual(_signal_strategy("002696.SZ:entry:teacher_review:relay_break_reseal"),
+                         "teacher_review_playbooks")
+        self.assertEqual(_signal_strategy("002696.SZ:entry:launch-radar-v1"), "launch_radar")
+        pick = _auction_pick({
+            "symbol": "002696.SZ", "name": "百洋股份", "open": 10.0, "gap": 0.1,
+            "amount": 12_000_000, "volume": 100_000, "unmatched": 500,
+            "bucket": "9%+_not_at_limit", "boards": 4, "risk_rank": 2.5,
+            "sealed_from_open": False, "opens_at_limit": False,
+        }, 1, at(9, 25))
+        self.assertEqual((pick["symbol"], pick["score_scale"], pick["auction"]["pct_change"]),
+                         ("002696.SZ", "auction_risk_rank_inverse", 10.0))
+        self.assertEqual(pick["evidence"]["source"], "auction_open_desk_daily")
 
 
 if __name__ == "__main__":  # pragma: no cover

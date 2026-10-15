@@ -200,6 +200,16 @@ def _reasons(strategy_key: str, pick: Mapping[str, Any], plan: Mapping[str, Any]
         reasons.append(f"策略排名第 {rank} 位")
     if score is not None:
         reasons.append(f"策略原始分数 {score:g}（保留原策略量纲）")
+    evidence = pick.get("evidence") if isinstance(pick.get("evidence"), Mapping) else {}
+    source = evidence.get("source")
+    if source:
+        reasons.append(f"证据来源：{source}")
+    if evidence.get("boards") is not None:
+        reasons.append(f"连板/高度记录 {float(evidence['boards']):g} 板")
+    if evidence.get("bucket"):
+        reasons.append(f"竞价分层：{evidence['bucket']}")
+    if evidence.get("signal_key"):
+        reasons.append(f"触发信号：{evidence['signal_key']}")
     if pick.get("resonance", 0) and int(pick.get("resonance") or 0) > 1:
         reasons.append(f"与 {int(pick['resonance'])} 条策略线共振")
     auction = pick.get("auction") if isinstance(pick.get("auction"), Mapping) else {}
