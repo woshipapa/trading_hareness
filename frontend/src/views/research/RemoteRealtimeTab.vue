@@ -35,6 +35,7 @@ const runtimeResources = computed(() => runtime.runtimeHealth.value.resources ??
 const memoryResource = computed(() => runtimeResources.value.memory ?? {});
 const diskResource = computed(() => runtimeResources.value.disk ?? {});
 const resourcePercent = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric >= 0 ? Math.min(100, Math.round(numeric * 1000) / 10) : null;
 };
