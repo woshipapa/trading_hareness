@@ -1,0 +1,196 @@
+{
+  "observed_at": "2026-10-15T17:00:53.264139+08:00",
+  "board_version": "research-boards-v1",
+  "summary": {
+    "degraded": 5,
+    "ready": 10
+  },
+  "strategies": [
+    {
+      "key": "board_flow_drill",
+      "model_version": "board-flow-drill-v1",
+      "maturity": "shadow",
+      "readiness": "degraded",
+      "weak_inputs": [
+        "sector.flow_curve←eastmoney_free（degraded）"
+      ],
+      "blocking_inputs": [],
+      "ledger_lines": {
+        "board_stock_mining_inflow": null,
+        "board_stock_mining_outflow": null
+      }
+    },
+    {
+      "key": "countertrend_rebound_shadow",
+      "model_version": "watchlist-countertrend-rebound-state-v1",
+      "maturity": "shadow",
+      "readiness": "degraded",
+      "weak_inputs": [
+        "bars.adjustment_factor←longhu_qfq_derived（unmonitored）"
+      ],
+      "blocking_inputs": [],
+      "ledger_lines": {}
+    },
+    {
+      "key": "disclosure_day_watch",
+      "model_version": "disclosure-day-watch-v1",
+      "maturity": "shadow",
+      "readiness": "degraded",
+      "weak_inputs": [
+        "events.disclosure_schedule←eastmoney_datacenter（unmonitored）",
+        "events.earnings_forecast←eastmoney_datacenter（unmonitored）",
+        "events.earnings_express←eastmoney_datacenter（unmonitored）"
+      ],
+      "blocking_inputs": [],
+      "ledger_lines": {}
+    },
+    {
+      "key": "multi_factor_rank_v1",
+      "model_version": "strategy-v1",
+      "maturity": "research_enabled",
+      "readiness": "degraded",
+      "weak_inputs": [
+        "bars.adjustment_factor←longhu_qfq_derived（unmonitored）"
+      ],
+      "blocking_inputs": [],
+      "ledger_lines": {}
+    },
+    {
+      "key": "post_close_base_candidates",
+      "model_version": "post-close-base-start-v3",
+      "maturity": "research_enabled",
+      "readiness": "degraded",
+      "weak_inputs": [
+        "bars.adjustment_factor←longhu_qfq_derived（unmonitored）"
+      ],
+      "blocking_inputs": [],
+      "ledger_lines": {
+        "post_close_base_ready": {
+          "as_of_date": "2026-09-29",
+          "candidates": 8
+        },
+        "post_close_base_forming": null,
+        "post_close_fresh_start": {
+          "as_of_date": "2026-09-29",
+          "candidates": 19
+        }
+      }
+    },
+    {
+      "key": "dragon_leader_research",
+      "model_version": "dragon-leader-v1",
+      "maturity": "shadow",
+      "readiness": "ready",
+      "weak_inputs": [],
+      "blocking_inputs": [],
+      "ledger_lines": {}
+    },
+    {
+      "key": "intraday_watchlist_confirmation",
+      "model_version": "watchlist-confirmation-v8",
+      "maturity": "shadow",
+      "readiness": "ready",
+      "weak_inputs": [],
+      "blocking_inputs": [],
+      "ledger_lines": {}
+    },
+    {
+      "key": "launch_radar",
+      "model_version": "launch-radar-v1",
+      "maturity": "shadow",
+      "readiness": "ready",
+      "weak_inputs": [],
+      "blocking_inputs": [],
+      "ledger_lines": {
+        "launch_radar": {
+          "as_of_date": "2026-09-22",
+          "candidates": 86
+        }
+      }
+    },
+    {
+      "key": "limit_up_continuation",
+      "model_version": "limit-up-continuation-v1",
+      "maturity": "shadow",
+      "readiness": "ready",
+      "weak_inputs": [],
+      "blocking_inputs": [],
+      "ledger_lines": {}
+    },
+    {
+      "key": "longhu_multifactor_shadow",
+      "model_version": "longhu-multifactor-shadow-v1",
+      "maturity": "shadow",
+      "readiness": "ready",
+      "weak_inputs": [],
+      "blocking_inputs": [],
+      "ledger_lines": {}
+    },
+    {
+      "key": "post_close_limit_lift_pattern",
+      "model_version": "post-close-limit-lift-pattern-v7",
+      "maturity": "research_enabled",
+      "readiness": "ready",
+      "weak_inputs": [],
+      "blocking_inputs": [],
+      "ledger_lines": {
+        "post_close_limit_pattern": {
+          "as_of_date": "2026-09-29",
+          "candidates": 20
+        }
+      }
+    },
+    {
+      "key": "teacher_review_playbooks",
+      "model_version": "teacher-review-rules-v5",
+      "maturity": "shadow",
+      "readiness": "ready",
+      "weak_inputs": [],
+      "blocking_inputs": [],
+      "ledger_lines": {
+        "teacher_review_relay": {
+          "as_of_date": "2026-09-21",
+          "candidates": 10
+        },
+        "teacher_review_trend": {
+          "as_of_date": "2026-09-21",
+          "candidates": 26
+        }
+      }
+    },
+    {
+      "key": "ten_day_leader_rotation_shadow",
+      "model_version": "ten-day-leader-vwap-coordination-shadow-v2",
+      "maturity": "shadow",
+      "readiness": "ready",
+      "weak_inputs": [],
+      "blocking_inputs": [],
+      "ledger_lines": {
+        "ten_day_leader_rotation": null
+      }
+    },
+    {
+      "key": "xiaojie_leader_flow",
+      "model_version": "xiaojie-leader-flow-v3",
+      "maturity": "shadow",
+      "readiness": "ready",
+      "weak_inputs": [],
+      "blocking_inputs": [],
+      "ledger_lines": {
+        "xiaojie_leader_flow": {
+          "as_of_date": "2026-09-22",
+          "candidates": 43
+        }
+      }
+    },
+    {
+      "key": "watchlist_main_wave_shadow",
+      "model_version": "watchlist-main-wave-pattern-v2",
+      "maturity": "shadow",
+      "readiness": "ready",
+      "weak_inputs": [],
+      "blocking_inputs": [],
+      "ledger_lines": {}
+    }
+  ]
+}

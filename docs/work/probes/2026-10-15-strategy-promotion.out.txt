@@ -1,0 +1,9 @@
+{
+  "as_of_date": "2026-10-15",
+  "count": 15,
+  "nonzero": [],
+  "reason_counts": {
+    "P0 safety default: only an explicitly approved research version may supply a nonzero live weight.": 14,
+    "P0 safety default: research-only Xiao Jie leader-flow quantification; explicit approval required.": 1
+  }
+}

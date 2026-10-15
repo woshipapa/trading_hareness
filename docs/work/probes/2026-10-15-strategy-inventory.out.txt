@@ -1,0 +1,194 @@
+{
+  "contract_count": 15,
+  "contracts": [
+    {
+      "key": "board_flow_drill",
+      "model_version": "board-flow-drill-v1",
+      "owner_module": "app/board_flow_drill.py",
+      "owner_module_exists": true,
+      "runtime_owner": "intraday_edge",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "research_alert",
+      "deprecated": false
+    },
+    {
+      "key": "countertrend_rebound_shadow",
+      "model_version": "watchlist-countertrend-rebound-state-v1",
+      "owner_module": "app/watchlist_countertrend_rebound.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": false
+    },
+    {
+      "key": "disclosure_day_watch",
+      "model_version": "disclosure-day-watch-v1",
+      "owner_module": "app/disclosure_day_watch.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": false
+    },
+    {
+      "key": "dragon_leader_research",
+      "model_version": "dragon-leader-v1",
+      "owner_module": "app/dragon_leader_research.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": false
+    },
+    {
+      "key": "intraday_watchlist_confirmation",
+      "model_version": "watchlist-confirmation-v8",
+      "owner_module": "app/intraday_signal_rules.py",
+      "owner_module_exists": true,
+      "runtime_owner": "intraday_edge",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "research_alert",
+      "deprecated": false
+    },
+    {
+      "key": "launch_radar",
+      "model_version": "launch-radar-v1",
+      "owner_module": "app/launch_radar.py",
+      "owner_module_exists": true,
+      "runtime_owner": "intraday_edge",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": false
+    },
+    {
+      "key": "limit_up_continuation",
+      "model_version": "limit-up-continuation-v1",
+      "owner_module": "app/limit_up_continuation.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": false
+    },
+    {
+      "key": "longhu_multifactor_shadow",
+      "model_version": "longhu-multifactor-shadow-v1",
+      "owner_module": "app/longhu_multifactor_shadow.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": false
+    },
+    {
+      "key": "multi_factor_rank_v1",
+      "model_version": "strategy-v1",
+      "owner_module": "app/factor_sql_lab.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "research_enabled",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": false
+    },
+    {
+      "key": "post_close_base_candidates",
+      "model_version": "post-close-base-start-v3",
+      "owner_module": "app/post_close_strategy_service.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "research_enabled",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": false
+    },
+    {
+      "key": "post_close_limit_lift_pattern",
+      "model_version": "post-close-limit-lift-pattern-v7",
+      "owner_module": "app/strategy_pattern_mining_service.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "research_enabled",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": false
+    },
+    {
+      "key": "teacher_review_playbooks",
+      "model_version": "teacher-review-rules-v5",
+      "owner_module": "app/teacher_review_rules.py",
+      "owner_module_exists": true,
+      "runtime_owner": "intraday_edge",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "research_alert",
+      "deprecated": false
+    },
+    {
+      "key": "ten_day_leader_rotation_shadow",
+      "model_version": "ten-day-leader-vwap-coordination-shadow-v2",
+      "owner_module": "app/ten_day_leader_rotation_research.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": false
+    },
+    {
+      "key": "watchlist_main_wave_shadow",
+      "model_version": "watchlist-main-wave-pattern-v2",
+      "owner_module": "app/watchlist_main_wave_v2.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "none",
+      "deprecated": true
+    },
+    {
+      "key": "xiaojie_leader_flow",
+      "model_version": "xiaojie-leader-flow-v3",
+      "owner_module": "app/xiaojie_leader_flow.py",
+      "owner_module_exists": true,
+      "runtime_owner": "research",
+      "maturity": "shadow",
+      "live_effect": "none",
+      "alert_effect": "research_alert",
+      "deprecated": false
+    }
+  ],
+  "branches": [
+    {
+      "branch": "claude/peer-observe-only-hotfix",
+      "strategy_files_changed_vs_main": []
+    },
+    {
+      "branch": "claude/teacher-cycle-report-facts",
+      "strategy_files_changed_vs_main": []
+    },
+    {
+      "branch": "codex/tactic-trials",
+      "strategy_files_changed_vs_main": []
+    },
+    {
+      "branch": "feat/teacher-review-cohort",
+      "strategy_files_changed_vs_main": []
+    },
+    {
+      "branch": "integrate/pr1-safe",
+      "strategy_files_changed_vs_main": [
+        "quant-service/app/dragon_leader_research.py"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+7d9a7111 main_ancestor=yes
+9c76fb22 main_ancestor=yes
+0ce39a44 main_ancestor=yes
+
+branch_heads:
+claude/peer-observe-only-hotfix 20a897b8 fix(teacher-review): an observed plan that would have entered is not a missed push
+claude/teacher-cycle-report-facts fb4eba26 fix(xhs): reconcile stale edge n8n executions
+codex/owner-hot-a 919aa056 Merge main into codex/owner-hot-a
+codex/tactic-trials 5255c896 Merge main into codex/tactic-trials
+feat/teacher-review-cohort d5c359de feat: quantify teacher post-close reviews as a watchlist strategy
+integrate/pr1-safe 0d8fe622 Keep Longhu close data out of canonical controls
+main 1de13e24 notes: tidy W018 handoff
+sync/owner-runtime-d5c359d d5c359de feat: quantify teacher post-close reviews as a watchlist strategy
+
+main_vs_relevant_branches:
+[integrate/pr1-safe]
+M	quant-service/app/dragon_leader_research.py
+[claude/peer-observe-only-hotfix]
+M	quant-service/app/teacher_outcome_review.py
+M	quant-service/app/ten_day_leader_rotation_scheduler.py
+[feat/teacher-review-cohort]
+[sync/owner-runtime-d5c359d]
+[codex/tactic-trials]

@@ -1,0 +1,308 @@
+{
+  "count": 23,
+  "items": [
+    {
+      "strategy_key": "event_research_daily_volume_surge_v1",
+      "engine": "sql-cohort-study",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "live_effect",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "event_research_limit_up_continuation_v1",
+      "engine": "sql-cohort-study",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "live_effect",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "event_research_post_close_backtest_v1",
+      "engine": "python-sampled-backtest",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "live_effect",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "event_research_sector_flow_reversal_stock_v1",
+      "engine": "sql-cohort-study",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "live_effect",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "event_research_short_term_reversal_v1",
+      "engine": "sql-decile-study",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "live_effect",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "intraday_eac_breakout_research_v2",
+      "engine": "event_replay",
+      "version": "research-v2",
+      "status": "experimental",
+      "configuration_keys": [
+        "above_vwap_pct",
+        "entry_window_pct",
+        "minute_volume_multiple",
+        "no_automatic_order",
+        "outlier_policy",
+        "requires",
+        "return_1m_pct_min",
+        "return_3m_pct",
+        "status",
+        "time_windows"
+      ]
+    },
+    {
+      "strategy_key": "intraday_eac_breakout_research_v3",
+      "engine": "event_replay",
+      "version": "research-v3",
+      "status": "experimental",
+      "configuration_keys": [
+        "above_vwap_pct",
+        "baseline_unavailable_policy",
+        "entry_window_pct",
+        "minute_volume_multiple",
+        "no_automatic_order",
+        "outlier_policy",
+        "requires",
+        "return_1m_pct_min",
+        "return_3m_pct",
+        "status",
+        "time_bucket_minimum_sample_days",
+        "time_bucket_volume_surprise_min",
+        "time_windows"
+      ]
+    },
+    {
+      "strategy_key": "intraday_entry_timing_challengers_v1",
+      "engine": "python-recorded-input-replay",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "live_effect",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "intraday_green_reclaim_research_v1",
+      "engine": "event_replay",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "above_vwap_pct",
+        "confirmation",
+        "entry_window_pct",
+        "flow_percentile_min",
+        "minute_volume_multiple_min",
+        "no_automatic_order",
+        "recovery_from_session_low_pct_min",
+        "return_3m_pct",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "intraday_upside_breakout_research_v1",
+      "engine": "event_replay",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "above_vwap_pct",
+        "confirmation",
+        "entry_window_pct",
+        "minute_volume_multiple_min",
+        "no_automatic_order",
+        "requires",
+        "return_1m_pct_min",
+        "return_3m_pct",
+        "score_min",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "multi_factor_rank_v1",
+      "engine": "native_factor_sql_v2",
+      "version": "strategy-v2",
+      "status": "experimental",
+      "configuration_keys": [
+        "factors",
+        "hold_days",
+        "long_only",
+        "non_overlapping_periods",
+        "point_in_time_universe",
+        "rebalance_days",
+        "same_day_exit",
+        "top_n"
+      ]
+    },
+    {
+      "strategy_key": "post_close_base_contraction_v1",
+      "engine": "native-a-share-simulator",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "base_range_pct",
+        "lookback_days",
+        "near_resistance_pct_max",
+        "no_automatic_order",
+        "recent_volatility_max_ratio",
+        "recent_volume_max_ratio",
+        "requires",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "sql_factor_lab:intraday_strength",
+      "engine": "native-sql-cross-section",
+      "version": "factor-lab-v2",
+      "status": "experimental",
+      "configuration_keys": [
+        "factor_key",
+        "live_effect"
+      ]
+    },
+    {
+      "strategy_key": "sql_factor_lab:momentum_20d",
+      "engine": "native-sql-cross-section",
+      "version": "factor-lab-v2",
+      "status": "experimental",
+      "configuration_keys": [
+        "factor_key",
+        "live_effect"
+      ]
+    },
+    {
+      "strategy_key": "sql_factor_lab:momentum_5d",
+      "engine": "native-sql-cross-section",
+      "version": "factor-lab-v2",
+      "status": "experimental",
+      "configuration_keys": [
+        "factor_key",
+        "live_effect"
+      ]
+    },
+    {
+      "strategy_key": "sql_factor_lab:reversal_5d",
+      "engine": "native-sql-cross-section",
+      "version": "factor-lab-v2",
+      "status": "experimental",
+      "configuration_keys": [
+        "factor_key",
+        "live_effect"
+      ]
+    },
+    {
+      "strategy_key": "sql_factor_lab:sma_gap_20d",
+      "engine": "native-sql-cross-section",
+      "version": "factor-lab-v2",
+      "status": "experimental",
+      "configuration_keys": [
+        "factor_key",
+        "live_effect"
+      ]
+    },
+    {
+      "strategy_key": "sql_factor_lab:volatility_20d",
+      "engine": "native-sql-cross-section",
+      "version": "factor-lab-v2",
+      "status": "experimental",
+      "configuration_keys": [
+        "factor_key",
+        "live_effect"
+      ]
+    },
+    {
+      "strategy_key": "sql_factor_lab:volume_ratio_20d",
+      "engine": "native-sql-cross-section",
+      "version": "factor-lab-v2",
+      "status": "experimental",
+      "configuration_keys": [
+        "factor_key",
+        "live_effect"
+      ]
+    },
+    {
+      "strategy_key": "watchlist_countertrend_rebound_lifecycle_v1",
+      "engine": "causal-countertrend-state-machine",
+      "version": "lifecycle-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "entry",
+        "no_automatic_order",
+        "peer_mapping",
+        "reduce",
+        "status",
+        "t_plus_one"
+      ]
+    },
+    {
+      "strategy_key": "watchlist_countertrend_rebound_shadow_v1",
+      "engine": "causal-countertrend-state-machine",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "alert_eligible",
+        "entry",
+        "history_calendar_days",
+        "horizon_trading_days",
+        "live_effect",
+        "lookback_trading_days",
+        "no_automatic_order",
+        "no_feishu_alert",
+        "panic_policy",
+        "probability_contract",
+        "selection",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "watchlist_main_wave_shadow_v1",
+      "engine": "qlib-aligned-native-logistic",
+      "version": "research-v1",
+      "status": "experimental",
+      "configuration_keys": [
+        "entry",
+        "history_calendar_days",
+        "horizon_trading_days",
+        "lookback_trading_days",
+        "no_automatic_order",
+        "no_feishu_alert",
+        "selection",
+        "status"
+      ]
+    },
+    {
+      "strategy_key": "watchlist_main_wave_shadow_v2",
+      "engine": "qlib-aligned-causal-pattern",
+      "version": "research-v2",
+      "status": "experimental",
+      "configuration_keys": [
+        "entry",
+        "history_calendar_days",
+        "horizon_trading_days",
+        "lookback_trading_days",
+        "no_automatic_order",
+        "no_feishu_alert",
+        "selection",
+        "status",
+        "test_reuse_policy"
+      ]
+    }
+  ]
+}
