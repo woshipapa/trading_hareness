@@ -16,6 +16,7 @@
 5. 实时扫描在 session/watchlist gate 通过后立即启动只读 board-flow freshness 读取，让它与行情抓取和精确 membership 读取重叠；任务仍由当前 scan 持有，在 join 前失败会取消，不形成 detached background work。
 6. 最新扫描控制台读取增加迁移 `20261016_ow0127` 的 `(scan_id, severity DESC, created_at)` 索引，避免按最新 scan 读取信号时扫描整张事件表；持久化写入顺序和返回排序保持不变。
 7. 最新扫描 endpoint 的 scan、signals 和 deliveries 通过一条 `LATEST_SCAN_SNAPSHOT_SQL` 返回 JSONB envelope，同步/异步读路径共用它；JSONB 只在读边界解码，空扫描仍返回三个空/空列表字段。
+8. 市场量能复盘 endpoint 的当日分钟特征、近 20 日摘要、板块日流、板块结果和研究门禁通过一条 `MARKET_FLOW_SNAPSHOT_SQL` 返回 JSONB envelope；同步/异步读路径共用它，仍按请求日期取证据，不引入跨请求缓存。
 
 ## 后果
 
@@ -26,6 +27,8 @@
 最新扫描的信号读取只需要扫描目标 scan 的索引范围；本地 `EXPLAIN (ANALYZE)` 的执行时间由约 4.7 ms 降至约 0.2 ms，5 次实际查询探针的中位数由 5.587 ms 降至 0.769 ms。索引会增加每条信号写入的维护成本，owner 必须结合实际写入吞吐、锁等待和索引命中率复核。
 
 最新扫描 JSONB 快照把数据库 statement count 从 3 降到 1；本地热身后的五次中位数约为 4.778 ms，原三条查询约为 4.203 ms，增加的本地 JSONB 组装成本预期由 owner 反向隧道少两次往返抵消。该收益必须在 owner 上线后用真实隧道延迟复测，不能把本地 CPU 微差当作线上结论。
+
+市场量能快照把 statement count 从 5 降到 1；本地 compose PostgreSQL 的五次中位数约为 788.019 ms，旧五条查询约为 790.734 ms。结果保留了同一请求日期、500 条板块上限、20 条日摘要上限和完整结果汇总；本地 JSONB 聚合略有开销，但 owner 经反向隧道可少四次往返，需上线后按真实隧道延迟和锁等待复测。
 
 这些改动只优化研究读模型、证据落盘和纸面扫描准备，不改变策略资格、point-in-time 边界、事件幂等顺序、provider 并发上限或任何 live effect。
 
@@ -38,4 +41,5 @@
 - `test_scan_signal_read_index_migration.py` 验证最新扫描信号索引的迁移链和可逆 downgrade；本地 `EXPLAIN (ANALYZE, BUFFERS)` 作为计划证据保存在工作记录中。
 - `docs/work/probes/2026-10-16-latest-scan-read.py` 在本地临时建立并删除等价索引，记录 5 次查询中位数；输出不代表 owner 隧道或交易日高峰。
 - `docs/work/probes/2026-10-16-latest-scan-snapshot.py` 对比三条旧查询和一条 JSONB 快照，验证返回行数与 statement count；本地测量包含 JSONB 组装成本。
+- `docs/work/probes/2026-10-16-market-flow-snapshot.py` 对比五条旧查询和一条 JSONB 快照，验证返回计数与 statement count；本地测量包含 JSONB 聚合成本，不代表 owner 隧道收益。
 - overlay 回归、`py_compile`、组件边界检查和 `git diff --check` 在提交前运行；owner 当前仍需先应用 `20261016_ow0123`，线上收益需发布后用真实慢事务、执行计划和隧道等待复测。

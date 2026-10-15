@@ -306,15 +306,11 @@ class AsyncBoardAndSectorReadTests(unittest.IsolatedAsyncioTestCase):
 
             async def execute(self, sql, params=()):
                 self.calls.append((sql, params))
-                if "DISTINCT ON(exchange_date)" in sql:
-                    return Result(rows=[])
-                if "sector_flow_daily_features feature" in sql:
-                    return Result(rows=[])
-                if "sector_flow_daily_outcomes" in sql and "GROUP BY" in sql:
-                    return Result(rows=[])
-                if "matured_events" in sql:
-                    return Result({"trading_days": 59, "matured_events": 199})
-                return Result(rows=[{"market_state": "rotation", "feature_key": "minute-1"}])
+                return Result({
+                    "items": [{"market_state": "rotation", "feature_key": "minute-1"}],
+                    "daily": [], "sector_daily": [], "sector_outcome_summary": [],
+                    "readiness": {"trading_days": 59, "matured_events": 199},
+                })
 
         class Transaction:
             def __init__(self, connection):
@@ -337,7 +333,8 @@ class AsyncBoardAndSectorReadTests(unittest.IsolatedAsyncioTestCase):
         payload = await async_market_flow_features(database, date(2026, 8, 10), limit=5000)
         self.assertEqual(payload["items"][0]["feature_key"], "minute-1")
         self.assertEqual(payload["research_gate"]["status"], "accumulating")
-        self.assertEqual(database.connection.calls[0][1], (date(2026, 8, 10), 1000))
+        self.assertEqual(database.connection.calls[0][1], (date(2026, 8, 10), 1000, date(2026, 8, 10), date(2026, 8, 10)))
+        self.assertEqual(len(database.connection.calls), 1)
 
     async def test_sector_router_prefers_async_exact_evidence_projections(self) -> None:
         calls = []

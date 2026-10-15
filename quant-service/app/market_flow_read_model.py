@@ -42,6 +42,107 @@ SECTOR_OUTCOME_SQL = """SELECT taxonomy_key,transition,horizon_days,count(*) FIL
         GROUP BY taxonomy_key,transition,horizon_days
         ORDER BY taxonomy_key,horizon_days,transition"""
 
+# The market-flow tab combines five independent read projections. They are all
+# evidence as of one requested date and none is used to write or promote a
+# strategy, so one statement preserves the same snapshot while avoiding four
+# extra owner-tunnel round trips. JSONB is only the transport envelope; the
+# projection below still receives the same row-shaped dictionaries.
+MARKET_FLOW_SNAPSHOT_SQL = """
+WITH item_rows AS (
+       SELECT feature_key,exchange_date,cadence,observed_at,source_snapshot_minute,status,market_state,
+              concept_count,concept_positive_ratio,concept_median_flow,concept_mean_change_pct,
+              five_minute_positive_ratio_delta,session_positive_ratio_delta,afternoon_repair_strength,
+              market_amount,market_volume,amount_change_pct,volume_change_pct,advancer_ratio,
+              features,quality_flags,updated_at
+         FROM quant.market_flow_feature_snapshots
+        WHERE exchange_date=%s
+        ORDER BY observed_at
+        LIMIT %s
+), daily_rows AS (
+       SELECT DISTINCT ON(exchange_date) feature_key,exchange_date,cadence,observed_at,status,market_state,
+              concept_count,concept_positive_ratio,market_amount,market_volume,amount_change_pct,
+              volume_change_pct,advancer_ratio,features,quality_flags
+         FROM quant.market_flow_feature_snapshots
+        WHERE cadence IN ('close','midday')
+        ORDER BY exchange_date DESC,
+                 CASE cadence WHEN 'close' THEN 0 ELSE 1 END,observed_at DESC
+        LIMIT 20
+), chosen_taxonomy AS (
+       SELECT taxonomy_key
+         FROM quant.sector_flow_daily_features
+        WHERE trading_date=%s AND taxonomy_key IN ('eastmoney_concept','ths_concept_flow')
+        GROUP BY taxonomy_key
+        ORDER BY CASE taxonomy_key WHEN 'eastmoney_concept' THEN 0 ELSE 1 END
+        LIMIT 1
+), sector_rows AS (
+       SELECT feature.taxonomy_key,feature.trading_date,feature.sector_key,sector.label,feature.provider_key,
+              feature.status,feature.transition,feature.net_amount,feature.previous_net_amount,
+              feature.net_change_amount,feature.net_acceleration,feature.rank_percentile,
+              feature.flow_sign_streak,feature.change_pct,feature.price_flow_divergence,
+              feature.lhb_stock_count,feature.lhb_net_amount,feature.lhb_negative_count,
+              feature.lhb_sell_pressure_ratio,feature.limit_up_count,feature.quality_flags
+         FROM quant.sector_flow_daily_features feature
+         JOIN chosen_taxonomy chosen ON chosen.taxonomy_key=feature.taxonomy_key
+         JOIN quant.sectors sector
+           ON sector.taxonomy_key=feature.taxonomy_key AND sector.sector_key=feature.sector_key
+        WHERE feature.trading_date=%s
+        ORDER BY feature.rank_percentile DESC NULLS LAST,abs(feature.net_change_amount) DESC NULLS LAST
+        LIMIT 500
+), outcome_rows AS (
+       SELECT taxonomy_key,transition,horizon_days,count(*) FILTER (WHERE status='matured') AS matured,
+              avg(directional_return) FILTER (WHERE status='matured') AS avg_directional_return,
+              avg(cross_section_excess_return) FILTER (WHERE status='matured') AS avg_excess_return,
+              avg((directional_return>0)::int) FILTER (WHERE status='matured') AS directional_hit_rate
+         FROM quant.sector_flow_daily_outcomes
+        GROUP BY taxonomy_key,transition,horizon_days
+        ORDER BY taxonomy_key,horizon_days,transition
+), readiness AS (
+       SELECT (SELECT count(DISTINCT trading_date) FROM quant.sector_flow_daily_features) AS trading_days,
+              count(DISTINCT (sector_key,signal_date)) FILTER (WHERE status='matured') AS matured_events
+         FROM quant.sector_flow_daily_outcomes
+)
+SELECT COALESCE((SELECT jsonb_agg(to_jsonb(item) ORDER BY item.observed_at) FROM item_rows item), '[]'::jsonb) AS items,
+       COALESCE((SELECT jsonb_agg(to_jsonb(item) ORDER BY item.exchange_date DESC,
+                                                CASE item.cadence WHEN 'close' THEN 0 ELSE 1 END,
+                                                item.observed_at DESC)
+                   FROM daily_rows item), '[]'::jsonb) AS daily,
+       COALESCE((SELECT jsonb_agg(to_jsonb(item) ORDER BY item.rank_percentile DESC NULLS LAST,
+                                                abs(item.net_change_amount) DESC NULLS LAST)
+                   FROM sector_rows item), '[]'::jsonb) AS sector_daily,
+       COALESCE((SELECT jsonb_agg(to_jsonb(item) ORDER BY item.taxonomy_key,item.horizon_days,item.transition)
+                   FROM outcome_rows item), '[]'::jsonb) AS sector_outcome_summary,
+       COALESCE((SELECT to_jsonb(item) FROM readiness item),
+                '{"trading_days": 0, "matured_events": 0}'::jsonb) AS readiness
+"""
+
+
+def _json_snapshot_value(value: Any, default: Any) -> Any:
+    """Accept psycopg JSONB values and lightweight string based test doubles."""
+    if value is None:
+        return default
+    if isinstance(value, (str, bytes, bytearray)):
+        import json
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return default
+    return value
+
+
+def project_market_flow_snapshot(row: Any, selected_date: date) -> dict[str, Any]:
+    """Decode the one statement envelope and use the shared pure projection."""
+    if not row:
+        return project_market_flow_features([], [], [], [], {"trading_days": 0, "matured_events": 0}, selected_date)
+    row = dict(row)
+    return project_market_flow_features(
+        _json_snapshot_value(row.get("items"), []),
+        _json_snapshot_value(row.get("daily"), []),
+        _json_snapshot_value(row.get("sector_daily"), []),
+        _json_snapshot_value(row.get("sector_outcome_summary"), []),
+        _json_snapshot_value(row.get("readiness"), {"trading_days": 0, "matured_events": 0}),
+        selected_date,
+    )
+
 
 def sector_daily_source(sector_rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Which concept-flow taxonomy a session's sector rows came from."""
@@ -63,42 +164,11 @@ def market_flow_features(
     selected_date = trade_date or datetime.now(timezone.utc).astimezone(china).date()
     bounded_limit = max(1, min(int(limit), 1000))
     with database.transaction() as connection:
-        rows = connection.execute(
-            """SELECT feature_key,exchange_date,cadence,observed_at,source_snapshot_minute,status,market_state,
-                      concept_count,concept_positive_ratio,concept_median_flow,concept_mean_change_pct,
-                      five_minute_positive_ratio_delta,session_positive_ratio_delta,afternoon_repair_strength,
-                      market_amount,market_volume,amount_change_pct,volume_change_pct,advancer_ratio,
-                      features,quality_flags,updated_at
-                 FROM quant.market_flow_feature_snapshots
-                WHERE exchange_date=%s
-                ORDER BY observed_at LIMIT %s""",
-            (selected_date, bounded_limit),
-        ).fetchall()
-        daily_rows = connection.execute(
-            """SELECT DISTINCT ON(exchange_date) feature_key,exchange_date,cadence,observed_at,status,market_state,
-                      concept_count,concept_positive_ratio,market_amount,market_volume,amount_change_pct,
-                      volume_change_pct,advancer_ratio,features,quality_flags
-                 FROM quant.market_flow_feature_snapshots
-                WHERE cadence IN ('close','midday')
-                ORDER BY exchange_date DESC,
-                         CASE cadence WHEN 'close' THEN 0 ELSE 1 END,observed_at DESC
-                LIMIT 20""",
-        ).fetchall()
-        sector_rows = connection.execute(
-            SECTOR_DAILY_SQL,
-            (selected_date, selected_date),
-        ).fetchall()
-        outcome_rows = connection.execute(
-            SECTOR_OUTCOME_SQL
-        ).fetchall()
-        readiness = connection.execute(
-            """SELECT (SELECT count(DISTINCT trading_date) FROM quant.sector_flow_daily_features) AS trading_days,
-                      count(DISTINCT (sector_key,signal_date)) FILTER (WHERE status='matured') AS matured_events
-                 FROM quant.sector_flow_daily_outcomes"""
+        row = connection.execute(
+            MARKET_FLOW_SNAPSHOT_SQL,
+            (selected_date, bounded_limit, selected_date, selected_date),
         ).fetchone()
-    return project_market_flow_features(
-        rows, daily_rows, sector_rows, outcome_rows, readiness, selected_date,
-    )
+    return project_market_flow_snapshot(row, selected_date)
 
 
 def project_market_flow_features(
@@ -138,5 +208,5 @@ def project_market_flow_features(
     }
 
 
-__all__ = ["SECTOR_DAILY_SQL", "SECTOR_DAILY_TAXONOMIES", "SECTOR_OUTCOME_SQL", "market_flow_features",
-           "project_market_flow_features", "sector_daily_source"]
+__all__ = ["MARKET_FLOW_SNAPSHOT_SQL", "SECTOR_DAILY_SQL", "SECTOR_DAILY_TAXONOMIES", "SECTOR_OUTCOME_SQL",
+           "market_flow_features", "project_market_flow_features", "project_market_flow_snapshot", "sector_daily_source"]
