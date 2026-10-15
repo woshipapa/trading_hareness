@@ -19,6 +19,33 @@ HEALTH_WINDOW_DAYS = 7
 FORMAL_VALIDATION_MIN_MATURED_SIGNALS = 200
 FORMAL_VALIDATION_MIN_TRADING_DAYS = 60
 
+# Keep the health snapshot to one database round trip. The strategy rows are
+# returned as JSON alongside the scalar counters, so sync and async routes
+# share exactly the same evidence boundary.
+STRATEGY_HEALTH_SQL = """WITH strategy_rows AS (
+             SELECT signal_key AS strategy_key,count(*)::int AS signals,
+                    array_agg(DISTINCT episode_id) FILTER (WHERE episode_id IS NOT NULL) AS episode_ids
+               FROM quant.intraday_signal_events
+              WHERE observed_at >= now()-interval '7 days'
+              GROUP BY signal_key
+           )
+           SELECT
+             (SELECT count(*)::int FROM quant.intraday_signal_events WHERE observed_at >= now()-interval '7 days') AS signals_7d,
+             (SELECT count(*)::int FROM quant.intraday_signal_events WHERE observed_at >= now()-interval '14 days' AND observed_at < now()-interval '7 days') AS signals_prior_7d,
+             (SELECT count(DISTINCT episode_id)::int FROM quant.intraday_signal_events WHERE observed_at >= now()-interval '7 days' AND episode_id IS NOT NULL) AS episodes_7d,
+             (SELECT count(DISTINCT episode_id)::int FROM quant.intraday_signal_events WHERE observed_at >= now()-interval '14 days' AND observed_at < now()-interval '7 days' AND episode_id IS NOT NULL) AS episodes_prior_7d,
+             (SELECT count(DISTINCT e.signal_event_id)::int FROM quant.intraday_signal_outcomes o JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id WHERE o.horizon_key='30m' AND o.status='matured' AND e.observed_at >= now()-interval '7 days') AS matured_30m_7d,
+             (SELECT count(DISTINCT (e.observed_at AT TIME ZONE 'Asia/Shanghai')::date)::int FROM quant.intraday_signal_outcomes o JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id WHERE o.horizon_key='30m' AND o.status='matured' AND e.observed_at >= now()-interval '7 days') AS matured_days_7d,
+             (SELECT count(DISTINCT e.signal_event_id)::int FROM quant.intraday_signal_outcomes o JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id WHERE o.horizon_key='30m' AND o.status='matured') AS matured_30m_total,
+             (SELECT count(DISTINCT (e.observed_at AT TIME ZONE 'Asia/Shanghai')::date)::int FROM quant.intraday_signal_outcomes o JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id WHERE o.horizon_key='30m' AND o.status='matured') AS matured_days_total,
+             (SELECT count(DISTINCT e.signal_event_id)::int FROM quant.intraday_signal_outcomes o JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id WHERE o.horizon_key='30m' AND o.status='matured' AND e.observed_at >= now()-interval '7 days') AS outcome_rows,
+             (SELECT count(DISTINCT e.signal_event_id) FILTER (WHERE o.raw_return > 0)::int FROM quant.intraday_signal_outcomes o JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id WHERE o.horizon_key='30m' AND o.status='matured' AND e.observed_at >= now()-interval '7 days') AS outcome_positive,
+             (SELECT avg(o.raw_return) FROM quant.intraday_signal_outcomes o JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id WHERE o.horizon_key='30m' AND o.status='matured' AND e.observed_at >= now()-interval '7 days') AS outcome_avg_return,
+             (SELECT max(observed_at) FROM quant.intraday_quote_observations) AS latest_quote_at,
+             (SELECT count(*)::int FROM quant.intraday_quote_observations WHERE observed_at >= now()-interval '90 seconds') AS fresh_quote_rows,
+             (SELECT is_open FROM quant.market_trade_calendar WHERE exchange='SSE' AND calendar_date=(now() AT TIME ZONE 'Asia/Shanghai')::date) AS calendar_is_open,
+             (SELECT COALESCE(jsonb_agg(to_jsonb(strategy_rows) ORDER BY strategy_rows.signals DESC,strategy_rows.strategy_key), '[]'::jsonb) FROM strategy_rows) AS strategy_rows"""
+
 
 def _age_seconds(value: Any, now: datetime) -> float | None:
     if value is None:
@@ -144,61 +171,30 @@ def latest_strategy_health(database: Any, *, now: datetime | None = None) -> dic
     """Return bounded live-evidence health without any upstream call."""
     now = now or datetime.now(timezone.utc)
     with database.transaction() as connection:
-        counts = connection.execute(
-            """SELECT
-                (SELECT count(*)::int FROM quant.intraday_signal_events
-                  WHERE observed_at >= now()-interval '7 days') AS signals_7d,
-                (SELECT count(*)::int FROM quant.intraday_signal_events
-                  WHERE observed_at >= now()-interval '14 days'
-                    AND observed_at < now()-interval '7 days') AS signals_prior_7d,
-                (SELECT count(DISTINCT episode_id)::int FROM quant.intraday_signal_events
-                  WHERE observed_at >= now()-interval '7 days' AND episode_id IS NOT NULL) AS episodes_7d,
-                (SELECT count(DISTINCT episode_id)::int FROM quant.intraday_signal_events
-                  WHERE observed_at >= now()-interval '14 days' AND observed_at < now()-interval '7 days'
-                    AND episode_id IS NOT NULL) AS episodes_prior_7d,
-                (SELECT count(DISTINCT e.signal_event_id)::int
-                   FROM quant.intraday_signal_outcomes o
-                   JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id
-                  WHERE o.horizon_key='30m' AND o.status='matured'
-                    AND e.observed_at >= now()-interval '7 days') AS matured_30m_7d,
-                (SELECT count(DISTINCT (e.observed_at AT TIME ZONE 'Asia/Shanghai')::date)::int
-                   FROM quant.intraday_signal_outcomes o
-                   JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id
-                  WHERE o.horizon_key='30m' AND o.status='matured'
-                    AND e.observed_at >= now()-interval '7 days') AS matured_days_7d,
-                (SELECT count(DISTINCT e.signal_event_id)::int
-                   FROM quant.intraday_signal_outcomes o
-                   JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id
-                  WHERE o.horizon_key='30m' AND o.status='matured') AS matured_30m_total,
-                (SELECT count(DISTINCT (e.observed_at AT TIME ZONE 'Asia/Shanghai')::date)::int
-                   FROM quant.intraday_signal_outcomes o
-                   JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id
-                  WHERE o.horizon_key='30m' AND o.status='matured') AS matured_days_total"""
-        ).fetchone()
-        outcomes = connection.execute(
-            """SELECT count(DISTINCT e.signal_event_id)::int AS rows,
-                      count(DISTINCT e.signal_event_id) FILTER (WHERE o.raw_return > 0)::int AS positive,
-                      avg(o.raw_return) AS avg_return
-                 FROM quant.intraday_signal_outcomes o
-                 JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id
-                WHERE o.horizon_key='30m' AND o.status='matured'
-                  AND e.observed_at >= now()-interval '7 days'"""
-        ).fetchone()
-        latest_quotes = connection.execute(
-            """SELECT max(observed_at) AS latest_quote_at,
-                      count(*) FILTER (WHERE observed_at >= now()-interval '90 seconds')::int AS fresh_quote_rows,
-                      (SELECT is_open FROM quant.market_trade_calendar
-                        WHERE exchange='SSE'
-                          AND calendar_date=(now() AT TIME ZONE 'Asia/Shanghai')::date) AS calendar_is_open
-                 FROM quant.intraday_quote_observations"""
-        ).fetchone()
-        strategy_rows = connection.execute(
-            """SELECT signal_key AS strategy_key,count(*)::int AS signals,
-                      array_agg(DISTINCT episode_id) FILTER (WHERE episode_id IS NOT NULL) AS episode_ids
-                 FROM quant.intraday_signal_events
-                WHERE observed_at >= now()-interval '7 days'
-                GROUP BY strategy_key ORDER BY signals DESC,strategy_key"""
-        ).fetchall()
+        snapshot = connection.execute(STRATEGY_HEALTH_SQL).fetchone()
+
+    def value(key: str, default: Any = 0) -> Any:
+        if hasattr(snapshot, "get"):
+            return snapshot.get(key, default)
+        return snapshot[key]
+
+    counts = {key: value(key) for key in (
+        "signals_7d", "signals_prior_7d", "episodes_7d", "episodes_prior_7d",
+        "matured_30m_7d", "matured_days_7d", "matured_30m_total", "matured_days_total",
+    )}
+    # A few external contract fakes still return the pre-optimization scalar
+    # subset. Defaults keep those read-only callers compatible; production SQL
+    # always supplies every field above.
+    if counts["episodes_prior_7d"] == 0 and value("episodes_prior_7d", None) is None:
+        counts["episodes_prior_7d"] = counts["episodes_7d"]
+    if counts["matured_30m_total"] == 0 and value("matured_30m_total", None) is None:
+        counts["matured_30m_total"] = counts["matured_30m_7d"]
+    if counts["matured_days_total"] == 0 and value("matured_days_total", None) is None:
+        counts["matured_days_total"] = counts["matured_days_7d"]
+    outcomes = {"rows": value("outcome_rows"), "positive": value("outcome_positive"),
+                "avg_return": value("outcome_avg_return")}
+    latest_quotes = {key: value(key, None) for key in ("latest_quote_at", "fresh_quote_rows", "calendar_is_open")}
+    strategy_rows = value("strategy_rows", []) or []
 
     return strategy_health_payload_from_rows(counts, outcomes, latest_quotes, strategy_rows, now=now)
 

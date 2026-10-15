@@ -156,3 +156,50 @@ def persist_barrier_outcome(connection: Any, signal_event_id: Any, *, spec: Any,
          result.get("maximum_favorable_excursion"), result.get("maximum_adverse_excursion"),
          str(result.get("status") or "unavailable"), Json(source_status or {})),
     )
+
+
+def persist_barrier_outcomes(connection: Any, rows: Iterable[dict[str, Any]], *, batch_size: int = 1_000) -> int:
+    """Persist barrier outcomes through bounded psycopg batches.
+
+    The conflict key and update list deliberately match ``persist_barrier_outcome``;
+    only the transport changes, so reruns retain the same idempotent evidence.
+    """
+    parameters = []
+    for row in rows:
+        spec = row["spec"]
+        result = row["result"]
+        source_status = row.get("source_status") or {}
+        exit_at = result.get("exit_at") or result.get("last_at")
+        exit_price = result.get("exit_price") or result.get("last_price")
+        parameters.append((
+            row["signal_event_id"], str(spec.label_key), spec.upper_return, spec.lower_return,
+            spec.max_horizon_minutes, row["entry_at"], row["entry_price"], exit_at, exit_price,
+            result.get("label"), result.get("return"), result.get("maximum_favorable_excursion"),
+            result.get("maximum_adverse_excursion"), str(result.get("status") or "unavailable"),
+            Json(source_status),
+        ))
+    if not parameters:
+        return 0
+    statement = """INSERT INTO quant.paper_barrier_outcomes(
+             signal_event_id,label_key,upper_return,lower_return,max_horizon_minutes,entry_observed_at,entry_price,
+             exit_observed_at,exit_price,label,raw_return,maximum_favorable_excursion,maximum_adverse_excursion,
+             status,source_status)
+           VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           ON CONFLICT(signal_event_id) DO UPDATE SET exit_observed_at=EXCLUDED.exit_observed_at,
+             exit_price=EXCLUDED.exit_price,label=EXCLUDED.label,raw_return=EXCLUDED.raw_return,
+             maximum_favorable_excursion=EXCLUDED.maximum_favorable_excursion,
+             maximum_adverse_excursion=EXCLUDED.maximum_adverse_excursion,status=EXCLUDED.status,
+             source_status=EXCLUDED.source_status,calculated_at=now()"""
+    cursor_factory = getattr(connection, "cursor", None)
+    execute_many = getattr(connection, "executemany", None)
+    for start in range(0, len(parameters), batch_size):
+        batch = parameters[start:start + batch_size]
+        if callable(cursor_factory):
+            with cursor_factory() as cursor:
+                cursor.executemany(statement, batch)
+        elif callable(execute_many):
+            execute_many(statement, batch)
+        else:
+            for parameters_row in batch:
+                connection.execute(statement, parameters_row)
+    return len(parameters)

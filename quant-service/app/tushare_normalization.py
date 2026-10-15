@@ -136,6 +136,70 @@ def _normalize_daily_basic_rows(
         return None
 
 
+def _normalize_control_rows(
+    connection: Any, api_name: str, rows: list[dict[str, Any]], available_at: datetime, *,
+    date_parser: Callable[[Any], Any], decimal_or_none: Callable[[Any], Any],
+    ensure_instruments: Callable[[Any, list[str]], Any], provider_key: str,
+    safe_error_detail: Callable[[str, int], str],
+) -> int | None:
+    """Batch the two close-control projections that otherwise write per row."""
+    prepared: list[tuple[str, Any, Any, Any, dict[str, Any]]] = []
+    for row in rows:
+        try:
+            symbol = str(row.get("ts_code") or "").upper()
+            trading_date = date_parser(row.get("trade_date"))
+            if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol) or not trading_date:
+                raise ValueError(f"{api_name} row needs ts_code and trade_date")
+            if api_name == "stk_limit":
+                first, second = decimal_or_none(row.get("up_limit")), decimal_or_none(row.get("down_limit"))
+                if first is None or second is None:
+                    raise ValueError("stk_limit row needs both limits")
+                raw = row
+            else:
+                if not provider_key.startswith("tushare") and provider_key != "longhu_qfq_derived":
+                    raise ValueError(f"{provider_key} cannot provide cumulative adjustment factors")
+                first, second = positive_decimal(row.get("adj_factor")), None
+                if first is None:
+                    raise ValueError("adj_factor row has no positive adj_factor")
+                raw = {**row, "factor_semantics": COMPLETE_FACTOR_SEMANTICS, "adjustment_state": "complete"}
+            prepared.append((symbol, trading_date, first, second, raw))
+        except Exception as error:  # noqa: BLE001 - preserve row-level warning semantics
+            _record_normalization_failure(connection, api_name, error, row, safe_error_detail)
+    if not prepared or not hasattr(connection, "cursor") or ensure_instruments is None:
+        return None if prepared else 0
+    try:
+        with connection.transaction():
+            ensure_instruments(connection, [symbol for symbol, _day, _first, _second, _raw in prepared])
+            with connection.cursor() as cursor:
+                if api_name == "stk_limit":
+                    cursor.executemany(
+                        """INSERT INTO quant.daily_trade_limits(symbol,trading_date,limit_up,limit_down,provider,available_at,raw)
+                           VALUES(%s,%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT(symbol,trading_date,provider) DO UPDATE SET limit_up=EXCLUDED.limit_up,
+                             limit_down=EXCLUDED.limit_down,available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
+                        [(symbol, day, first, second, provider_key, available_at, Json(raw))
+                         for symbol, day, first, second, raw in prepared],
+                    )
+                    cursor.executemany(
+                        "UPDATE quant.canonical_bars_daily SET limit_up=%s,limit_down=%s,canonicalized_at=now() WHERE symbol=%s AND trading_date=%s",
+                        [(first, second, symbol, day) for symbol, day, first, second, _raw in prepared],
+                    )
+                else:
+                    cursor.executemany(
+                        """INSERT INTO quant.daily_adjustment_factors(symbol,trading_date,adj_factor,provider,available_at,raw)
+                           VALUES(%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT(symbol,trading_date,provider) DO UPDATE SET adj_factor=EXCLUDED.adj_factor,
+                             available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
+                        [(symbol, day, first, provider_key, available_at, Json(raw))
+                         for symbol, day, first, _second, raw in prepared],
+                    )
+                    cursor.executemany(
+                        "UPDATE quant.canonical_bars_daily SET adj_factor=%s,canonicalized_at=now() WHERE symbol=%s AND trading_date=%s",
+                        [(first, symbol, day) for symbol, day, first, _second, _raw in prepared],
+                    )
+        return len(prepared)
+    except Exception:
+        return None
 def normalize_rows(
     connection: Any, api_name: str, rows: list[dict[str, Any]], available_at: datetime,
     *,
@@ -164,6 +228,14 @@ def normalize_rows(
             connection, rows, available_at, date_parser=date_parser,
             decimal_or_none=decimal_or_none, safe_error_detail=safe_error_detail,
             provider_key=provider_key,
+        )
+        if batched is not None:
+            return batched
+    if api_name in {"stk_limit", "adj_factor"} and ensure_instruments is not None:
+        batched = _normalize_control_rows(
+            connection, api_name, rows, available_at, date_parser=date_parser,
+            decimal_or_none=decimal_or_none, ensure_instruments=ensure_instruments,
+            provider_key=provider_key, safe_error_detail=safe_error_detail,
         )
         if batched is not None:
             return batched

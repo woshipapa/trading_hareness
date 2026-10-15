@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import MagicMock
 
 from app.replay_readiness import historical_replay_readiness
-from app.strategy_health_read_model import strategy_health_payload_from_rows
+from app.strategy_health_read_model import latest_strategy_health, strategy_health_payload_from_rows
 
 
 class StrategyHealthReadModelTests(unittest.TestCase):
@@ -104,6 +104,26 @@ class StrategyHealthReadModelTests(unittest.TestCase):
         self.assertEqual(frequency["drift_basis"], "episodes")
         self.assertEqual(frequency["drift_status"], "stable")
         self.assertEqual(frequency["raw_signal_drift_status"], "warning")
+
+    def test_latest_health_uses_one_snapshot_query(self) -> None:
+        snapshot = {
+            "signals_7d": 12, "signals_prior_7d": 10, "episodes_7d": 4, "episodes_prior_7d": 4,
+            "matured_30m_7d": 8, "matured_days_7d": 3, "matured_30m_total": 8, "matured_days_total": 3,
+            "outcome_rows": 8, "outcome_positive": 5, "outcome_avg_return": 0.003,
+            "latest_quote_at": datetime(2026, 8, 24, 3, 29, 59, tzinfo=timezone.utc),
+            "fresh_quote_rows": 0, "calendar_is_open": True, "strategy_rows": [],
+        }
+        result = MagicMock()
+        result.fetchone.return_value = snapshot
+        connection = MagicMock()
+        connection.execute.return_value = result
+        database = MagicMock()
+        database.transaction.return_value.__enter__.return_value = connection
+
+        payload = latest_strategy_health(database, now=datetime(2026, 8, 24, 4, 28, tzinfo=timezone.utc))
+
+        self.assertEqual(payload["outcomes_30m"]["matured"], 8)
+        self.assertEqual(connection.execute.call_count, 1)
 
 
 class ReplayReadinessRepositoryTests(unittest.TestCase):

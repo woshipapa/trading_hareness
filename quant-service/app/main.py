@@ -293,7 +293,9 @@ from .strategy_runtime_runners import (
 )
 from .analyst_market_review import build_recorded_analyst_market_review
 from .strategy_pattern_read_model import latest_strategy_pattern_mining as read_latest_strategy_pattern_mining
-from .intraday_outcome_settlement import settle as persist_intraday_outcome_settlement
+from .intraday_outcome_settlement import (
+    settle as persist_intraday_outcome_settlement, signal_event_ids as load_intraday_signal_event_ids,
+)
 from .intraday_outcome_runtime import IntradayOutcomeRuntime, IntradayOutcomeRuntimeDependencies
 from .tushare_normalization import normalize_rows as pure_normalize_tushare_rows
 from .market_regimes import (
@@ -458,7 +460,10 @@ from .intraday_signal_policy import (
     signal_event_state as intraday_signal_event_state,
 )
 from .contextual_policy_learning import contextual_bandit_policy_review
-from .paper_execution import paper_decision_payload, persist_barrier_outcome, persist_paper_decision, triple_barrier_label
+from .paper_execution import (
+    paper_decision_payload, persist_barrier_outcome, persist_barrier_outcomes,
+    persist_paper_decision, triple_barrier_label,
+)
 from .paper_portfolio import paper_risk_gate, persist_portfolio_snapshot
 from .paper_execution_service import accept_paper_decision, configure_paper_account, roll_paper_positions_sellable
 from .analyst_prompt_lab import (
@@ -1172,6 +1177,8 @@ def recompute_intraday_signal_outcomes(as_of_date: date | None = None) -> dict[s
         barrier_spec_type=LabelSpec,
         triple_barrier_label=triple_barrier_label,
         persist_barrier_outcome=persist_barrier_outcome,
+        persist_barrier_outcome_batch=persist_barrier_outcomes,
+        load_signal_event_ids=load_intraday_signal_event_ids,
         return_decomposition=a_share_return_decomposition,
         json_safe=strategy_json_safe,
     )).recompute(as_of_date)

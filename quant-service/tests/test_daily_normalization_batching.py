@@ -60,6 +60,28 @@ class _DailyBasicBatchConnection(_Connection):
         yield Cursor()
 
 
+class _ControlBatchConnection(_Connection):
+    def __init__(self):
+        super().__init__()
+        self.batches: list[tuple[str, list[tuple]]] = []
+
+    @contextmanager
+    def cursor(self):
+        connection = self
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def executemany(self, statement, parameters):
+                connection.batches.append((statement, list(parameters)))
+
+        yield Cursor()
+
+
 def _bar_type(**fields):
     return SimpleNamespace(**fields)
 
@@ -169,6 +191,30 @@ class DailyNormalizationBatchingTests(unittest.TestCase):
         self.assertEqual(len(connection.batches), 1)
         self.assertEqual(len(connection.batches[0][1]), 2)
         self.assertIn("INSERT INTO quant.daily_fundamentals", connection.batches[0][0])
+
+    def test_close_controls_use_batched_projection_and_canonical_updates(self):
+        connection = _ControlBatchConnection()
+        seen: list[list[str]] = []
+        rows = [
+            {"ts_code": "600176.SH", "trade_date": "20260918", "up_limit": "55", "down_limit": "45"},
+            {"ts_code": "000001.SZ", "trade_date": "20260918", "up_limit": "13", "down_limit": "11"},
+        ]
+        normalized = normalize_rows(
+            connection, "stk_limit", rows, AVAILABLE_AT,
+            core_apis=frozenset({"stk_limit"}),
+            date_parser=lambda value: date(2026, 9, 18) if value else None,
+            exchange_for=lambda symbol: symbol.rsplit(".", 1)[1],
+            is_st_security_name=lambda _name: False,
+            ensure_instrument=lambda *_args: None, ensure_instruments=lambda _connection, symbols: seen.append(symbols),
+            upsert_bar=lambda *_args: None, daily_bar_type=_bar_type,
+            decimal_or_none=lambda value: Decimal(str(value)) if value is not None else None,
+            safe_error_detail=lambda message, _limit: message, provider_key="tushare_primary",
+        )
+        self.assertEqual(normalized, 2)
+        self.assertEqual(seen, [["600176.SH", "000001.SZ"]])
+        self.assertEqual(len(connection.batches), 2)
+        self.assertIn("INSERT INTO quant.daily_trade_limits", connection.batches[0][0])
+        self.assertIn("UPDATE quant.canonical_bars_daily", connection.batches[1][0])
 
 
 if __name__ == "__main__":

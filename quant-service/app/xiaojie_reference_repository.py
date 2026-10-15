@@ -107,7 +107,7 @@ async def ensure_session_trade_limits(
 def persist_trade_limit_rows(connection: Any, trading_date: date, rows: list[dict[str, Any]],
                              provider: str, available_at: datetime) -> int:
     """Upsert one session's published limit prices."""
-    stored = 0
+    parameters = []
     for row in rows:
         symbol = str(row.get("ts_code") or "").upper()
         try:
@@ -117,17 +117,30 @@ def persist_trade_limit_rows(connection: Any, trading_date: date, rows: list[dic
             continue
         if not symbol or up_limit is None:
             continue
-        connection.execute(
-            """INSERT INTO quant.daily_trade_limits(
+        parameters.append((symbol, trading_date, up_limit, down_limit, provider, available_at,
+                           Json(dict(row)), symbol))
+    if not parameters:
+        return 0
+    statement = """INSERT INTO quant.daily_trade_limits(
                     symbol,trading_date,limit_up,limit_down,provider,available_at,raw)
                SELECT %s,%s,%s,%s,%s,%s,%s
                 WHERE EXISTS(SELECT 1 FROM quant.instruments WHERE symbol=%s)
                ON CONFLICT(symbol,trading_date,provider) DO UPDATE SET
                  limit_up=EXCLUDED.limit_up,limit_down=EXCLUDED.limit_down,
-                 available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
-            (symbol, trading_date, up_limit, down_limit, provider, available_at,
-             Json(dict(row)), symbol),
-        )
+                 available_at=EXCLUDED.available_at,raw=EXCLUDED.raw"""
+    cursor_factory = getattr(connection, "cursor", None)
+    if callable(cursor_factory):
+        try:
+            with cursor_factory() as cursor:
+                cursor.executemany(statement, parameters)
+            return len(parameters)
+        except Exception:
+            # Preserve the old row-isolated fallback if a driver or one row
+            # rejects the batch; a partial close must remain retryable.
+            pass
+    stored = 0
+    for item in parameters:
+        connection.execute(statement, item)
         stored += 1
     return stored
 

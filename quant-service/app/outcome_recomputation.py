@@ -5,7 +5,26 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from .t1_settlement import SETTLEMENT_VERSION
-from .t1_settlement_repository import EqualWeightMarket, settle_idea, settlement_columns, settlement_update_sql, settlement_values
+from .t1_settlement_repository import (
+    EqualWeightMarket, forward_bars_batch, settle_idea, settlement_columns, settlement_update_sql, settlement_values,
+)
+
+
+def _execute_batch(connection: Any, statement: str, rows: list[tuple[Any, ...]], *, batch_size: int = 1_000) -> None:
+    if not rows:
+        return
+    cursor_factory = getattr(connection, "cursor", None)
+    execute_many = getattr(connection, "executemany", None)
+    for start in range(0, len(rows), batch_size):
+        batch = rows[start:start + batch_size]
+        if callable(cursor_factory):
+            with cursor_factory() as cursor:
+                cursor.executemany(statement, batch)
+        elif callable(execute_many):
+            execute_many(statement, batch)
+        else:
+            for parameters in batch:
+                connection.execute(statement, parameters)
 
 
 def recompute(
@@ -47,39 +66,50 @@ def recompute(
         market = EqualWeightMarket(connection, min(signal_dates), as_of_date) if signal_dates else None
         columns = settlement_columns("entry_close", "exit_close")
         placeholders = ",".join(["%s"] * (len(columns) + 3))
+        settlement_requests = [(row["symbol"], row["signal_date"], int(row["horizon_days"])) for row in claims]
+        settlement_requests.extend((row["symbol"], row["run_date"], int(row["horizon_days"])) for row in recommendations)
+        forward_windows = forward_bars_batch(connection, settlement_requests, as_of_date)
         rows: list[dict[str, Any]] = []
-        for claim in claims:
+        claim_parameters: list[tuple[Any, ...]] = []
+        recommendation_parameters: list[tuple[Any, ...]] = []
+        for request_index, claim in enumerate(claims):
             # Entry is the first session after the claim became available to a
             # strategy; the T+1 rule decides the exit (t1_settlement.py).
             result = settle_idea(connection, symbol=claim["symbol"], signal_date=claim["signal_date"],
                                  as_of_date=as_of_date, direction=int(claim["direction"]),
-                                 horizon_sessions=int(claim["horizon_days"]), market=market)
+                                 horizon_sessions=int(claim["horizon_days"]), market=market,
+                                 bars=forward_windows.get(request_index, []))
             if result["status"] != "settled":
                 continue
-            connection.execute(
-                f"""INSERT INTO quant.outcomes(claim_id,symbol,horizon_days,{",".join(columns)})
-                    VALUES({placeholders})
-                    ON CONFLICT(claim_id,symbol,entry_date,horizon_days) DO UPDATE SET
-                      {settlement_update_sql("entry_close", "exit_close", keys=("entry_date",))}""",
-                (claim["claim_id"], claim["symbol"], claim["horizon_days"], *settlement_values(result)),
-            )
+            claim_parameters.append((claim["claim_id"], claim["symbol"], claim["horizon_days"], *settlement_values(result)))
             rows.append(claim)
         recommendation_outcomes = 0
-        for recommendation in recommendations:
+        for request_index, recommendation in enumerate(recommendations, start=len(claims)):
             result = settle_idea(connection, symbol=recommendation["symbol"], signal_date=recommendation["run_date"],
                                  as_of_date=as_of_date, direction=int(recommendation["direction"]),
-                                 horizon_sessions=int(recommendation["horizon_days"]), market=market)
+                                 horizon_sessions=int(recommendation["horizon_days"]), market=market,
+                                 bars=forward_windows.get(request_index, []))
             if result["status"] != "settled":
                 continue
-            connection.execute(
-                f"""INSERT INTO quant.outcomes(recommendation_run_id,symbol,horizon_days,{",".join(columns)})
-                    VALUES({placeholders})
-                    ON CONFLICT (recommendation_run_id,symbol,entry_date,horizon_days) WHERE recommendation_run_id IS NOT NULL
-                    DO UPDATE SET {settlement_update_sql("entry_close", "exit_close", keys=("entry_date",))}""",
-                (recommendation["run_id"], recommendation["symbol"], recommendation["horizon_days"],
-                 *settlement_values(result)),
-            )
+            recommendation_parameters.append((recommendation["run_id"], recommendation["symbol"], recommendation["horizon_days"],
+                                               *settlement_values(result)))
             recommendation_outcomes += 1
+        _execute_batch(
+            connection,
+            f"""INSERT INTO quant.outcomes(claim_id,symbol,horizon_days,{",".join(columns)})
+                VALUES({placeholders})
+                ON CONFLICT(claim_id,symbol,entry_date,horizon_days) DO UPDATE SET
+                  {settlement_update_sql("entry_close", "exit_close", keys=("entry_date",))}""",
+            claim_parameters,
+        )
+        _execute_batch(
+            connection,
+            f"""INSERT INTO quant.outcomes(recommendation_run_id,symbol,horizon_days,{",".join(columns)})
+                VALUES({placeholders})
+                ON CONFLICT (recommendation_run_id,symbol,entry_date,horizon_days) WHERE recommendation_run_id IS NOT NULL
+                DO UPDATE SET {settlement_update_sql("entry_close", "exit_close", keys=("entry_date",))}""",
+            recommendation_parameters,
+        )
         candidate_outcomes = (
             settle_post_close_and_leader_rotation_outcomes(connection, as_of_date)
             if settle_post_close_and_leader_rotation_outcomes is not None else {}

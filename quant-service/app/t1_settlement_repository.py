@@ -35,6 +35,40 @@ def forward_bars(connection: Any, symbol: str, signal_date: date, as_of_date: da
     return [dict(row) for row in rows]
 
 
+def forward_bars_batch(connection: Any, requests: list[tuple[str, date, int]], as_of_date: date) -> dict[int, list[dict[str, Any]]]:
+    """Load each idea's bounded forward window with one LATERAL query.
+
+    The request-specific ``LIMIT`` preserves ``forward_bars`` semantics while
+    avoiding one tunnel round trip per claim or recommendation.
+    """
+    if not requests:
+        return {}
+    values = ",".join(["(%s,%s,%s,%s)"] * len(requests))
+    parameters: list[Any] = []
+    for index, (symbol, signal_date, horizon_sessions) in enumerate(requests):
+        parameters.extend((index, symbol, signal_date, max(int(horizon_sessions), 2) + MAX_EXIT_ROLL_SESSIONS))
+    parameters.append(as_of_date)
+    rows = connection.execute(
+        f"""WITH requests(request_index,symbol,signal_date,max_rows) AS (VALUES {values})
+            SELECT r.request_index,b.trading_date,b.open,b.high,b.low,b.close,b.pre_close,b.adj_factor,
+                   b.is_suspended,b.limit_up,b.limit_down
+              FROM requests r
+              CROSS JOIN LATERAL (
+                SELECT trading_date,open,high,low,close,pre_close,adj_factor,is_suspended,limit_up,limit_down
+                  FROM quant.canonical_bars_daily
+                 WHERE symbol=r.symbol AND trading_date>r.signal_date AND trading_date<=%s
+                 ORDER BY trading_date LIMIT r.max_rows
+              ) b
+             ORDER BY r.request_index,b.trading_date""",
+        parameters,
+    ).fetchall()
+    result = {index: [] for index in range(len(requests))}
+    for row in rows:
+        item = dict(row)
+        result[int(item.pop("request_index"))].append(item)
+    return result
+
+
 class EqualWeightMarket:
     """Per-session equal-weight A-share returns, loaded once per settle run."""
 
@@ -61,9 +95,10 @@ class EqualWeightMarket:
 
 
 def settle_idea(connection: Any, *, symbol: str, signal_date: date, as_of_date: date, direction: int,
-                horizon_sessions: int, market: EqualWeightMarket | None) -> dict[str, Any]:
+                horizon_sessions: int, market: EqualWeightMarket | None,
+                bars: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Load one idea's forward bars and settle it."""
-    bars = forward_bars(connection, symbol, signal_date, as_of_date, horizon_sessions)
+    bars = bars if bars is not None else forward_bars(connection, symbol, signal_date, as_of_date, horizon_sessions)
     return settle(bars, symbol=symbol, direction=direction, horizon_sessions=horizon_sessions,
                   benchmark_return=market.window_return if market else None)
 
@@ -101,5 +136,5 @@ def settlement_update_sql(entry_price_column: str, exit_price_column: str, *, ke
 
 __all__ = [
     "A_SHARE_EQUITY_PATTERN", "EqualWeightMarket", "SETTLEMENT_COLUMNS", "SETTLEMENT_VERSION", "forward_bars",
-    "settle_idea", "settlement_columns", "settlement_update_sql", "settlement_values",
+    "settle_idea", "forward_bars_batch", "settlement_columns", "settlement_update_sql", "settlement_values",
 ]

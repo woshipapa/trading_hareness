@@ -26,6 +26,49 @@ from .intraday_clock import continuous_auction_bounds, intraday_outcome_window
 INTRADAY_EXIT_QUOTE_TOLERANCE_SECONDS = 90
 PRICED_QUOTE_SOURCES = ("longhuvip", "tencent_free", "fuyao_ths")
 _CN = ZoneInfo("Asia/Shanghai")
+_BATCH_SIZE = 1_000
+
+_HORIZON_OUTCOME_SQL = """INSERT INTO quant.intraday_signal_outcomes(signal_event_id,horizon_key,direction,entry_observed_at,entry_price,
+     exit_observed_at,exit_price,raw_return,maximum_favorable_excursion,maximum_adverse_excursion,status,tradability,source_status)
+   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'observed_quote_only',%s)
+   ON CONFLICT(signal_event_id,horizon_key) DO UPDATE SET exit_observed_at=EXCLUDED.exit_observed_at,
+     exit_price=EXCLUDED.exit_price,raw_return=EXCLUDED.raw_return,
+     maximum_favorable_excursion=EXCLUDED.maximum_favorable_excursion,
+     maximum_adverse_excursion=EXCLUDED.maximum_adverse_excursion,status=EXCLUDED.status,
+     tradability=EXCLUDED.tradability,source_status=EXCLUDED.source_status,calculated_at=now()"""
+
+_DAILY_OUTCOME_SQL = """INSERT INTO quant.intraday_signal_outcomes(signal_event_id,horizon_key,direction,entry_observed_at,entry_price,
+     exit_observed_at,exit_price,raw_return,maximum_favorable_excursion,maximum_adverse_excursion,status,tradability,source_status)
+   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'daily_close_reference',%s)
+   ON CONFLICT(signal_event_id,horizon_key) DO UPDATE SET exit_observed_at=EXCLUDED.exit_observed_at,
+     exit_price=EXCLUDED.exit_price,raw_return=EXCLUDED.raw_return,
+     maximum_favorable_excursion=EXCLUDED.maximum_favorable_excursion,
+     maximum_adverse_excursion=EXCLUDED.maximum_adverse_excursion,status=EXCLUDED.status,
+     tradability=EXCLUDED.tradability,source_status=EXCLUDED.source_status,calculated_at=now()"""
+
+
+def _execute_batch(connection: Any, statement: str, rows: list[tuple[Any, ...]]) -> None:
+    """Send bounded batches while keeping lightweight test connections compatible.
+
+    psycopg's connection ``executemany`` uses its pipeline-capable path, which
+    removes one tunnel round trip per outcome row.  A few pure repository tests
+    intentionally expose only ``execute``; retaining that fallback keeps their
+    SQL assertions useful without changing the production path.
+    """
+    if not rows:
+        return
+    cursor_factory = getattr(connection, "cursor", None)
+    execute_many = getattr(connection, "executemany", None)
+    for start in range(0, len(rows), _BATCH_SIZE):
+        batch = rows[start:start + _BATCH_SIZE]
+        if callable(cursor_factory):
+            with cursor_factory() as cursor:
+                cursor.executemany(statement, batch)
+        elif callable(execute_many):
+            execute_many(statement, batch)
+        else:
+            for parameters in batch:
+                connection.execute(statement, parameters)
 
 
 class PricePaths:
@@ -71,6 +114,31 @@ class PricePaths:
             self._series[key] = ([at for at, _ in ordered], [price for _, price in ordered])
         return self._series[key]
 
+    def prefetch(self, keys: set[tuple[str, date]]) -> None:
+        """Load all quote paths for the supplied symbol/day pairs in day batches."""
+        by_day: dict[date, set[str]] = {}
+        for symbol, day in keys:
+            by_day.setdefault(day, set()).add(symbol)
+        for day, symbols in by_day.items():
+            start = datetime.combine(day, time(0), tzinfo=_CN)
+            rows = self.connection.execute(
+                """SELECT symbol,observed_at,price FROM quant.intraday_quote_observations
+                     WHERE symbol=ANY(%s) AND source_name=ANY(%s) AND observed_at>=%s AND observed_at<%s
+                       AND observed_at<=%s AND price>0""",
+                (sorted(symbols), list(PRICED_QUOTE_SOURCES), start, start + timedelta(days=1), self.cutoff),
+            ).fetchall()
+            merged: dict[str, dict[datetime, Decimal]] = {symbol: {} for symbol in symbols}
+            for row in rows:
+                row_symbol = row.get("symbol") if hasattr(row, "get") else None
+                symbol = str(row_symbol) if row_symbol is not None else (next(iter(symbols)) if len(symbols) == 1 else "")
+                if symbol in merged:
+                    merged[symbol][row["observed_at"]] = Decimal(row["price"])
+            tape = self._day_tape(day)
+            for symbol in symbols:
+                merged[symbol].update(dict(tape.get(symbol, [])))
+                ordered = sorted(merged[symbol].items())
+                self._series[(symbol, day)] = ([at for at, _ in ordered], [price for _, price in ordered])
+
     def last_at_or_before(self, symbol: str, at: datetime, not_before: datetime) -> tuple[datetime, Decimal] | None:
         times, prices = self.series(symbol, at)
         index = bisect_right(times, at) - 1
@@ -99,6 +167,48 @@ def signal_entry_price(evidence: dict[str, Any], decimal_or_none: Callable[[Any]
     return None, None
 
 
+def _prefetch_daily_exits(connection: Any, signals: list[Any], cutoff: datetime) -> dict[tuple[Any, str], Any]:
+    """Read daily close candidates once and apply each signal's point-in-time filter in Python."""
+    if not signals:
+        return {}
+    dates = [row["observed_at"].astimezone(_CN).date() for row in signals]
+    observed = [row["observed_at"] for row in signals]
+    symbols = sorted({str(row["symbol"]) for row in signals})
+    rows = connection.execute(
+        """SELECT symbol,trading_date,available_at,open,close FROM quant.canonical_bars_daily
+             WHERE symbol=ANY(%s) AND trading_date BETWEEN %s AND %s
+               AND available_at>%s AND available_at<=%s
+             ORDER BY symbol,trading_date,available_at""",
+        (symbols, min(dates), cutoff.astimezone(_CN).date(), min(observed), cutoff),
+    ).fetchall()
+    by_symbol: dict[str, list[Any]] = {}
+    for row in rows:
+        by_symbol.setdefault(str(row["symbol"]), []).append(row)
+    exits: dict[tuple[Any, str], Any] = {}
+    for signal in signals:
+        signal_date = signal["observed_at"].astimezone(_CN).date()
+        candidates = [row for row in by_symbol.get(str(signal["symbol"]), [])
+                      if row["available_at"] > signal["observed_at"] and row["available_at"] <= cutoff]
+        same_day = next((row for row in candidates if row["trading_date"] == signal_date), None)
+        next_day = next((row for row in candidates if row["trading_date"] > signal_date), None)
+        exits[(signal["signal_event_id"], "close")] = same_day
+        exits[(signal["signal_event_id"], "next_close")] = next_day
+    return exits
+
+
+def signal_event_ids(connection: Any, cutoff: datetime) -> list[Any]:
+    """Return the bounded settlement work list without opening a write transaction."""
+    rows = connection.execute(
+        """SELECT signal_event_id
+             FROM quant.intraday_signal_events
+            WHERE state IN ('confirmed','alerted') AND signal_type IN ('entry','watch','reduce','exit')
+              AND observed_at<=%s
+            ORDER BY observed_at""",
+        (cutoff,),
+    ).fetchall()
+    return [row["signal_event_id"] for row in rows]
+
+
 def settle(
     connection: Any, as_of_date: date | None, *, cutoff: datetime,
     horizons: tuple[tuple[str, int], ...], direction_for: Callable[[str], int | None],
@@ -106,17 +216,29 @@ def settle(
     decimal_or_none: Callable[[Any], Decimal | None], barrier_spec_type: Callable[[], Any],
     triple_barrier_label: Callable[..., Any], persist_barrier_outcome: Callable[..., Any],
     return_decomposition: Callable[..., dict[str, Any]], json_safe: Callable[[Any], Any],
+    persist_barrier_outcome_batch: Callable[[Any, list[dict[str, Any]]], Any] | None = None,
+    signal_event_ids: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Settle only from rows already persisted before ``cutoff``; never fetch."""
     horizon_counts = {key: 0 for key, _ in horizons}
     matured = pending = 0
-    signals = connection.execute(
-        """SELECT signal_event_id,symbol,signal_type,observed_at,evidence
+    signal_query = """SELECT signal_event_id,symbol,signal_type,observed_at,evidence
              FROM quant.intraday_signal_events
             WHERE state IN ('confirmed','alerted') AND signal_type IN ('entry','watch','reduce','exit')
-              AND observed_at<=%s ORDER BY observed_at""", (cutoff,),
-    ).fetchall()
+              AND observed_at<=%s"""
+    signal_parameters: list[Any] = [cutoff]
+    if signal_event_ids is not None:
+        signal_query += " AND signal_event_id=ANY(%s)"
+        signal_parameters.append(signal_event_ids)
+    signal_query += " ORDER BY observed_at"
+    signals = connection.execute(signal_query, tuple(signal_parameters)).fetchall()
+    signals = [dict(row) for row in signals]
     paths = PricePaths(connection, cutoff)
+    paths.prefetch({(str(signal["symbol"]), signal["observed_at"].astimezone(_CN).date()) for signal in signals})
+    daily_exits = _prefetch_daily_exits(connection, signals, cutoff)
+    barrier_batch: list[dict[str, Any]] = []
+    horizon_batch: list[tuple[Any, ...]] = []
+    daily_batch: list[tuple[Any, ...]] = []
     skipped = 0
     for signal in signals:
         direction = direction_for(str(signal["signal_type"]))
@@ -163,16 +285,16 @@ def settle(
                     "reason": "barrier_horizon_crosses_continuous_session_boundary",
                     **{key: barrier_result[key] for key in ("last_at", "last_price") if key in barrier_result},
                 }
-        persist_barrier_outcome(
-            connection, signal["signal_event_id"], spec=barrier_spec, entry_at=entry_observed_at,
-            entry_price=entry_price, result=barrier_result,
-            source_status={
+        barrier_batch.append({
+            "signal_event_id": signal["signal_event_id"], "spec": barrier_spec,
+            "entry_at": entry_observed_at, "entry_price": entry_price,
+            "result": barrier_result, "source_status": {
                 "path": "stored_scan_tape_and_priced_quotes", "cutoff": cutoff.isoformat(),
                 "session_bounded": True,
                 "row_count": len(barrier_rows),
                 "reason": barrier_result.get("reason"),
             },
-        )
+        })
         for horizon_key, minutes in horizons:
             window = intraday_outcome_window(
                 entry_observed_at, horizon_minutes=minutes, cutoff=cutoff,
@@ -199,36 +321,24 @@ def settle(
                 outcome = None
                 if status == "pending":
                     pending += 1
-            connection.execute(
-                """INSERT INTO quant.intraday_signal_outcomes(signal_event_id,horizon_key,direction,entry_observed_at,entry_price,
-                     exit_observed_at,exit_price,raw_return,maximum_favorable_excursion,maximum_adverse_excursion,status,tradability,source_status)
-                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'observed_quote_only',%s)
-                   ON CONFLICT(signal_event_id,horizon_key) DO UPDATE SET exit_observed_at=EXCLUDED.exit_observed_at,
-                     exit_price=EXCLUDED.exit_price,raw_return=EXCLUDED.raw_return,
-                     maximum_favorable_excursion=EXCLUDED.maximum_favorable_excursion,
-                     maximum_adverse_excursion=EXCLUDED.maximum_adverse_excursion,status=EXCLUDED.status,
-                     tradability=EXCLUDED.tradability,source_status=EXCLUDED.source_status,calculated_at=now()""",
-                (signal["signal_event_id"], horizon_key, direction, entry_observed_at, entry_price,
-                 exit_quote["observed_at"] if exit_quote else None, exit_quote["price"] if exit_quote else None,
-                 outcome["raw_return"] if outcome else None, outcome["maximum_favorable_excursion"] if outcome else None,
-                 outcome["maximum_adverse_excursion"] if outcome else None, status,
-                 Json({
-                     "entry": entry_source, "exit": "stored_scan_tape_and_priced_quotes",
-                     "cutoff": cutoff.isoformat(), "settlement_window": {
-                         key: value.isoformat() if isinstance(value, datetime) else value
-                         for key, value in window.items()
-                     },
-                 })),
-            )
+            horizon_batch.append((
+                signal["signal_event_id"], horizon_key, direction, entry_observed_at, entry_price,
+                exit_quote["observed_at"] if exit_quote else None, exit_quote["price"] if exit_quote else None,
+                outcome["raw_return"] if outcome else None, outcome["maximum_favorable_excursion"] if outcome else None,
+                outcome["maximum_adverse_excursion"] if outcome else None, status,
+                Json({
+                    "entry": entry_source, "exit": "stored_scan_tape_and_priced_quotes",
+                    "cutoff": cutoff.isoformat(), "settlement_window": {
+                        key: value.isoformat() if isinstance(value, datetime) else value
+                        for key, value in window.items()
+                    },
+                }),
+            ))
             horizon_counts[horizon_key] += 1
-        signal_date = signal["observed_at"].astimezone(ZoneInfo("Asia/Shanghai")).date()
+        signal_date = signal["observed_at"].astimezone(_CN).date()
         same_day_close: Decimal | None = None
-        for horizon_key, date_operator in (("close", "="), ("next_close", ">")):
-            daily_exit = connection.execute(
-                f"""SELECT trading_date,available_at,open,close FROM quant.canonical_bars_daily
-                     WHERE symbol=%s AND trading_date {date_operator} %s AND available_at>%s AND available_at<=%s
-                     ORDER BY trading_date LIMIT 1""", (signal["symbol"], signal_date, signal["observed_at"], cutoff),
-            ).fetchone()
+        for horizon_key in ("close", "next_close"):
+            daily_exit = daily_exits.get((signal["signal_event_id"], horizon_key))
             status = "matured" if daily_exit else "pending"
             outcome = metrics_for(entry_price, direction, [Decimal(daily_exit["close"])]) if daily_exit else None
             if horizon_key == "close" and daily_exit:
@@ -238,30 +348,32 @@ def settle(
                 Decimal(daily_exit["open"]) if horizon_key == "next_close" and daily_exit and daily_exit["open"] else None,
                 Decimal(daily_exit["close"]) if horizon_key == "next_close" and daily_exit else None,
             ) if horizon_key == "next_close" else None
-            connection.execute(
-                """INSERT INTO quant.intraday_signal_outcomes(signal_event_id,horizon_key,direction,entry_observed_at,entry_price,
-                     exit_observed_at,exit_price,raw_return,maximum_favorable_excursion,maximum_adverse_excursion,status,tradability,source_status)
-                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'daily_close_reference',%s)
-                   ON CONFLICT(signal_event_id,horizon_key) DO UPDATE SET exit_observed_at=EXCLUDED.exit_observed_at,
-                     exit_price=EXCLUDED.exit_price,raw_return=EXCLUDED.raw_return,
-                     maximum_favorable_excursion=EXCLUDED.maximum_favorable_excursion,
-                     maximum_adverse_excursion=EXCLUDED.maximum_adverse_excursion,status=EXCLUDED.status,
-                     tradability=EXCLUDED.tradability,source_status=EXCLUDED.source_status,calculated_at=now()""",
-                (signal["signal_event_id"], horizon_key, direction, entry_observed_at, entry_price,
-                 daily_exit["available_at"] if daily_exit else None, daily_exit["close"] if daily_exit else None,
-                 outcome["raw_return"] if outcome else None, outcome["maximum_favorable_excursion"] if outcome else None,
-                 outcome["maximum_adverse_excursion"] if outcome else None, status,
-                 Json(json_safe({"entry": entry_source, "exit": "canonical_daily_close", "cutoff": cutoff.isoformat(),
-                                 "return_decomposition": decomposition}))),
-            )
+            daily_batch.append((
+                signal["signal_event_id"], horizon_key, direction, entry_observed_at, entry_price,
+                daily_exit["available_at"] if daily_exit else None, daily_exit["close"] if daily_exit else None,
+                outcome["raw_return"] if outcome else None, outcome["maximum_favorable_excursion"] if outcome else None,
+                outcome["maximum_adverse_excursion"] if outcome else None, status,
+                Json(json_safe({"entry": entry_source, "exit": "canonical_daily_close", "cutoff": cutoff.isoformat(),
+                                "return_decomposition": decomposition})),
+            ))
             if status == "matured":
                 matured += 1
             else:
                 pending += 1
+    if persist_barrier_outcome_batch is not None:
+        persist_barrier_outcome_batch(connection, barrier_batch)
+    else:
+        for row in barrier_batch:
+            persist_barrier_outcome(
+                connection, row["signal_event_id"], spec=row["spec"], entry_at=row["entry_at"],
+                entry_price=row["entry_price"], result=row["result"], source_status=row["source_status"],
+            )
+    _execute_batch(connection, _HORIZON_OUTCOME_SQL, horizon_batch)
+    _execute_batch(connection, _DAILY_OUTCOME_SQL, daily_batch)
     return {"as_of_date": str(as_of_date) if as_of_date else None, "signals": len(signals),
             "skipped_without_entry_price": skipped,
             "outcome_rows": sum(horizon_counts.values()) + (len(signals) - skipped) * 2,
             "matured": matured, "pending": pending, "intraday_horizons": horizon_counts}
 
 
-__all__ = ["PRICED_QUOTE_SOURCES", "PricePaths", "settle", "signal_entry_price"]
+__all__ = ["PRICED_QUOTE_SOURCES", "PricePaths", "settle", "signal_entry_price", "signal_event_ids"]
