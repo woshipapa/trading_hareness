@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, AsyncIterator, Iterator, Mapping
@@ -1892,16 +1893,25 @@ class Database:
             timeout=self._pool_settings["timeout_seconds"], max_waiting=ASYNC_POOL_MAX_WAITING,
         )
         self._opened = False
+        # Repository calls can open the lazily-created pool from several
+        # executor threads at once.  psycopg's sync pool open is not
+        # single-flight, so protect lifecycle transitions just like the async
+        # read pool below.
+        self._lifecycle_lock = threading.Lock()
 
     def open(self) -> None:
-        if not self._opened:
-            self._pool.open(wait=True, timeout=self._pool_settings["timeout_seconds"])
-            self._opened = True
+        if self._opened:
+            return
+        with self._lifecycle_lock:
+            if not self._opened:
+                self._pool.open(wait=True, timeout=self._pool_settings["timeout_seconds"])
+                self._opened = True
 
     def close(self) -> None:
-        if self._opened:
-            self._pool.close()
-            self._opened = False
+        with self._lifecycle_lock:
+            if self._opened:
+                self._pool.close()
+                self._opened = False
 
     def pool_status(self) -> dict[str, Any]:
         stats = self._pool.get_stats()
@@ -1991,6 +2001,11 @@ class AsyncDatabase:
         self._pool_settings["max_size"] = async_max
         self._pool = self._new_pool()
         self._opened = False
+        # Several dashboard requests can arrive during startup and all call
+        # ``transaction()`` at once.  psycopg's async pool open is not
+        # single-flight itself; serialize lifecycle transitions so a burst
+        # cannot call ``open()`` twice on the same pool.
+        self._lifecycle_lock = asyncio.Lock()
         self._closing: set[asyncio.Future[None]] = set()
 
     def _new_pool(self) -> AsyncConnectionPool:
@@ -2007,14 +2022,18 @@ class AsyncDatabase:
         )
 
     async def open(self) -> None:
-        if not self._opened:
-            await self._pool.open(wait=True, timeout=self._pool_settings["timeout_seconds"])
-            self._opened = True
+        if self._opened:
+            return
+        async with self._lifecycle_lock:
+            if not self._opened:
+                await self._pool.open(wait=True, timeout=self._pool_settings["timeout_seconds"])
+                self._opened = True
 
     async def close(self) -> None:
-        if self._opened:
-            await self._pool.close()
-            self._opened = False
+        async with self._lifecycle_lock:
+            if self._opened:
+                await self._pool.close()
+                self._opened = False
 
     async def replace_pool(self) -> None:
         """Swap in a fresh pool, leaving the old one to be torn down separately.
@@ -2033,13 +2052,19 @@ class AsyncDatabase:
         this method exists to prevent.  It is therefore closed in the
         background, under a timeout, and never blocks the new pool's opening.
         """
-        previous, self._pool = self._pool, self._new_pool()
-        self._opened = False
-        closing = asyncio.ensure_future(_close_pool_quietly(previous))
-        # Hold a reference: a bare task can be garbage collected mid-flight.
-        self._closing.add(closing)
-        closing.add_done_callback(self._closing.discard)
-        await self.open()
+        async with self._lifecycle_lock:
+            previous, self._pool = self._pool, self._new_pool()
+            self._opened = False
+            closing = asyncio.ensure_future(_close_pool_quietly(previous))
+            # Hold a reference: a bare task can be garbage collected mid-flight.
+            self._closing.add(closing)
+            closing.add_done_callback(self._closing.discard)
+            # Keep the lifecycle lock through the new pool's first open.  A
+            # concurrent shutdown must observe either the old open pool or
+            # this fully opened replacement, never a false ``_opened`` window
+            # between the swap and this await.
+            await self._pool.open(wait=True, timeout=self._pool_settings["timeout_seconds"])
+            self._opened = True
 
     def pool_status(self) -> dict[str, int | bool]:
         stats = self._pool.get_stats()

@@ -68,6 +68,68 @@ _HISTORICAL_LIMITS_SQL = """SELECT count(DISTINCT symbol)::int limit_symbols
 _HISTORICAL_MINUTES_SQL = """SELECT count(DISTINCT symbol)::int minute_symbols
                                 FROM quant.market_bars_minute"""
 
+# These aggregates are independent read projections.  Keeping one SQL string
+# per feature lets the async pool overlap the large history scans instead of
+# waiting for the UNION's slowest branch before starting the next one.  Every
+# query returns the same row shape consumed by feature_readiness_projection.
+_FEATURE_READINESS_SQL = (
+    """SELECT 'daily_bars' AS feature,
+                     count(DISTINCT symbol)::int AS symbols,
+                     count(*)::int AS rows,
+                     max(trading_date) AS latest_date,
+                     'P0' AS priority
+                FROM quant.canonical_bars_daily
+               WHERE symbol <> '000300.SH' AND adj_factor > 0""",
+    """SELECT 'daily_basic' AS feature,
+                     count(DISTINCT symbol)::int AS symbols,
+                     count(*)::int AS rows,
+                     max(trading_date) AS latest_date,
+                     'P0' AS priority
+                FROM quant.daily_fundamentals""",
+    """SELECT 'trade_limits' AS feature,
+                     count(DISTINCT symbol)::int AS symbols,
+                     count(*)::int AS rows,
+                     max(trading_date) AS latest_date,
+                     'P0' AS priority
+                FROM quant.daily_trade_limits""",
+    """SELECT 'stock_flow' AS feature,
+                     count(DISTINCT symbol)::int AS symbols,
+                     count(*)::int AS rows,
+                     max(trading_date) AS latest_date,
+                     'P1' AS priority
+                FROM quant.stock_money_flow_daily
+               WHERE source = 'longhuvip_main_net'""",
+    """SELECT 'stk_factor_pro' AS feature,
+                     count(DISTINCT row_data->>'ts_code')::int AS symbols,
+                     count(*)::int AS rows,
+                     max(to_date(NULLIF(row_data->>'trade_date', ''), 'YYYYMMDD')) AS latest_date,
+                     'P1' AS priority
+                FROM quant.tushare_raw_records
+               WHERE api_name = 'stk_factor_pro'""",
+    """SELECT 'sector_flow' AS feature,
+                     count(DISTINCT sector_key)::int AS symbols,
+                     count(*)::int AS rows,
+                     max(trading_date) AS latest_date,
+                     'P1' AS priority
+                FROM quant.sector_market_observations""",
+    """SELECT 'announcements' AS feature,
+                     count(DISTINCT symbol)::int AS symbols,
+                     count(*)::int AS rows,
+                     max(occurred_at::date) AS latest_date,
+                     'P1' AS priority
+                FROM quant.market_events""",
+    """SELECT 'analyst_claims' AS feature,
+                     count(DISTINCT subject_key)::int AS symbols,
+                     count(*)::int AS rows,
+                     max((available_at AT TIME ZONE 'Asia/Shanghai')::date) AS latest_date,
+                     'P1' AS priority
+                FROM quant.analyst_claims""",
+)
+
+_FEATURE_READINESS_UNIVERSE_SQL = """SELECT greatest(1, count(*)::int) AS symbols
+                                         FROM quant.universe_members
+                                        WHERE universe_key = 'all_a' AND enabled"""
+
 
 async def _fetchone(async_database: Any, sql: str, params: Any = ()) -> dict[str, Any]:
     """Run one independent read in its own transaction/pooled connection."""
@@ -97,25 +159,16 @@ async def frameworks(async_database: Any) -> dict[str, Any]:
 
 
 async def feature_readiness(async_database: Any) -> dict[str, Any]:
-    async with async_database.transaction() as connection:
-        # Keep the existing readiness function's SQL and output contract in
-        # the synchronous compatibility path; this projection mirrors its
-        # query so dashboard reads never borrow that connection.
-        result = await connection.execute(
-            """SELECT 'daily_bars' feature,count(DISTINCT symbol)::int symbols,count(*)::int rows,max(trading_date) latest_date,'P0' priority FROM quant.canonical_bars_daily WHERE symbol<>'000300.SH' AND adj_factor>0
-               UNION ALL SELECT 'daily_basic',count(DISTINCT symbol)::int,count(*)::int,max(trading_date),'P0' FROM quant.daily_fundamentals
-               UNION ALL SELECT 'trade_limits',count(DISTINCT symbol)::int,count(*)::int,max(trading_date),'P0' FROM quant.daily_trade_limits
-               UNION ALL SELECT 'stock_flow',count(DISTINCT symbol)::int,count(*)::int,max(trading_date),'P1' FROM quant.stock_money_flow_daily WHERE source='longhuvip_main_net'
-               UNION ALL SELECT 'stk_factor_pro',count(DISTINCT row_data->>'ts_code')::int,count(*)::int,max(to_date(NULLIF(row_data->>'trade_date',''),'YYYYMMDD')),'P1' FROM quant.tushare_raw_records WHERE api_name='stk_factor_pro'
-               UNION ALL SELECT 'sector_flow',count(DISTINCT sector_key)::int,count(*)::int,max(trading_date),'P1' FROM quant.sector_market_observations
-               UNION ALL SELECT 'announcements',count(DISTINCT symbol)::int,count(*)::int,max(occurred_at::date),'P1' FROM quant.market_events
-               UNION ALL SELECT 'analyst_claims',count(DISTINCT subject_key)::int,count(*)::int,
-                  max((available_at AT TIME ZONE 'Asia/Shanghai')::date),'P1' FROM quant.analyst_claims"""
-        )
-        rows = await result.fetchall()
-        result = await connection.execute("SELECT greatest(1,count(*)::int) symbols FROM quant.universe_members WHERE universe_key='all_a' AND enabled")
-        universe_size = int((await result.fetchone())["symbols"])
-    return feature_readiness_projection([dict(row) for row in rows], universe_size)
+    # These are display-only aggregates.  PostgreSQL READ COMMITTED gives
+    # each statement the same statement-level snapshot semantics as the old
+    # UNION plus universe query, while separate pooled connections let the
+    # expensive history scans use available CPU, storage and tunnel capacity
+    # concurrently.  The pool remains bounded by ASYNC_POOL_MAX_WAITING.
+    rows, universe = await asyncio.gather(
+        asyncio.gather(*(_fetchone(async_database, sql) for sql in _FEATURE_READINESS_SQL)),
+        _fetchone(async_database, _FEATURE_READINESS_UNIVERSE_SQL),
+    )
+    return feature_readiness_projection(rows, int(universe.get("symbols") or 1))
 
 
 async def replay_readiness(async_database: Any) -> dict[str, Any]:

@@ -1,6 +1,8 @@
 """Focused regression tests extracted from the legacy provider helper suite."""
 
 from provider_test_support import *  # noqa: F403
+from concurrent.futures import ThreadPoolExecutor
+import time
 from app.database import AsyncDatabase, Database
 from app.tushare_providers import PROMAX_VERIFIED_APIS
 
@@ -222,6 +224,39 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         with patch.dict("os.environ", {"QUANT_ASYNC_READ_POOL_MAX_SIZE": "999"}, clear=False):
             database = AsyncDatabase(Database())
         self.assertEqual(database._pool_settings["max_size"], 32)
+
+    def test_async_read_pool_open_is_single_flight(self):
+        database = AsyncDatabase(Database())
+        calls = 0
+
+        async def open_pool(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0)
+
+        async def open_burst():
+            with patch.object(database._pool, "open", new=open_pool):
+                await asyncio.gather(*(database.open() for _ in range(8)))
+
+        asyncio.run(open_burst())
+        self.assertEqual(calls, 1)
+        self.assertTrue(database._opened)
+
+    def test_sync_database_pool_open_is_single_flight(self):
+        database = Database()
+        calls = 0
+
+        def open_pool(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            time.sleep(0.01)
+
+        with patch.object(database._pool, "open", new=open_pool):
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                list(executor.map(lambda _value: database.open(), range(8)))
+
+        self.assertEqual(calls, 1)
+        self.assertTrue(database._opened)
 
     def test_akshare_retry_is_bounded_and_returns_the_first_success(self):
         with patch("app.akshare_provider._call", side_effect=[AkShareProviderError("temporary disconnect"), [{"code": "000001"}]] ) as call, \
