@@ -7,7 +7,7 @@
 - updated: 2026-10-16
 - plan: docs/work/plans/concurrency-stress.md
 - branch: main
-- head: 00d237d8
+- head: d8c5b520
 - release: none
 
 ## Requirements
@@ -53,6 +53,7 @@
 - 2026-10-16 02:41 Asia/Shanghai：实时扫描的 Tencent 盘口批次改为复用已验证的 80 只上游合同；200 只观察池请求从 5 批降为 80/80/40 三批，Eastmoney 40 只批次和 licensed Longhu 8 路保持不变。新增 200 只 capture 回归与 scan overlap 定向 overlay 共 22 项通过。
 - 2026-10-16 02:48 Asia/Shanghai：盘末分钟 profile 的 per-symbol fan-out 增加 semaphore，复用 `LONGHU_MINUTE_BATCH_WORKERS` 的默认 8/硬上限 8；200 只不会再一次性向 realtime executor 提交并触发饱和后逐票误 fallback。定向 minute/provider overlay 86 项仅保留既有 W016 local-spool settings 登记失败。
 - 2026-10-16 02:55 Asia/Shanghai：盘末分钟 capture 的 owner 写入再收敛：观察池 instrument 注册改为一次 `unnest` 批量 upsert，所有 symbol 的分钟参数合并为一次 `executemany`，历史 retention DELETE 也由逐票改为 `ANY(text[])`；这条路径的 200 只事务不再按 symbol 叠加 tunnel 往返，研究证据与幂等键不变。minute/provider overlay 78 项通过。
+- 2026-10-16 02:58 Asia/Shanghai：最新完整 overlay 运行 3298 项，仍只有工作区其他会话 `local_spool_*` 读取未登记环境变量的 `test_settings` 失败；本轮分钟 capture、scan overlap、盘口批次与 timing contract 无新增失败。
 
 ## Waiting on the user
 
