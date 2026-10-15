@@ -54,6 +54,7 @@
 - 2026-10-16：`feature_readiness` 拆为 8 个 feature 聚合加 1 个 universe 统计并发读取；本地 overlay 三次中位 1,532.029 ms，legacy UNION 对照 1,716.112 ms，返回 8 项且 `decision_ready=true`。证据脚本和输出为 `docs/work/probes/2026-10-16-feature-readiness-overlap.py` / `.out.txt`，owner 还未套用 0130 索引迁移。
 - 2026-10-16：当前源码 ASGI 压力矩阵 `/api/v1/data-readiness/features` 的 1/2/4/8 并发均 200；p50 分别约 1,672/2,248/3,704/7,514 ms，8 并发 p95 约 7,855 ms，慢事务日志达到 5--8 秒。async pool 达到 16 个连接但无等待，说明继续提高 owner 默认池会先放大 4 核数据库竞争；证据为 `docs/work/probes/2026-10-16-feature-readiness-stress.py` / `.out.txt`。
 - 2026-10-16：更正上一条“重启本地 quant 服务后 curl 2.45--2.77 秒”的记录：该长驻容器使用 baked image，未执行当前源码 overlay，不能作为当前代码证据。当前源码 overlay 直接测得 history/overview 并行约 1,715 ms、runtime status snapshot 约 244 ms；后续报告均以 overlay 或明确标注的 baked image 为准。
+- 2026-10-16：只读执行 `scripts/release plan a809ced7`：owner 当前库版本 `20261015_ow0122`，目标 `20261016_ow0130`，需先应用 0123--0130；计划因其他会话的 host-tree 路径判为 FULL，未执行 `--apply`。edge adapter/dashboard 与 xhs 也有其他会话改动，保持独立发布单元。
 
 ## Waiting on the user
 
