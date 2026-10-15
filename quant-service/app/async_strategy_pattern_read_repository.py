@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from typing import Any, Callable
 
@@ -39,8 +40,14 @@ async def latest_strategy_pattern_mining(
     daily_grouped: dict[str, list[dict[str, Any]]] = {}
     for record in daily_records:
         daily_grouped.setdefault(str(record["symbol"]), []).append(dict(record))
-    board_contexts = await database_runner(post_close_exact_board_context_fn, run["as_of_date"], timeout_seconds=30)
-    lhb_contexts = await database_runner(post_close_tushare_lhb_context_fn, run["as_of_date"], timeout_seconds=30)
+    # These are independent persisted research projections. Submit both to
+    # the bounded database bridge together so one slow tunnel round trip does
+    # not serialize the other; each runner still owns its own transaction and
+    # timeout.
+    board_contexts, lhb_contexts = await asyncio.gather(
+        database_runner(post_close_exact_board_context_fn, run["as_of_date"], timeout_seconds=30),
+        database_runner(post_close_tushare_lhb_context_fn, run["as_of_date"], timeout_seconds=30),
+    )
     for item in pool:
         daily = post_close_limit_daily_features_fn(daily_grouped.get(str(item.get("ts_code") or ""), []))
         item.update({"daily_features": daily, "volume_multiple_5d": daily.get("volume_multiple_5d"), "volume_multiple_20d": daily.get("volume_multiple_20d"), "low_pct": daily.get("low_pct"), "board_context": board_contexts.get(str(item.get("ts_code") or "")), "lhb_context": lhb_contexts.get(str(item.get("ts_code") or ""))})

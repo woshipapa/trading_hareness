@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from contextlib import asynccontextmanager, contextmanager
@@ -153,6 +154,23 @@ class StrategyPatternReadModelTests(unittest.IsolatedAsyncioTestCase):
 
         payload = await read_async(database, *DEPENDENCIES, database_runner=runner)
         self.assert_payload(payload, database)
+
+    async def test_async_context_reads_overlap(self) -> None:
+        database = AsyncDatabase()
+        started: set[str] = set()
+        release = asyncio.Event()
+
+        async def runner(fn, day, **_kwargs):
+            name = "board" if fn is DEPENDENCIES[4] else "lhb"
+            started.add(name)
+            if len(started) == 2:
+                release.set()
+            await release.wait()
+            return fn(day)
+
+        payload = await read_async(database, *DEPENDENCIES, database_runner=runner)
+        self.assert_payload(payload, database)
+        self.assertEqual(started, {"board", "lhb"})
 
 
 if __name__ == "__main__":

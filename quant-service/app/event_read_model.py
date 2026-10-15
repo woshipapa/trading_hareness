@@ -53,12 +53,17 @@ def market_events(database: Any, symbol: str | None, event_type: str | None,
     with database.transaction() as connection:
         rows = connection.execute(
             f"""SELECT event_id,symbol,event_type,occurred_at,available_at,source,title,body,url,
-                              content_sha256,event_identity_key,created_at
+                              content_sha256,event_identity_key,created_at,
+                              count(*) OVER()::int AS __total_count
                          FROM quant.market_events WHERE {where}
                         ORDER BY occurred_at DESC,created_at DESC LIMIT %s OFFSET %s""",
             (*params, limit, offset),
         ).fetchall()
-        total = connection.execute(f"SELECT count(*)::int total FROM quant.market_events WHERE {where}", tuple(params)).fetchone()["total"]
+        row_dicts = [dict(row) for row in rows]
+        total = int(row_dicts[0]["__total_count"]) if row_dicts and row_dicts[0].get("__total_count") is not None else None
+        rows = [{key: value for key, value in row.items() if key != "__total_count"} for row in row_dicts]
+        if total is None:
+            total = connection.execute(f"SELECT count(*)::int total FROM quant.market_events WHERE {where}", tuple(params)).fetchone()["total"]
     return {"items": rows, "symbol": symbol, "event_type": event_type,
             "trade_date": str(trade_date) if trade_date else None,
             "limit": limit, "offset": offset, "total": total,

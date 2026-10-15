@@ -90,6 +90,34 @@ class MarketEventReadTests(unittest.TestCase):
         self.assertEqual(payload["total"], 1)
         self.assertEqual(len(database.calls), 2)
 
+    def test_async_window_count_avoids_second_round_trip_on_a_nonempty_page(self):
+        class Database(_Database):
+            async def execute(self, sql, params=()):
+                self.calls.append((sql, params))
+                return _AsyncResult(rows=[{
+                    "event_id": "e1", "event_type": "limit_up_pool", "body": "{}", "__total_count": 42,
+                }])
+
+        database = Database(asynchronous=True)
+        payload = asyncio.run(async_market_events(database, None, None, None, 10, 0))
+        self.assertEqual(payload["total"], 42)
+        self.assertEqual(payload["items"], [{"event_id": "e1", "event_type": "limit_up_pool", "body": "{}"}])
+        self.assertEqual(len(database.calls), 1)
+
+    def test_sync_window_count_avoids_second_round_trip_on_a_nonempty_page(self):
+        class Database(_SyncDatabase):
+            def execute_sync(self, sql, params=()):
+                self.calls.append((sql, params))
+                return _Result(rows=[{
+                    "event_id": "e1", "event_type": "limit_up_pool", "body": "{}", "__total_count": 42,
+                }])
+
+        database = Database()
+        payload = market_events(database, None, None, None, 10, 0)
+        self.assertEqual(payload["total"], 42)
+        self.assertEqual(payload["items"], [{"event_id": "e1", "event_type": "limit_up_pool", "body": "{}"}])
+        self.assertEqual(len(database.calls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

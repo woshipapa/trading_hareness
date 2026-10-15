@@ -40,6 +40,7 @@
 - 2026-10-16 02:00 Asia/Shanghai: provider health 写入从 capture 返回前移出主等待点，改为每个 scan 一个有界 task 集合；策略链路立即消费 immutable capture，runtime 在响应前统一 join，失败不会留下 detached task，也不会改变 scan eligibility。
 - 2026-10-16 02:41 Asia/Shanghai: primary signal receipt 提交后，ten-day shadow rotation 改为与 alert delivery/teacher research 并行；shadow 仍只写 research evidence，独立失败继续降级，响应前统一 join。新增事件型回归验证串行实现会等待死锁、并行实现可完成。
 - 2026-10-16 03:13 Asia/Shanghai: session gate 与 watchlist 读取、规则保留清理与 outbox retry 改为有界并行并在 capture 前统一 join。扫描事务先计算整个观察池，再批量读取事件状态；200 标的合成探针从 600 次状态 SQL 降为 3 次。报价证据、规则快照和拒绝原因也通过 cursor batch 写入，单写事件顺序保持不变。
+- 2026-10-16 03:42 Asia/Shanghai: 扫描准备复用同一事务刚写入的纸面持仓与组合快照，并把 cash/equity 的准备读合并为一个标量查询；市场事件非空分页用窗口计数消除第二次 count 往返，空页保留精确回退。策略形态页的 board 与龙虎榜上下文改为通过既有有界 runner 并行读取；新增 `20261016_ow0123` 读模型索引迁移。
 
 ## Waiting on the user
 
@@ -60,6 +61,7 @@
 - `docs/work/probes/2026-10-16-realtime-overlap-benchmark.out.txt`: 200 次本地 overlap 编排测量输出。
 - `docs/work/probes/2026-10-16-intraday-event-state-batch.out.txt`: 200 标的事件状态 repository statement-count 探针。
 - `docs/decisions/0032-batched-realtime-scan-evidence.md`: 批量读取/写入与回退边界。
+- `docs/decisions/0033-realtime-read-round-trips.md`: 扫描准备与研究读模型的往返收敛、索引和发布闸门。
 
 ## Findings
 

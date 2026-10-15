@@ -50,14 +50,22 @@ async def market_events(async_database: Any, symbol: str | None, event_type: str
     async with async_database.transaction() as connection:
         result = await connection.execute(
             f"""SELECT event_id,symbol,event_type,occurred_at,available_at,source,title,body,url,
-                              content_sha256,event_identity_key,created_at
+                              content_sha256,event_identity_key,created_at,
+                              count(*) OVER()::int AS __total_count
                          FROM quant.market_events WHERE {where}
                         ORDER BY occurred_at DESC,created_at DESC LIMIT %s OFFSET %s""",
             (*params, limit, offset),
         )
         rows = await result.fetchall()
-        total_result = await connection.execute(f"SELECT count(*)::int total FROM quant.market_events WHERE {where}", params)
-        total = (await total_result.fetchone())["total"]
+        row_dicts = [dict(row) for row in rows]
+        total = int(row_dicts[0]["__total_count"]) if row_dicts and row_dicts[0].get("__total_count") is not None else None
+        rows = [{key: value for key, value in row.items() if key != "__total_count"} for row in row_dicts]
+        if total is None:
+            # An offset beyond the end has no window row. Keep the exact total
+            # contract for that uncommon page without adding a second query to
+            # the normal first-page path.
+            total_result = await connection.execute(f"SELECT count(*)::int total FROM quant.market_events WHERE {where}", params)
+            total = int((await total_result.fetchone())["total"])
     return {"items": rows, "symbol": symbol, "event_type": event_type,
             "trade_date": str(trade_date) if trade_date else None,
             "limit": limit, "offset": offset, "total": total,

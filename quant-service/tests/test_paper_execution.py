@@ -164,6 +164,35 @@ class PaperExecutionTests(unittest.TestCase):
         self.assertIn("NOT (m.sector_key = ANY(%s))", membership_sql)
         self.assertEqual(membership_sql.count("%s"), len(params))
 
+    def test_portfolio_snapshot_can_return_its_rows_for_same_transaction_reuse(self):
+        from app.paper_portfolio import persist_portfolio_snapshot
+
+        class Connection:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, params=None):
+                self.calls.append((sql, params))
+
+                class Result:
+                    def fetchall(self):
+                        return [{"symbol": "000001.SZ", "quantity": 100, "sellable_quantity": 100,
+                                 "average_cost": 10.0, "buy_date": None, "realized_pnl": 0.0,
+                                 "sector_keys": []}] if "FROM quant.paper_positions" in sql else []
+
+                    def fetchone(self):
+                        return {"peak_equity": None, "previous_close_equity": None} if "max(equity)" in sql else None
+
+                return Result()
+
+        snapshot = persist_portfolio_snapshot(
+            Connection(), as_of=datetime(2026, 8, 14, 0, 30, tzinfo=timezone.utc), quotes={}, cash=1000,
+            include_positions=True,
+        )
+        self.assertEqual(snapshot["_positions"][0]["symbol"], "000001.SZ")
+        self.assertEqual(snapshot["positions"], [{"symbol": "000001.SZ", "quantity": 100, "price": 10.0,
+                                                  "market_value": 1000.0, "sector_keys": []}])
+
 
 class PaperPortfolioRiskStateTests(unittest.TestCase):
     def test_a_holding_without_a_quote_is_marked_at_cost_not_zero(self):

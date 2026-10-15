@@ -110,6 +110,41 @@ class IntradayScanRepositoryTests(unittest.TestCase):
         self.assertIn("NOT (member.sector_key = ANY(%s))", membership_sql)
         self.assertEqual(membership_sql.count("%s"), len(membership_params))
 
+    def test_scan_local_state_reuses_portfolio_rows_and_snapshot_when_supplied(self) -> None:
+        class Result:
+            def __init__(self, rows=None):
+                self.rows = rows or []
+
+            def fetchall(self):
+                return self.rows
+
+        class Connection:
+            def __init__(self):
+                self.calls = []
+                self.results = iter([
+                    Result([{"symbol": "000001.SZ", "observed_at": datetime(2026, 8, 17, 1, 0,
+                                                                                  tzinfo=timezone.utc), "raw": {}}]),
+                    Result([{"symbol": "000001.SZ", "sector_key": "pcb"}]),
+                ])
+
+            def execute(self, sql, params=None):
+                self.calls.append((str(sql), params))
+                return next(self.results)
+
+        connection = Connection()
+        state = load_intraday_scan_local_state(
+            connection, ["000001.SZ"], observed_at=datetime(2026, 8, 17, 1, 5, tzinfo=timezone.utc),
+            session_start=datetime(2026, 8, 17, 1, 0, tzinfo=timezone.utc), local_trade_date=date(2026, 8, 17),
+            paper_positions={"000001.SZ": {"symbol": "000001.SZ", "quantity": 100,
+                                           "sellable_quantity": 100, "average_cost": 10.0}},
+            snapshot_payload={"equity": 1000.0, "drawdown": 0.0},
+        )
+        self.assertEqual(len(connection.calls), 2)
+        self.assertEqual(state.paper_positions["000001.SZ"]["quantity"], 100)
+        self.assertEqual(set(state.paper_positions["000001.SZ"]),
+                         {"symbol", "quantity", "sellable_quantity", "average_cost"})
+        self.assertEqual(state.snapshot_payload["equity"], 1000.0)
+
     def test_signal_state_batches_per_key_reads_and_preserves_alert_payload(self) -> None:
         class Result:
             def __init__(self, *, rows=None, row=None):

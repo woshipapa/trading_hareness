@@ -125,6 +125,8 @@ def load_intraday_scan_local_state(
     observed_at: datetime,
     session_start: datetime,
     local_trade_date: date,
+    paper_positions: dict[str, dict[str, Any]] | None = None,
+    snapshot_payload: dict[str, Any] | None = None,
 ) -> IntradayScanLocalState:
     """Load all bounded scan-local SQL inputs without provider access.
 
@@ -143,13 +145,14 @@ def load_intraday_scan_local_state(
     order_book_by_symbol: dict[str, list[dict[str, Any]]] = {}
     for item in order_book_rows:
         order_book_by_symbol.setdefault(str(item["symbol"]), []).append(dict(item))
-    paper_positions = {
-        str(row["symbol"]): dict(row)
-        for row in connection.execute(
-            "SELECT symbol,quantity,sellable_quantity,average_cost FROM quant.paper_positions WHERE symbol=ANY(%s)",
-            (selected_symbols,),
-        ).fetchall()
-    }
+    if paper_positions is None:
+        paper_positions = {
+            str(row["symbol"]): dict(row)
+            for row in connection.execute(
+                "SELECT symbol,quantity,sellable_quantity,average_cost FROM quant.paper_positions WHERE symbol=ANY(%s)",
+                (selected_symbols,),
+            ).fetchall()
+        }
     membership_predicate = point_in_time_membership_predicate("member", "(%s::date)")
     sector_predicate, sector_parameters = sector_group_predicate("member")
     sector_rows = connection.execute(
@@ -162,12 +165,15 @@ def load_intraday_scan_local_state(
     candidate_sector_keys: dict[str, list[str]] = {}
     for row in sector_rows:
         candidate_sector_keys.setdefault(str(row["symbol"]), []).append(str(row["sector_key"]))
-    paper_snapshot = connection.execute(
-        "SELECT drawdown,payload FROM quant.paper_portfolio_snapshots ORDER BY as_of DESC LIMIT 1",
-    ).fetchone()
-    snapshot_payload = dict(paper_snapshot["payload"] or {}) if paper_snapshot else {}
-    if paper_snapshot:
-        snapshot_payload["drawdown"] = paper_snapshot["drawdown"]
+    if snapshot_payload is None:
+        paper_snapshot = connection.execute(
+            "SELECT drawdown,payload FROM quant.paper_portfolio_snapshots ORDER BY as_of DESC LIMIT 1",
+        ).fetchone()
+        snapshot_payload = dict(paper_snapshot["payload"] or {}) if paper_snapshot else {}
+        if paper_snapshot:
+            snapshot_payload["drawdown"] = paper_snapshot["drawdown"]
+    else:
+        snapshot_payload = dict(snapshot_payload)
     return IntradayScanLocalState(
         order_book_by_symbol=order_book_by_symbol,
         paper_positions=paper_positions,

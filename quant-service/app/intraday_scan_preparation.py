@@ -109,20 +109,46 @@ def prepare_intraday_scan_inputs(
            VALUES(%s,%s,'completed',%s,%s,%s)""",
         (scan_id, observed_at, Json(selected_symbols), Json(dependencies.json_safe(source_status)), Json({"watched": len(watches)})),
     )
-    account = connection.execute("SELECT cash FROM quant.paper_accounts WHERE account_key='default'").fetchone()
-    prior_snapshot = connection.execute(
-        "SELECT equity,payload FROM quant.paper_portfolio_snapshots ORDER BY as_of DESC LIMIT 1"
+    portfolio_state = connection.execute(
+        """SELECT
+               (SELECT cash FROM quant.paper_accounts WHERE account_key='default') AS cash,
+               (SELECT equity FROM quant.paper_portfolio_snapshots ORDER BY as_of DESC LIMIT 1) AS previous_equity"""
     ).fetchone()
-    dependencies.persist_portfolio_snapshot(
+    portfolio_snapshot = dependencies.persist_portfolio_snapshot(
         connection, as_of=observed_at, quotes=quotes,
-        cash=float(account["cash"]) if account is not None else 0,
-        previous_equity=float(prior_snapshot["equity"]) if prior_snapshot and prior_snapshot["equity"] is not None else None,
+        cash=float(portfolio_state["cash"]) if portfolio_state and portfolio_state["cash"] is not None else 0,
+        previous_equity=(float(portfolio_state["previous_equity"])
+                         if portfolio_state and portfolio_state["previous_equity"] is not None else None),
+        include_positions=True,
     )
     session_start = observed_at.astimezone(timezone(timedelta(hours=8))).replace(
         hour=0, minute=0, second=0, microsecond=0,
     ).astimezone(timezone.utc)
+    cached_positions = None
+    cached_snapshot_payload = None
+    if isinstance(portfolio_snapshot, dict):
+        raw_positions = portfolio_snapshot.get("_positions")
+        if isinstance(raw_positions, list):
+            cached_positions = {
+                str(row["symbol"]): {
+                    "symbol": str(row["symbol"]),
+                    "quantity": row.get("quantity"),
+                    "sellable_quantity": row.get("sellable_quantity"),
+                    "average_cost": row.get("average_cost"),
+                }
+                for row in raw_positions
+                if isinstance(row, dict) and row.get("symbol")
+            }
+        cached_snapshot_payload = {
+            key: value for key, value in portfolio_snapshot.items() if key != "_positions"
+        }
+        # The stored payload carries this provenance marker; add it to the
+        # same-transaction hand-off so signal evidence remains byte-for-byte
+        # equivalent to the old read-after-write path.
+        cached_snapshot_payload.setdefault("cash_source", "paper_config_or_prior_snapshot")
     local_state = dependencies.load_local_state(
         connection, selected_symbols, observed_at=observed_at, session_start=session_start, local_trade_date=local_trade_date,
+        paper_positions=cached_positions, snapshot_payload=cached_snapshot_payload,
     )
     dependencies.clear_stale_episodes(connection, selected_symbols, observed_at)
     market_contexts = dependencies.market_context_batch(connection, [(observed_at, symbol) for symbol in selected_symbols])

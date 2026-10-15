@@ -134,7 +134,8 @@ def _sector_exposure(rows: list[dict[str, Any]], equity: float) -> dict[str, flo
 
 def persist_portfolio_snapshot(connection: Any, *, as_of: Any, quotes: dict[str, Any],
                               cash: float, previous_equity: float | None = None,
-                              previous_close_equity: float | None = None) -> dict[str, Any]:
+                              previous_close_equity: float | None = None,
+                              include_positions: bool = False) -> dict[str, Any]:
     # Coalesce high-frequency scans into one durable minute bucket.  This
     # keeps the paper ledger bounded while retaining the minute-level audit
     # needed by the dashboard and barrier labels.
@@ -180,6 +181,12 @@ def persist_portfolio_snapshot(connection: Any, *, as_of: Any, quotes: dict[str,
         (as_of, snapshot["cash"], snapshot["equity"], snapshot["gross_exposure"], snapshot["net_exposure"],
          snapshot["drawdown"], Json({**snapshot, "cash_source": "paper_config_or_prior_snapshot"})),
     )
+    # The live scan immediately needs the exact rows used for this mark.  Keep
+    # that hand-off out of the persisted payload (which is an external evidence
+    # contract), but allow the caller to reuse the already-fetched rows instead
+    # of issuing a second paper_positions query in the same transaction.
+    if include_positions:
+        return {**snapshot, "_positions": positions}
     return snapshot
 
 
