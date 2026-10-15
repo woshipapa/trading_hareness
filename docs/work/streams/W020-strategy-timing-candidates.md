@@ -7,13 +7,14 @@
 - updated: 2026-10-15
 - plan: none
 - branch: main
-- head: bfd180e3
-- release: owner-code-20261015-live-freshness-3；edge-2026.10.15-timing；console-20261015T161623Z-13bde20b2b62
+- head: 9828a9e1
+- release: owner-code-20261015-live-freshness-3；edge-2026.10.15-timing；console-20261015T171516Z-9828a9e19051；hotfix-20261015T173007Z-861ecbfaa96e
 
 ## Requirements
 
 - 2026-10-15 用户要求：“当前就是希望每套策略可以放心大胆的推出他选的票和买点，以及选他的原因。这里不需要因为过多的闸门担心而严格，这里需要的就是每个票选出来之后当天结束看看每个策略就有他的样本了再去让ai去总结修正就好了。”
 - 2026-10-15 用户要求：“每个策略比如竞价的这几个龙头策略，可以在开盘前竞价的时候结合条件给出他要买的票。有的盘中扫描的可能是盘中买或者尾盘买。”
+- 2026-10-16 用户要求：“在开盘前，把前端这里设计好哦，也方便后续修改拓展，这里就是前后端利用好我们的高性能owner的配置，把owner的200mbps网络带宽尽量利用高。”
 
 ## Plan
 
@@ -32,7 +33,8 @@
 - [x] 6 focused release-path suite（14 tests）、边界检查、API contract 和 diff check 通过；全量 release-path suite 的既有 `test_settings` 因其他会话新增 local-spool 环境变量未声明而失败
 - [x] 7 owner code-only、edge adapter 和量化控制台均已发布；owner schema gate、健康检查、运行时摘要/PID 1 和 timing board 路由已核对
 - [x] 8 将当日 `auction_open_desk_daily` 和 `intraday_signal_events` 投影到对应研究线；4 板竞价样本与老师 entry 信号经 owner 路由实读，排序和来源理由已核对
-- [ ] 9 下一交易日核对竞价时段与盘中/尾盘阶段实际候选样本
+- [x] 9 将 Session Radar 改为可扩展的四阶段工作台；实时雷达、策略卡片和健康并行读取，取消旧请求，收盘复盘明细不再在开盘前轮询
+- [ ] 10 下一交易日核对竞价时段与盘中/尾盘阶段实际候选样本
 
 ## Log
 
@@ -47,6 +49,8 @@
 - 2026-10-15 Codex：`/api/v1/strategies/cards?trade_date=2026-10-15` 实读到百洋股份 `002696.SZ`、慈文传媒 `002343.SZ` 的老师 entry 候选，以及竞价龙头线的 4 板样本；每条候选含参考价、来源理由、`research_only=true`、`live_effect=none`。证据见 `docs/work/probes/2026-10-15-live-cards-release.out.txt`。
 - 2026-10-16 Codex：策略卡片增加 `freshness`（读取时间、竞价源、盘中信号源、台账基线）；当前交易日只显示当天实时源，实时源缺失时返回空卡片和 `missing`，历史日期明确为 `historical_available`，旧台账只作 `replay_baseline`。
 - 2026-10-16 Codex：Session Radar 的雷达、策略卡片和指标健康统一每分钟并行刷新；失败清空对应面板，读取序号阻止旧请求晚返回覆盖新结果。owner `bfd180e3` 与 edge console `13bde20b2b62` 已通过运行时/健康核验。
+- 2026-10-16 Codex：提交 `9828a9e1` 增加数据驱动的竞价/盘中/尾盘/盘后阶段卡片、候选理由和参考价；实时读取使用 `AbortController` 取消过期请求，涨停复盘明细只在历史日或收盘后读取。前端 typecheck、26 项相关测试、build 和 diff check 通过。
+- 2026-10-16 Codex：控制台发布 `console-20261015T171516Z-9828a9e19051`；为使独立控制台目录真正被同源适配器读取，按既定顺序重启既有 `861ecbfa` overlay，发布 `hotfix-20261015T173007Z-861ecbfaa96e-25717`。`scripts/release status --owner-source-sha bfd180e3 --edge-source-sha 861ecbfa` 全部检查通过；实读 `/` 的新 SessionRadar 资源和当日卡片接口确认当前竞价阶段无旧候选。
 
 ## Waiting on the user
 
