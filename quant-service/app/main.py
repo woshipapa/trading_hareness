@@ -656,6 +656,7 @@ from .longhu_market_service import (
     owner_longhu_source_factory,
     sync as sync_longhu_full_market_close,
 )
+from .async_keyed_memo import AsyncKeyedMemo
 from .longhu_shared_full_market import shared_longhu_source_factory
 from .longhu_supplemental_service import sync as sync_longhu_supplemental_isolated
 from .longhu_replay_read_repository import readiness as longhu_replay_readiness
@@ -1445,6 +1446,25 @@ async def _longhu_full_market_close(trade_date: date) -> dict[str, Any]:
     )
 
 
+_longhu_close_memo = AsyncKeyedMemo(
+    lambda key: _longhu_full_market_close(key[0]),
+    # A completed close is immutable for the exchange date.  Keep the result
+    # only long enough for the post-close universe and daily stages to share
+    # it; failures and blocked repairs remain retryable.
+    ttl_seconds=300,
+    cacheable=lambda result: isinstance(result, dict) and result.get("status") in {"completed", "unchanged"},
+    max_entries=4,
+)
+
+
+async def _longhu_full_market_close_shared(trade_date: date) -> dict[str, Any]:
+    """Join duplicate same-date close requests without widening provider concurrency."""
+    # Tests and operator overrides can replace the adapter at runtime.  Include
+    # its identity in the key so a replacement can never receive an old result.
+    key = (trade_date, id(sync_longhu_full_market_close), id(longhu_full_market_source_factory))
+    return await _longhu_close_memo.get(key)
+
+
 async def sync_market_universe(request: MarketUniverseSyncRequest) -> dict[str, Any]:
     """The Longhu close adds members; the Fuyao A-share listing is the one that can also retire them."""
     async def listing() -> dict[str, Any]:
@@ -1456,7 +1476,7 @@ async def sync_market_universe(request: MarketUniverseSyncRequest) -> dict[str, 
         )
 
     if request.provider == "auto" and longhu_full_market_enabled():
-        result = await _longhu_full_market_close(cn_today())
+        result = await _longhu_full_market_close_shared(cn_today())
         if result.get("status") in {"completed", "unchanged"}:
             return {**result, "universe_key": request.universe_key,
                     "members": int(result.get("daily_rows") or result.get("imported") or 0)}
@@ -1478,7 +1498,7 @@ async def sync_full_market_daily(request: FullMarketDailySyncRequest) -> dict[st
     if request.provider != "auto" or not longhu_full_market_enabled():
         return {"status": "disabled", "provider": request.provider,
                 "reason": "only the Longhu full-market close remains; the Tushare chain was retired (decision 0005)"}
-    return await _longhu_full_market_close(request.trade_date or cn_today())
+    return await _longhu_full_market_close_shared(request.trade_date or cn_today())
 
 
 def full_market_daily_row_count(trade_date: date) -> int:
@@ -1796,7 +1816,10 @@ async def cancel_shared_snapshots() -> None:
     try:
         await _intraday_all_a_snapshots.cancel_inflight()
     finally:
-        await _tdx_all_a_snapshots.cancel_inflight()
+        try:
+            await _tdx_all_a_snapshots.cancel_inflight()
+        finally:
+            await _longhu_close_memo.cancel_inflight()
 
 
 def consume_background_task_exception(task: asyncio.Task[Any]) -> None:

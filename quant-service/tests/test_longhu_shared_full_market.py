@@ -221,6 +221,35 @@ class LicensedClosePathWiringTests(unittest.TestCase):
         # retired Tushare chain is no longer tried in between.
         self.assertEqual(result, {"status": "failed", "reason": "point-in-time all-A coverage"})
 
+    def test_universe_and_daily_routes_share_one_same_date_close(self):
+        import asyncio
+
+        import app.main as main
+        from app.request_models import FullMarketDailySyncRequest, MarketUniverseSyncRequest
+
+        calls = []
+
+        async def fake_sync(trade_date, **_kwargs):
+            calls.append(trade_date)
+            return {"status": "completed", "trade_date": str(trade_date), "imported": 3}
+
+        with patch("app.main.cn_today", return_value=TRADE_DATE), \
+             patch("app.main.longhu_full_market_enabled", return_value=True), \
+             patch("app.main.sync_longhu_full_market_close", new=fake_sync), \
+             patch("app.main.longhu_full_market_source_factory", return_value=object()):
+            async def run():
+                universe = await main.sync_market_universe(MarketUniverseSyncRequest(provider="auto"))
+                daily = await main.sync_full_market_daily(
+                    FullMarketDailySyncRequest(provider="auto", trade_date=TRADE_DATE),
+                )
+                return universe, daily
+
+            universe, daily = asyncio.run(run())
+
+        self.assertEqual(calls, [TRADE_DATE])
+        self.assertEqual(universe["members"], 3)
+        self.assertEqual(daily["imported"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

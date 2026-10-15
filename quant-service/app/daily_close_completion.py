@@ -131,16 +131,21 @@ def completion_status(outcomes: Mapping[str, Iterable[Any]], *, limits_pending: 
 
 
 def _read_state(db: Any, day: date) -> dict[str, Any]:
-  with db.transaction() as connection:
-    roster = [str(row["symbol"]) for row in connection.execute(
-        "SELECT symbol FROM quant.universe_members WHERE universe_key='all_a' AND enabled ORDER BY symbol").fetchall()]
-    rows = connection.execute(
-        """SELECT b.symbol,b.trading_date,b.open,b.high,b.low,b.close,b.pre_close,
-                         b.limit_up,b.limit_down,b.adj_factor,b.is_suspended,b.quality_status
-             FROM quant.canonical_bars_daily b
-             JOIN quant.universe_members u ON u.universe_key='all_a' AND u.enabled AND u.symbol=b.symbol
-            WHERE b.trading_date=%s""", (day,)).fetchall()
-    return {"roster": roster, "bars": [dict(row) for row in rows]}
+    with db.transaction() as connection:
+        # The roster and the landed bars are one point-in-time read model. A
+        # left join preserves missing symbols while reducing the two tunnel
+        # round trips used by the old roster-then-bars sequence to one.
+        rows = connection.execute(
+            """SELECT u.symbol,b.trading_date,b.open,b.high,b.low,b.close,b.pre_close,
+                             b.limit_up,b.limit_down,b.adj_factor,b.is_suspended,b.quality_status
+                 FROM quant.universe_members u
+                 LEFT JOIN quant.canonical_bars_daily b
+                   ON b.symbol=u.symbol AND b.trading_date=%s
+                WHERE u.universe_key='all_a' AND u.enabled
+                ORDER BY u.symbol""", (day,)).fetchall()
+        roster = [str(row["symbol"]) for row in rows]
+        bars = [dict(row) for row in rows if row["trading_date"] is not None]
+        return {"roster": roster, "bars": bars}
 
 
 def _day_bars(connection: Any, day: date, symbols: Iterable[str] | None = None) -> list[dict[str, Any]]:
@@ -290,14 +295,20 @@ async def complete(trade_date: date, *, db: Any, run_public_blocking: Callable[.
         # The re-read and normalizer upsert are not atomic. The close is not writing at this time,
         # and both use the same vendor series, which matched all seven fields on 150 repaired stocks.
         written = persist_rows(connection, "daily", key + ":daily", daily_rows, PROVIDER_KEY, observed_at)
-        current = {row["symbol"]: row for row in _day_bars(connection, trade_date)}
+        if daily_rows:
+            # Only a successful daily upsert can change this projection. When
+            # the close is already complete, retain the first read and avoid
+            # another round trip over the owner tunnel.
+            current = {row["symbol"]: row for row in _day_bars(connection, trade_date)}
         stored_filled = filled & set(current)
         bar_rejected = sorted(filled - stored_filled)
-        ratios = _day_ratios(connection, trade_date)
+        eligible_limit_symbols = set(bars_without_limits) | stored_filled
+        # A complete close has no limit rows to repair. Avoid the all-universe
+        # five-session LATERAL query in that common idempotent case.
+        ratios = _day_ratios(connection, trade_date) if eligible_limit_symbols else {}
         for row in current.values():
             row["ratios"] = ratios.get(row["symbol"], [])
         agreement = limit_rule_agreement(current.values())
-        eligible_limit_symbols = set(bars_without_limits) | stored_filled
         missing_limit_rows = [row for symbol, row in current.items()
                               if symbol in eligible_limit_symbols and
                               (row.get("limit_up") is None or row.get("limit_down") is None)]
@@ -315,10 +326,9 @@ async def complete(trade_date: date, *, db: Any, run_public_blocking: Callable[.
             carried = []
         if carried:
             written += persist_rows(connection, "stk_limit", key + ":stk_limit", carried, PROVIDER_KEY, observed_at)
-        current = {row["symbol"]: row for row in _day_bars(connection, trade_date)}
         factor_candidates = [
             {**row, "ex_rights_on_day": health["ex_rights_on_day"].get(row["symbol"], False)}
-            for row in _factor_state(connection, trade_date, stored_filled)
+            for row in (_factor_state(connection, trade_date, stored_filled) if stored_filled else [])
             if row["symbol"] in stored_filled and
             (current[row["symbol"]].get("adj_factor") is None or
              Decimal(str(current[row["symbol"]]["adj_factor"])) <= 0)

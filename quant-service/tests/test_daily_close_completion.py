@@ -70,6 +70,36 @@ class DailyCloseRulesTests(unittest.TestCase):
         self.assertEqual(result["pending"], {"000002.SZ": "factor_changes_across_session",
                                              "000003.SZ": "ex_rights_on_session"})
 
+    def test_read_state_reads_roster_and_bars_with_one_join(self):
+        class Result:
+            def fetchall(self):
+                return [
+                    {"symbol": "000001.SZ", "trading_date": DAY, "close": 10},
+                    {"symbol": "000002.SZ", "trading_date": None, "close": None},
+                ]
+
+        class Connection:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, _statement, _params):
+                self.calls += 1
+                return Result()
+
+        class Database:
+            def __init__(self):
+                self.connection = Connection()
+
+            @contextmanager
+            def transaction(self):
+                yield self.connection
+
+        database = Database()
+        state = completion._read_state(database, DAY)
+        self.assertEqual(database.connection.calls, 1)
+        self.assertEqual(state["roster"], ["000001.SZ", "000002.SZ"])
+        self.assertEqual([row["symbol"] for row in state["bars"]], ["000001.SZ"])
+
 class DailyCloseCompletionTests(unittest.TestCase):
     def run_completion(self, *, state, db=None, quotes=(), outcomes=None, errors=None, markers=None,
                        ratios=None, factors=(), source_error=None, vendor_error=None,

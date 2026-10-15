@@ -82,8 +82,16 @@ async def strategy_review_scheduler_step(
             attempts[key] = local
         try:
             if session == "close":
-                await dependencies.sync_index_context(exchange_date)
-            await dependencies.build_market_snapshot(exchange_date, session)
+                # The index context and the close cross-section are separate
+                # evidence products. Start them together so the slower public
+                # index read does not hold the snapshot provider idle; either
+                # failure still aborts this checkpoint as before.
+                await asyncio.gather(
+                    dependencies.sync_index_context(exchange_date),
+                    dependencies.build_market_snapshot(exchange_date, session),
+                )
+            else:
+                await dependencies.build_market_snapshot(exchange_date, session)
             await dependencies.build_board_report()
             if session == "close":
                 # Settlement reads persisted data only; it cannot add a live

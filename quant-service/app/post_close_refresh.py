@@ -130,6 +130,7 @@ async def run_refresh(
     json_safe: Callable[[Any], Any],
     timeout_overrides: dict[str, float] | None = None,
     stage_dependencies: dict[str, tuple[str, ...]] | None = None,
+    parallel_groups: tuple[tuple[str, ...], ...] | None = None,
     record_stage: Callable[[str, date, Callable[[], Any]], Awaitable[Any]] | None = None,
 ) -> dict[str, Any]:
     """Run durable post-close stages in their existing dependency order.
@@ -147,6 +148,12 @@ async def run_refresh(
     stages: dict[str, dict[str, Any]] = {}
     limits = timeout_overrides or {}
     dependencies = stage_dependencies or {}
+    groups = tuple(tuple(group) for group in (parallel_groups or ()) if group)
+    group_by_stage = {
+        stage_name: group
+        for group in groups
+        for stage_name in group
+    }
 
     async def stage(name: str) -> dict[str, Any]:
         phase_started = asyncio.get_running_loop().time()
@@ -182,8 +189,29 @@ async def run_refresh(
         return payload
 
     try:
-        for name in stage_order:
-            await stage(name)
+        remaining = list(stage_order)
+        while remaining:
+            name = remaining[0]
+            group = group_by_stage.get(name)
+            if group is None:
+                await stage(name)
+                remaining.pop(0)
+                continue
+
+            # A group is only launched when every member is ready. This keeps
+            # the declared stage order as the deterministic tie-breaker while
+            # allowing explicitly audited independent stages to overlap.
+            selected = [item for item in group if item in remaining]
+            ready = all(
+                all(dependency in stages for dependency in dependencies.get(item, ()))
+                for item in selected
+            )
+            if not ready:
+                await stage(name)
+                remaining.pop(0)
+                continue
+            await asyncio.gather(*(stage(item) for item in selected))
+            remaining = [item for item in remaining if item not in selected]
         sources = {
             "tushare_super": "requested through daily, THS flow, limit ladder, specialty and index phases",
             "akshare_eastmoney": "requested through supplements and board review",

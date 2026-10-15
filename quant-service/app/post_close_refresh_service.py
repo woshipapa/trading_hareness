@@ -81,6 +81,16 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     "market_timing": 120.0,
 }
 
+# Only stages with separate evidence ownership are listed here.  The runtime
+# still schedules every other stage in the existing order; these small groups
+# use the scheduler's own bounded database/provider budgets and therefore do
+# not widen any upstream quota.
+POST_CLOSE_PARALLEL_GROUPS = (
+    ("stale_fetch_runs", "trade_calendar", "analyst_text"),
+    ("analyst_outcomes", "analyst_intraday_outcomes"),
+    ("market_temperature", "market_temperature_intraday", "broad_etf_flow", "market_timing"),
+)
+
 POST_CLOSE_STAGE_DEPENDENCIES = {
     # Daily controls are correctness prerequisites: downstream strategy stages
     # must not reason over missing adjustment, limit or suspension fields.
@@ -104,6 +114,9 @@ POST_CLOSE_STAGE_DEPENDENCIES = {
     # record a session with half its lines missing.
     "candidate_ledger": ("daily_control_reconciliation", "post_close_strategy", "limit_lift_pattern_mining"),
     "limit_up_risk": ("limit_performance_lists",),
+    # Scorecards read the settled claim outcomes; the intraday analyst ledger
+    # is a separate research table and can settle alongside them.
+    "analyst_scorecards": ("analyst_outcomes",),
 }
 
 
@@ -396,12 +409,13 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
         acquire_lease=dependencies.acquire_lease, renew_lease=dependencies.renew_lease,
         release_lease=dependencies.release_lease, actions=actions, stage_order=POST_CLOSE_STAGE_ORDER,
         timeout_overrides=POST_CLOSE_TIMEOUT_OVERRIDES, stage_dependencies=POST_CLOSE_STAGE_DEPENDENCIES,
+        parallel_groups=POST_CLOSE_PARALLEL_GROUPS,
         record_stage=record_refresh_stage, trade_date=trade_date,
         safe_error_detail=dependencies.safe_error_detail, json_safe=dependencies.json_safe,
     )
 
 
 __all__ = [
-    "POST_CLOSE_STAGE_DEPENDENCIES", "POST_CLOSE_STAGE_ORDER", "POST_CLOSE_TIMEOUT_OVERRIDES",
+    "POST_CLOSE_PARALLEL_GROUPS", "POST_CLOSE_STAGE_DEPENDENCIES", "POST_CLOSE_STAGE_ORDER", "POST_CLOSE_TIMEOUT_OVERRIDES",
     "PostCloseRefreshDependencies", "run_post_close_refresh",
 ]

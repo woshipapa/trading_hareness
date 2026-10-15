@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import date
 
 from app.post_close_refresh import record_stage_with_receipt, run_refresh
 from app.post_close_refresh_service import (
+    POST_CLOSE_PARALLEL_GROUPS,
     POST_CLOSE_STAGE_DEPENDENCIES,
     POST_CLOSE_STAGE_ORDER,
     POST_CLOSE_TIMEOUT_OVERRIDES,
@@ -18,6 +20,43 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
     async def test_outcome_settlement_has_explicit_long_bounded_budget(self):
         self.assertEqual(POST_CLOSE_TIMEOUT_OVERRIDES["analyst_outcomes"], 300.0)
         self.assertEqual(POST_CLOSE_TIMEOUT_OVERRIDES["analyst_intraday_outcomes"], 180.0)
+
+    async def test_audited_parallel_group_overlaps_without_reordering_dependents(self):
+        active = 0
+        peak = 0
+        calls: list[str] = []
+
+        async def action(name: str):
+            nonlocal active, peak
+            calls.append(f"{name}:start")
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0)
+            active -= 1
+            calls.append(f"{name}:done")
+            return {"status": "completed"}
+
+        async def run_db(function, *args, **_kwargs):
+            result = function(*args)
+            return await result if hasattr(result, "__await__") else result
+
+        result = await run_refresh(
+            object(), db=object(), lease_key="lease", lease_seconds=lambda: 60,
+            run_database_blocking=run_db, acquire_lease=lambda *_: True,
+            renew_lease=lambda *_: True, release_lease=lambda *_: None,
+            actions={
+                "one": lambda: action("one"),
+                "two": lambda: action("two"),
+                "after": lambda: calls.append("after") or {"status": "completed"},
+            },
+            stage_order=("one", "two", "after"), trade_date=date(2026, 8, 21),
+            safe_error_detail=lambda value, _limit: value, json_safe=lambda value: value,
+            parallel_groups=(("one", "two"),),
+        )
+        self.assertEqual(peak, 2)
+        self.assertLess(calls.index("one:done"), calls.index("after"))
+        self.assertLess(calls.index("two:done"), calls.index("after"))
+        self.assertEqual(result["status"], "completed")
 
     async def test_limit_performance_capture_is_after_full_market_daily(self):
         self.assertEqual(
@@ -76,6 +115,7 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
         async def orchestrator(_request, **kwargs):
             captured["stage_order"] = kwargs["stage_order"]
             captured["dependencies"] = kwargs["stage_dependencies"]
+            captured["parallel_groups"] = kwargs["parallel_groups"]
             await kwargs["actions"]["trade_calendar"]()
             await kwargs["actions"]["full_market_daily"]()
             captured["daily_completion_disabled"] = await kwargs["actions"]["daily_close_completion"]()
@@ -128,6 +168,7 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(captured["stage_order"], POST_CLOSE_STAGE_ORDER)
         self.assertEqual(captured["dependencies"], POST_CLOSE_STAGE_DEPENDENCIES)
+        self.assertEqual(captured["parallel_groups"], POST_CLOSE_PARALLEL_GROUPS)
         self.assertEqual(captured["core_limit"], 7)
         self.assertEqual(captured["daily_request"].provider, "auto")
         self.assertEqual(captured["limit_performance"], {

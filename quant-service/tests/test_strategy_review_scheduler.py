@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime
 import unittest
 from zoneinfo import ZoneInfo
@@ -72,6 +73,31 @@ class StrategyReviewSchedulerTests(unittest.IsolatedAsyncioTestCase):
             ["calendar", "index", "snapshot", "board", "outcomes", "analyst_intraday_outcomes", "scorecards", "persist"],
         )
         self.assertIn((datetime(2026, 8, 14, tzinfo=CN).date(), "close"), completed)
+
+    async def test_close_index_and_snapshot_start_without_waiting_for_each_other(self):
+        started: list[str] = []
+        release = asyncio.Event()
+
+        async def operation(name, *args):
+            started.append(name)
+            if name in {"index", "snapshot"}:
+                await release.wait()
+            return {"status": "completed"}
+
+        dependencies, _calls = self._dependencies()
+        dependencies = dependencies.__class__(**{
+            **dependencies.__dict__,
+            "sync_index_context": lambda day: operation("index", day),
+            "build_market_snapshot": lambda day, session: operation("snapshot", day, session),
+        })
+        task = asyncio.create_task(strategy_review_scheduler_step(
+            set(), dependencies, local=datetime(2026, 8, 14, 15, 5, 30, tzinfo=CN),
+        ))
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        self.assertEqual(set(started), {"index", "snapshot"})
+        release.set()
+        self.assertEqual(await task, ("close",))
 
     async def test_failed_checkpoint_is_not_completed_and_can_retry(self):
         dependencies, calls = self._dependencies(fail_operation="board")
