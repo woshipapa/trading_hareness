@@ -43,7 +43,9 @@ def build_market_result_reads_router(
             # while allowing the async pool and CPU to overlap them.
             history_task = asyncio.create_task(async_history_estimate_fn())
             overview_task = asyncio.create_task(async_read_model.research_overview(async_database, {}))
-            overview_payload, history_estimate = await asyncio.gather(overview_task, history_task)
+            overview_payload, history_estimate = await asyncio.wait_for(
+                asyncio.gather(overview_task, history_task), timeout=15,
+            )
             overview_payload["history_estimate"] = history_estimate
             return overview_payload
         return read_model.research_overview(
