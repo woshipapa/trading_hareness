@@ -58,6 +58,11 @@ class StrategyTimingBoardTests(unittest.TestCase):
     def test_all_contracts_have_at_least_one_timing_plan(self):
         self.assertTrue(all(timing_plans(key) and timing_plans(key)[0]["phase"] for key in STRATEGY_CONTRACTS))
 
+    def test_historical_trade_date_is_closed_even_before_todays_open(self):
+        board = build_timing_board([], observed_at=datetime(2026, 10, 16, 0, 18, tzinfo=CN),
+                                   trade_date=date(2026, 10, 15))
+        self.assertEqual(board["active_phase"], "post_close")
+
 
 if __name__ == "__main__":
     unittest.main()

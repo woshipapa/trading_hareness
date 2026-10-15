@@ -147,6 +147,8 @@ def _cards_freshness(connection: Any, trade_date: date, as_of: date | None,
         overall = "fresh" if "fresh" in live_statuses else "available"
     elif "stale" in live_statuses:
         overall = "stale"
+    elif "historical_available" in live_statuses:
+        overall = "historical_available"
     else:
         overall = "missing"
     return {
@@ -624,7 +626,7 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
         contract = STRATEGY_CONTRACTS.get(contract_key) if contract_key else None
         direction = candidate_direction(line, None)
         picks = [_pick(row, quotes.get(row["symbol"]), limits.get(row["symbol"]), **context) for row in by_line[line]]
-        timing = build_card_timing(line, picks, observed_at=now)
+        timing = build_card_timing(line, picks, observed_at=now, trade_date=trade_date)
         cards.append({
             "strategy_key": line, "name": name, "style": style, "direction": "short" if direction < 0 else "long",
             "contract_key": contract_key, "model_version": contract.model_version if contract else None,

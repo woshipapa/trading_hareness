@@ -170,6 +170,14 @@ def _phase_at(value: datetime | None) -> str:
     return "post_close"
 
 
+def _phase_for(trade_date: date | None, value: datetime | None) -> str:
+    """Historical reads are closed even when the process clock is pre-open."""
+    observed = value or datetime.now(CN_TZ)
+    if trade_date is not None and observed.astimezone(CN_TZ).date() != trade_date:
+        return "post_close"
+    return _phase_at(observed)
+
+
 def _number(value: Any) -> float | None:
     try:
         parsed = float(value)
@@ -260,8 +268,9 @@ def research_candidate(strategy_key: str, pick: Mapping[str, Any], *, phase: str
     }
 
 
-def build_card_timing(strategy_key: str, picks: Sequence[Mapping[str, Any]], *, observed_at: datetime | None = None) -> dict[str, Any]:
-    phase = _phase_at(observed_at)
+def build_card_timing(strategy_key: str, picks: Sequence[Mapping[str, Any]], *, observed_at: datetime | None = None,
+                      trade_date: date | None = None) -> dict[str, Any]:
+    phase = _phase_for(trade_date, observed_at)
     return {
         "timing_plans": timing_plans(strategy_key),
         "active_phase": phase,
@@ -272,7 +281,7 @@ def build_card_timing(strategy_key: str, picks: Sequence[Mapping[str, Any]], *, 
 def build_timing_board(cards: Sequence[Mapping[str, Any]], *, observed_at: datetime | None = None,
                        trade_date: date | None = None) -> dict[str, Any]:
     """Include all registered contracts, even if today's ledger has no row."""
-    phase = _phase_at(observed_at)
+    phase = _phase_for(trade_date, observed_at)
     cards_by_contract: dict[str, list[Mapping[str, Any]]] = {}
     for card in cards:
         key = str(card.get("contract_key") or card.get("strategy_key") or "")
