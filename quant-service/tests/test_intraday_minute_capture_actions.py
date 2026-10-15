@@ -118,6 +118,7 @@ class IntradayMinuteCaptureActionTests(unittest.TestCase):
                 {"trade_date": yesterday.strftime("%Y%m%d"), "time": "09:31", "close": 10, "vol": 1, "amount": 100},
             ], {"storage_source": "longhu_intraday_minutes", "provider": "longhuvip"}
 
+        batch_symbols = []
         result = asyncio.run(action.capture(
             ["600664.SH"], realtime_session=lambda: asyncio.sleep(0, result=(True, "open")),
             fetch_minutes=lambda _symbol: asyncio.sleep(0, result=[]), fetch_minutes_with_source=fetch_source,
@@ -126,8 +127,10 @@ class IntradayMinuteCaptureActionTests(unittest.TestCase):
                 "open": row["open"], "high": row["high"], "low": row["low"], "close": row["close"],
                 "volume": row.get("vol", 1), "amount": row.get("amount", 100), "raw": row,
             }, ensure_instrument=lambda *_args: None, retention_days=lambda: 7,
+            ensure_instruments=lambda _connection, symbols: batch_symbols.extend(symbols),
         ))
         self.assertEqual(result["stored"], 1)
+        self.assertEqual(batch_symbols, ["600664.SH"])
         insert_calls = [item for item in connection.calls if "INSERT INTO quant.intraday_minute_sessions" in item[0]]
         self.assertEqual(len(insert_calls), 1)
         self.assertEqual(insert_calls[0][1][10], "longhu_intraday_minutes")

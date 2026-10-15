@@ -1368,6 +1368,11 @@ def ensure_offline_instrument(connection: Any, symbol: str) -> None:
     offline_minute_import_service.ensure_instrument(connection, symbol, exchange_for=exchange_for)
 
 
+def ensure_offline_instruments(connection: Any, symbols: list[str]) -> None:
+    """Register a close-capture basket in one owner-database round trip."""
+    ensure_registry_instruments(connection, symbols, source="offline-import")
+
+
 def offline_minute_import_stale_seconds(environ: Mapping[str, str] | None = None) -> int:
     """Bound the recovery wait before a crashed local CSV import can resume."""
     return offline_minute_import_service.stale_seconds(environ)
@@ -2589,6 +2594,7 @@ async def capture_intraday_minute_sessions(symbols: list[str]) -> dict[str, Any]
         ensure_instrument=ensure_offline_instrument,
         retention_days=intraday_minute_profile_retention_days,
         max_in_flight=minute_batch_workers(),
+        ensure_instruments=ensure_offline_instruments,
     )
 
 
@@ -3895,7 +3901,8 @@ async def watch_review_store_minutes(trade_date: date, rows_by_symbol: dict[str,
     from .intraday_minute_capture_actions import store_session_minutes
     return await run_database_blocking(lambda: store_session_minutes(
         db, trade_date, rows_by_symbol, source_name="longhu_intraday_minutes",
-        parse_minute=offline_minute_row, ensure_instrument=ensure_offline_instrument), timeout_seconds=120)
+        parse_minute=offline_minute_row, ensure_instrument=ensure_offline_instrument,
+        ensure_instruments=ensure_offline_instruments), timeout_seconds=120)
 
 
 def _watch_review_dependencies() -> WatchReviewDependencies:

@@ -120,13 +120,20 @@ async def fetch_longhu_first_minute_rows(
     }
 
 
-def store_symbol_minutes(connection: Any, symbol: str, rows: list[dict[str, Any]], trading_date: date,
-                         source_name: str, parse_minute: Callable[[dict[str, Any]], dict[str, Any]]) -> tuple[int, str | None]:
-    """Upsert one symbol's session rows in one batched statement; returns (stored, first error).
+_MINUTE_INSERT_SQL = """INSERT INTO quant.intraday_minute_sessions(
+       symbol,trading_date,minute_bucket,bar_time,open,high,low,close,volume,amount,source_name,available_at,raw
+   ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+   ON CONFLICT(symbol,trading_date,minute_bucket,source_name) DO UPDATE SET
+       bar_time=EXCLUDED.bar_time,open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
+       close=EXCLUDED.close,volume=EXCLUDED.volume,amount=EXCLUDED.amount,
+       available_at=EXCLUDED.available_at,raw=EXCLUDED.raw"""
 
-    Rows are validated first and written with a single ``executemany``: one
-    INSERT per minute over the ~100 ms tunnel took ~9 s a stock.
-    """
+
+def _prepare_symbol_minutes(
+    symbol: str, rows: list[dict[str, Any]], trading_date: date, source_name: str,
+    parse_minute: Callable[[dict[str, Any]], dict[str, Any]],
+) -> tuple[list[tuple[Any, ...]], str | None]:
+    """Validate one symbol and return insert parameters without doing I/O."""
     first_error = None
     params: list[tuple[Any, ...]] = []
     available_at = datetime.now(timezone.utc)
@@ -152,25 +159,29 @@ def store_symbol_minutes(connection: Any, symbol: str, rows: list[dict[str, Any]
                            tolerant_json(row["raw"])))
         except (ValueError, TypeError) as validation_error:
             first_error = first_error or f"invalid minute row: {str(validation_error)[:200]}"
-    if params:
-        # psycopg batches executemany on a cursor (the connection has no executemany).
-        with connection.cursor() as cursor:
-            cursor.executemany(
-            """INSERT INTO quant.intraday_minute_sessions(
-                   symbol,trading_date,minute_bucket,bar_time,open,high,low,close,volume,amount,source_name,available_at,raw
-               ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-               ON CONFLICT(symbol,trading_date,minute_bucket,source_name) DO UPDATE SET
-                   bar_time=EXCLUDED.bar_time,open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
-                   close=EXCLUDED.close,volume=EXCLUDED.volume,amount=EXCLUDED.amount,
-                   available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
-                params,
-            )
+    return params, first_error
+
+
+def _insert_minute_params(connection: Any, params: list[tuple[Any, ...]]) -> None:
+    """Write a validated batch through one cursor round trip."""
+    if not params:
+        return
+    with connection.cursor() as cursor:
+        cursor.executemany(_MINUTE_INSERT_SQL, params)
+
+
+def store_symbol_minutes(connection: Any, symbol: str, rows: list[dict[str, Any]], trading_date: date,
+                         source_name: str, parse_minute: Callable[[dict[str, Any]], dict[str, Any]]) -> tuple[int, str | None]:
+    """Upsert one symbol's session rows in one batched statement; returns (stored, first error)."""
+    params, first_error = _prepare_symbol_minutes(symbol, rows, trading_date, source_name, parse_minute)
+    _insert_minute_params(connection, params)
     return len(params), first_error
 
 
 def store_session_minutes(database: Any, trading_date: date, rows_by_symbol: dict[str, list[dict[str, Any]]], *,
                           source_name: str, parse_minute: Callable[[dict[str, Any]], dict[str, Any]],
-                          ensure_instrument: Callable[[Any, str], None]) -> dict[str, Any]:
+                          ensure_instrument: Callable[[Any, str], None],
+                          ensure_instruments: Callable[[Any, list[str]], None] | None = None) -> dict[str, Any]:
     """Store whole sessions for explicit watch symbols (the post-close review's copy).
 
     Additive only: rows are upserted by (symbol, date, minute, source) and no
@@ -181,12 +192,19 @@ def store_session_minutes(database: Any, trading_date: date, rows_by_symbol: dic
     stored_by_symbol: dict[str, int] = {}
     errors: dict[str, str] = {}
     with database.transaction() as connection:
-        for symbol, rows in sorted(rows_by_symbol.items()):
-            ensure_instrument(connection, symbol)
-            stored, error = store_symbol_minutes(connection, symbol, rows, trading_date, source_name, parse_minute)
-            stored_by_symbol[symbol] = stored
+        ordered = sorted(rows_by_symbol.items())
+        if ensure_instruments is not None and ordered:
+            ensure_instruments(connection, [symbol for symbol, _rows in ordered])
+        pending_params: list[tuple[Any, ...]] = []
+        for symbol, rows in ordered:
+            if ensure_instruments is None:
+                ensure_instrument(connection, symbol)
+            params, error = _prepare_symbol_minutes(symbol, rows, trading_date, source_name, parse_minute)
+            pending_params.extend(params)
+            stored_by_symbol[symbol] = len(params)
             if error:
                 errors[symbol] = error
+        _insert_minute_params(connection, pending_params)
     counts = sorted(stored_by_symbol.values())
     return {"status": "completed" if counts and not errors else "partial" if counts else "empty",
             "symbols": len(stored_by_symbol), "stored": sum(counts), "source_name": source_name,
@@ -213,6 +231,7 @@ class IntradayMinuteCaptureActions:
         ensure_instrument: Callable[[Any, str], None],
         retention_days: Callable[[], int],
         max_in_flight: int = MINUTE_CAPTURE_MAX_IN_FLIGHT,
+        ensure_instruments: Callable[[Any, list[str]], None] | None = None,
     ) -> dict[str, Any]:
         """Capture current-session rows through an injected persistence seam."""
         active, reason = await realtime_session()
@@ -246,7 +265,14 @@ class IntradayMinuteCaptureActions:
             stored_by_symbol: dict[str, int] = {}
             errors: dict[str, str] = {}
             source_status: dict[str, Any] = {}
+            pending_params: list[tuple[Any, ...]] = []
+            successful_symbols = [
+                result[0] for result in results
+                if isinstance(result, tuple) and len(result) == 4 and result[3] is None
+            ]
             with self._database.transaction() as connection:
+                if ensure_instruments is not None and successful_symbols:
+                    ensure_instruments(connection, successful_symbols)
                 for result in results:
                     if isinstance(result, Exception):
                         errors["unknown"] = str(result)[:300]
@@ -257,16 +283,22 @@ class IntradayMinuteCaptureActions:
                         continue
                     source_status[symbol] = source
                     source_name = minute_storage_source(source)
-                    ensure_instrument(connection, symbol)
-                    stored, error = store_symbol_minutes(connection, symbol, rows, trading_date, source_name, parse_minute)
-                    if error:
-                        errors.setdefault(symbol, error)
-                    stored_by_symbol[symbol] = stored
+                    if ensure_instruments is None:
+                        ensure_instrument(connection, symbol)
+                    params, validation_error = _prepare_symbol_minutes(
+                        symbol, rows, trading_date, source_name, parse_minute,
+                    )
+                    pending_params.extend(params)
+                    if validation_error:
+                        errors.setdefault(symbol, validation_error)
+                    stored_by_symbol[symbol] = len(params)
+                _insert_minute_params(connection, pending_params)
+                if successful_symbols:
                     connection.execute(
                         """DELETE FROM quant.intraday_minute_sessions
-                             WHERE symbol=%s AND trading_date<%s
+                             WHERE symbol=ANY(%s::text[]) AND trading_date<%s
                                AND source_name IN ('tushare_super_get_rt_min_daily','tushare_super_rt_min_daily','tencent_intraday_minutes','longhu_intraday_minutes')""",
-                        (symbol, retention_start),
+                        (successful_symbols, retention_start),
                     )
             return stored_by_symbol, errors, source_status
 
