@@ -1015,10 +1015,12 @@ class PlatformBoundaryTests(unittest.TestCase):
         connection.execute.side_effect = [
             MagicMock(fetchone=MagicMock(return_value={
                 "scan": {"scan_id": "scan-1"}, "signals": [], "deliveries": [],
+                "history": [{"scan_id": "scan-1", "status": "completed"}],
             })),
         ]
         payload = read_latest_intraday_scan(database, limit=10_000)
         self.assertEqual(payload["scan"]["scan_id"], "scan-1")
+        self.assertEqual(payload["history"][0]["status"], "completed")
         self.assertEqual(connection.execute.call_count, 1)
         self.assertEqual(connection.execute.call_args.args[1], (200, 200))
         router = build_intraday_evidence_reads_router(database, lambda _connection, symbol: {"symbol": symbol})

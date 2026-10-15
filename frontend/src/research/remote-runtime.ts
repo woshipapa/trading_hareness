@@ -57,6 +57,38 @@ export function scanOverlapRows(overlap: unknown): ScanOverlapRow[] {
     .map(([key, value]) => ({ key, value: String(value) }));
 }
 
+export type ScanPerformanceHistoryRow = {
+  scanId: string;
+  observedAt: string;
+  status: string;
+  totalMs: number;
+  persistenceStatus: string;
+};
+
+/** Convert the bounded scan history projection into oldest-to-newest bars. */
+export function scanPerformanceHistoryRows(value: unknown): ScanPerformanceHistoryRow[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((raw) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+      const item = raw as Record<string, unknown>;
+      const performance = item.scan_performance;
+      if (!performance || typeof performance !== 'object' || Array.isArray(performance)) return null;
+      const observedAt = String(item.observed_at ?? '').trim();
+      const totalMs = Number((performance as Record<string, unknown>).total_ms);
+      if (!observedAt || !Number.isFinite(totalMs) || totalMs < 0) return null;
+      return {
+        scanId: String(item.scan_id ?? observedAt),
+        observedAt,
+        status: String(item.status ?? 'unknown'),
+        totalMs: Math.round(totalMs * 10) / 10,
+        persistenceStatus: String((performance as Record<string, unknown>).persistence_status ?? 'unknown'),
+      };
+    })
+    .filter((row): row is ScanPerformanceHistoryRow => row !== null)
+    .reverse();
+}
+
 export type ExecutorCapacityRow = {
   key: string;
   workers: number;

@@ -1,0 +1,1 @@
+{"baseline_ms": [34.895, 6.869, 6.315, 6.036, 5.879], "history_ms": [14.114, 7.778, 6.671, 7.166, 6.938], "baseline_median_ms": 6.315, "history_median_ms": 7.166, "history_rows": 30, "has_scan": true, "scope": "local compose PostgreSQL; no owner tunnel/provider access"}

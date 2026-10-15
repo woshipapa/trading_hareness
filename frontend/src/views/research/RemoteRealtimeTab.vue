@@ -3,7 +3,7 @@ import { computed, inject, ref } from 'vue';
 import { Refresh, Link, Search } from '@element-plus/icons-vue';
 import { dashboardContextKey } from '../../dashboard-context';
 import { useRemoteQuantRuntime } from '../../composables/useRemoteQuantRuntime';
-import { executorCapacityRows, freshnessOf, freshnessLabel, scanOverlapRows as buildScanOverlapRows, scanStageRows as buildScanStageRows, symbolFromRow } from '../../research/remote-runtime';
+import { executorCapacityRows, freshnessOf, freshnessLabel, scanOverlapRows as buildScanOverlapRows, scanPerformanceHistoryRows as buildScanPerformanceHistoryRows, scanStageRows as buildScanStageRows, symbolFromRow } from '../../research/remote-runtime';
 
 const dashboard = inject(dashboardContextKey);
 if (!dashboard) throw new Error('research tab requires the dashboard shell context');
@@ -30,6 +30,9 @@ const scanFreshness = computed(() => freshnessOf(runtime.latestScan.value?.scan?
 const scanPerformance = computed(() => runtime.latestScan.value?.scan?.source_status?.scan_performance ?? runtime.latestScan.value?.scan_performance ?? {});
 const scanStageRows = computed(() => buildScanStageRows(scanPerformance.value.stage_ms, scanPerformance.value.total_ms));
 const scanOverlapRows = computed(() => buildScanOverlapRows(scanPerformance.value.overlap));
+const scanPerformanceHistory = computed(() => buildScanPerformanceHistoryRows(runtime.latestScan.value.history));
+const scanHistoryMax = computed(() => Math.max(1, ...scanPerformanceHistory.value.map((row) => row.totalMs)));
+const scanHistoryBarHeight = (totalMs: number) => Math.max(8, Math.round((totalMs / scanHistoryMax.value) * 100));
 const executorRows = computed(() => executorCapacityRows(runtime.runtimeHealth.value.blocking_executors));
 const runtimeResources = computed(() => runtime.runtimeHealth.value.resources ?? {});
 const memoryResource = computed(() => runtimeResources.value.memory ?? {});
@@ -154,6 +157,15 @@ const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.
         </el-space>
         <el-empty v-else description="暂无并行遥测" :image-size="38" />
       </div>
+    </div>
+    <div v-if="scanPerformanceHistory.length" class="scan-history-visual">
+      <div class="scan-visual-heading"><strong>最近扫描总耗时趋势</strong><small>{{ scanPerformanceHistory.length }} 次 · 仅展示已有遥测的扫描</small></div>
+      <div class="scan-history-bars" role="img" :aria-label="`最近 ${scanPerformanceHistory.length} 次扫描总耗时趋势`">
+        <div v-for="row in scanPerformanceHistory" :key="row.scanId" class="scan-history-bar-column" :title="`${dateText(row.observedAt)} · ${row.totalMs} ms · ${row.status}`">
+          <span class="scan-history-bar" :class="{ 'scan-history-bar-degraded': row.status !== 'completed' }" :style="{ height: `${scanHistoryBarHeight(row.totalMs)}%` }" />
+        </div>
+      </div>
+      <div class="scan-history-axis"><small>{{ dateText(scanPerformanceHistory[0].observedAt) }}</small><small>最新 {{ scanPerformanceHistory[scanPerformanceHistory.length - 1].totalMs }} ms</small></div>
     </div>
     <el-table v-if="scanStageRows.length" :data="scanStageRows" size="small" max-height="260">
       <el-table-column label="阶段" min-width="190"><template #default="{ row }">{{ scanStageLabel(row.stage) }}</template></el-table-column>
@@ -299,6 +311,51 @@ const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.
 
 .scan-overlap-visual :deep(.el-space) {
   width: 100%;
+}
+
+.scan-history-visual {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank);
+}
+
+.scan-history-bars {
+  display: flex;
+  align-items: end;
+  gap: 4px;
+  height: 84px;
+  padding: 8px 4px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.scan-history-bar-column {
+  display: flex;
+  align-items: end;
+  flex: 1 1 0;
+  min-width: 3px;
+  height: 100%;
+}
+
+.scan-history-bar {
+  display: block;
+  width: 100%;
+  min-height: 4px;
+  border-radius: 3px 3px 0 0;
+  background: var(--el-color-success);
+}
+
+.scan-history-bar-degraded {
+  background: var(--el-color-warning);
+}
+
+.scan-history-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+  color: var(--el-text-color-secondary);
 }
 
 @media (max-width: 768px) {

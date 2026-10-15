@@ -7,7 +7,7 @@ export type RemoteRuntimeHealth = Record<string, any>;
 export type RemoteService = { key?: string; label?: string; state?: string; last_error?: string | null; details?: Record<string, any>; [key: string]: any };
 export type RemoteServices = { items?: RemoteService[]; [key: string]: any };
 export type RemoteWatchlist = { items?: Record<string, any>[]; notice?: string; [key: string]: any };
-export type RemoteScan = { scan?: Record<string, any> | null; signals?: Record<string, any>[]; deliveries?: Record<string, any>[]; [key: string]: any };
+export type RemoteScan = { scan?: Record<string, any> | null; signals?: Record<string, any>[]; deliveries?: Record<string, any>[]; history?: Record<string, any>[]; [key: string]: any };
 export type RemoteStrategyDecision = { run?: Record<string, any> | null; recommendations?: Record<string, any>[]; [key: string]: any };
 export type RemotePostClose = { latest_completed?: Record<string, any> | null; candidates?: Record<string, any>[]; notice?: string; [key: string]: any };
 
@@ -18,7 +18,7 @@ export function useRemoteQuantRuntime() {
   const runtimeHealth = ref<RemoteRuntimeHealth>({});
   const services = ref<RemoteServices>({ items: [] });
   const watchlist = ref<RemoteWatchlist>({ items: [] });
-  const latestScan = ref<RemoteScan>({ signals: [], deliveries: [] });
+  const latestScan = ref<RemoteScan>({ signals: [], deliveries: [], history: [] });
   const strategyHealth = ref<Record<string, any>>({});
   const strategyDecision = ref<RemoteStrategyDecision>({ recommendations: [] });
   const closeReview = ref<Record<string, any>>({});
@@ -69,7 +69,7 @@ export function useRemoteQuantRuntime() {
       { label: '运行状态', promise: getJson<RemoteRuntimeHealth>('/api/research/runtime/health'), set: (value: any) => { runtimeHealth.value = value; }, empty: {} },
       { label: '服务状态', promise: getJson<RemoteServices>('/api/research/intraday/services/status'), set: (value: any) => { services.value = value; }, empty: { items: [] } },
       { label: '观察池', promise: getJson<RemoteWatchlist>('/api/research/intraday/watchlists'), set: (value: any) => { watchlist.value = value; }, empty: { items: [] } },
-      { label: '盘中扫描', promise: getJson<RemoteScan>('/api/research/intraday/scans/latest?limit=100'), set: (value: any) => { latestScan.value = value; }, empty: { signals: [], deliveries: [] } },
+      { label: '盘中扫描', promise: getJson<RemoteScan>('/api/research/intraday/scans/latest?limit=100'), set: (value: any) => { latestScan.value = value; }, empty: { signals: [], deliveries: [], history: [] } },
       { label: '策略健康', promise: getJson<Record<string, any>>('/api/research/strategy/health'), set: (value: any) => { strategyHealth.value = value; }, empty: {} },
     ] : [
       { label: '策略决策', promise: getJson<RemoteStrategyDecision>('/api/research/strategy/decisions/latest'), set: (value: any) => { strategyDecision.value = value; }, empty: { recommendations: [] } },

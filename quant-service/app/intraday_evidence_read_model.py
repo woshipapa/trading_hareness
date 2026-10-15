@@ -39,11 +39,30 @@ WITH latest AS (
          ORDER BY d.created_at
          LIMIT %s
       ) rows
+), recent_scans AS (
+    SELECT scan_id,observed_at,status,source_status->'scan_performance' AS scan_performance
+      FROM quant.intraday_scan_runs
+     ORDER BY observed_at DESC
+     LIMIT 30
+), history AS (
+    SELECT COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'scan_id',recent_scans.scan_id,
+                'observed_at',recent_scans.observed_at,
+                'status',recent_scans.status,
+                'scan_performance',COALESCE(recent_scans.scan_performance,'{}'::jsonb)
+            ) ORDER BY recent_scans.observed_at DESC
+        ),
+        '[]'::jsonb
+    ) AS value
+      FROM recent_scans
 )
 SELECT (SELECT scan FROM latest) AS scan,
        signals.value AS signals,
-       deliveries.value AS deliveries
-  FROM signals CROSS JOIN deliveries
+       deliveries.value AS deliveries,
+       history.value AS history
+  FROM signals CROSS JOIN deliveries CROSS JOIN history
 """
 
 
@@ -73,11 +92,12 @@ def latest_scan(database: Any, *, limit: int = 100) -> dict[str, Any]:
     with database.transaction() as connection:
         row = connection.execute(LATEST_SCAN_SNAPSHOT_SQL, (bounded_limit, bounded_limit)).fetchone()
     if not row:
-        return {"scan": None, "signals": [], "deliveries": []}
+        return {"scan": None, "signals": [], "deliveries": [], "history": []}
     return {
         "scan": _json_value(row.get("scan") if hasattr(row, "get") else row["scan"], None),
         "signals": _json_value(row.get("signals") if hasattr(row, "get") else row["signals"], []),
         "deliveries": _json_value(row.get("deliveries") if hasattr(row, "get") else row["deliveries"], []),
+        "history": _json_value(row.get("history") if hasattr(row, "get") else row["history"], []),
     }
 
 

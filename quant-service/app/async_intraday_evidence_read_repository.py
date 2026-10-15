@@ -32,12 +32,13 @@ async def latest_scan(async_database: Any, *, limit: int = 100) -> dict[str, Any
         result = await connection.execute(LATEST_SCAN_SNAPSHOT_SQL, (bounded_limit, bounded_limit))
         row = await result.fetchone()
     if not row:
-        return {"scan": None, "signals": [], "deliveries": []}
+        return {"scan": None, "signals": [], "deliveries": [], "history": []}
     row = dict(row)
     return {
         "scan": _json_value(row.get("scan"), None),
         "signals": _json_value(row.get("signals"), []),
         "deliveries": _json_value(row.get("deliveries"), []),
+        "history": _json_value(row.get("history"), []),
     }
 
 

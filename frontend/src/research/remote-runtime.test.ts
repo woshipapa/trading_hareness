@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { executorCapacityRows, freshnessOf, normalizeSymbol, scanOverlapRows, scanStageRows, symbolFromRow } from './remote-runtime';
+import { executorCapacityRows, freshnessOf, normalizeSymbol, scanOverlapRows, scanPerformanceHistoryRows, scanStageRows, symbolFromRow } from './remote-runtime';
 
 describe('remote runtime evidence helpers', () => {
 it('normalizes only exchange-qualified A-share symbols', () => {
@@ -34,6 +34,17 @@ it('keeps overlap telemetry displayable when newer keys arrive', () => {
     { key: 'unknown', value: '1' },
   ]);
   expect(scanOverlapRows([])).toEqual([]);
+});
+
+it('keeps only valid bounded scan history and orders it for a timeline', () => {
+  expect(scanPerformanceHistoryRows([
+    { scan_id: 'new', observed_at: '2026-10-16T01:02:00Z', status: 'completed', scan_performance: { total_ms: 120, persistence_status: 'persisted' } },
+    { scan_id: 'old', observed_at: '2026-10-16T01:01:00Z', status: 'completed', scan_performance: { total_ms: '240.4' } },
+    { scan_id: 'bad', observed_at: '2026-10-16T01:00:00Z', scan_performance: { total_ms: 'NaN' } },
+  ])).toEqual([
+    { scanId: 'old', observedAt: '2026-10-16T01:01:00Z', status: 'completed', totalMs: 240.4, persistenceStatus: 'unknown' },
+    { scanId: 'new', observedAt: '2026-10-16T01:02:00Z', status: 'completed', totalMs: 120, persistenceStatus: 'persisted' },
+  ]);
 });
 
 it('projects bounded executor capacity without trusting malformed health values', () => {
