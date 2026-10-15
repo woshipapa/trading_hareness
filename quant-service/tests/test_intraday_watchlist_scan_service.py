@@ -393,6 +393,61 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
         self.assertEqual(result["ten_day_leader_rotation_shadow"]["status"], "standby")
         self.assertEqual(shadow_statuses, [{"status": "standby", "reason": "no_completed_daily_shadow_cohort"}])
 
+    def test_shadow_memberships_and_quotes_overlap(self):
+        observed_at = datetime(2026, 8, 24, 2, tzinfo=timezone.utc)
+        membership_started = asyncio.Event()
+        quotes_started = asyncio.Event()
+        membership_calls = 0
+
+        async def session():
+            return True, "continuous auction"
+
+        async def watches(_):
+            return [{"symbol": "000001.SZ"}]
+
+        async def capture(_symbols, _observed, _slo):
+            return SimpleNamespace(
+                quotes={"000001.SZ": {"price": 10.0}}, all_a_rows=[], fresh_watch_rows=[],
+                sina_watch_rows=[], eastmoney_watch_flow_rows=[],
+                eastmoney_watch_flow_status={"status": "fresh"}, derived_flow_status={"status": "fresh"},
+                all_a_snapshot_status={"status": "fresh", "cross_sectional": True}, latency_ms=1,
+            )
+
+        async def memberships(_symbols, _observed):
+            nonlocal membership_calls
+            membership_calls += 1
+            if membership_calls == 1:
+                return []
+            membership_started.set()
+            await quotes_started.wait()
+            return []
+
+        async def shadow_quotes(_symbols):
+            quotes_started.set()
+            await membership_started.wait()
+            return {}, {"status": "completed"}
+
+        async def surge(*_args, **_kwargs):
+            return {}, {}
+
+        dependencies = self.dependencies(
+            now_utc=lambda: observed_at, realtime_session=session, load_watches=watches,
+            capture_quotes=capture, load_exact_memberships=memberships, surge_context=surge,
+            persist_signals=lambda *_args, **_kwargs: asyncio.sleep(0, result=[]),
+            shadow_rotation_due=lambda _observed: True,
+            shadow_pool=lambda: asyncio.sleep(0, result={"run": True, "candidates": [{"symbol": "000001.SZ"}]}),
+            shadow_rotation_slice=lambda candidates, _observed: (candidates, 0),
+            capture_shadow_quotes=shadow_quotes,
+            persist_shadow_observations=lambda **_kwargs: asyncio.sleep(0, result={"status": "completed"}),
+        )
+
+        async def bounded_scan():
+            return await asyncio.wait_for(run_watchlist_scan(self.request(), dependencies), timeout=1.0)
+
+        result = asyncio.run(bounded_scan())
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["ten_day_leader_rotation_shadow"]["status"], "completed")
+
     def test_session_watchlist_and_maintenance_tasks_overlap(self):
         observed_at = datetime(2026, 8, 24, 2, tzinfo=timezone.utc)
         session_started = asyncio.Event()

@@ -363,13 +363,30 @@ async def _run_shadow_rotation(
         )
         if shadow_pool.get("run") and rotation_candidates:
             shadow_symbols = [str(item["symbol"]).upper() for item in rotation_candidates]
-            shadow_memberships = await dependencies.load_exact_memberships(shadow_symbols, observed_at)
-            shadow_mapped_peers = dependencies.mapped_peers(shadow_symbols, shadow_memberships)
             shadow_watches = [
                 {"symbol": symbol, "metadata": {"surge_strategy": {"enabled": True}}}
                 for symbol in shadow_symbols
             ]
-            shadow_quotes, shadow_quote_status = await dependencies.capture_shadow_quotes(shadow_symbols)
+            # Membership evidence and shadow quotes share the same observation
+            # boundary but do not depend on one another.  Overlap them so a
+            # slow owner read or provider call does not extend this research
+            # branch's critical path; both are joined before features are built.
+            membership_task = asyncio.create_task(
+                dependencies.load_exact_memberships(shadow_symbols, observed_at),
+                name="intraday-shadow-memberships",
+            )
+            quote_task = asyncio.create_task(
+                dependencies.capture_shadow_quotes(shadow_symbols),
+                name="intraday-shadow-quotes",
+            )
+            try:
+                shadow_memberships, (shadow_quotes, shadow_quote_status) = await asyncio.gather(
+                    membership_task, quote_task,
+                )
+            except BaseException:
+                await _cancel_tasks([membership_task, quote_task])
+                raise
+            shadow_mapped_peers = dependencies.mapped_peers(shadow_symbols, shadow_memberships)
             shadow_minutes, shadow_minute_status = await dependencies.surge_context(
                 shadow_watches, mapped_peers=shadow_mapped_peers,
             )
