@@ -27,6 +27,21 @@ const openCardTonghuashun = () => {
   if (symbol) (dashboard as Record<string, any>).openAnalystStockInTonghuashun(symbol);
 };
 const scanFreshness = computed(() => freshnessOf(runtime.latestScan.value?.scan?.observed_at));
+const scanPerformance = computed(() => runtime.latestScan.value?.scan?.source_status?.scan_performance ?? runtime.latestScan.value?.scan_performance ?? {});
+const scanStageRows = computed(() => Object.entries(scanPerformance.value.stage_ms ?? {}).map(([stage, milliseconds]) => ({
+  stage,
+  milliseconds: Number(milliseconds),
+})));
+const scanStageLabel = (stage: string) => ({
+  session_and_watchlist: '会话与观察池',
+  pre_capture: '采集前准备',
+  market_wide_research: '全市场研究',
+  capture_and_memberships: '行情与成员关系',
+  enrichment_and_strategy_prepare: '分钟增强与策略准备',
+  signal_persist: '信号事务落库',
+  delivery_and_research: '提醒与研究分支',
+  shadow_rotation: '轮换影子研究',
+}[stage] ?? stage);
 const healthState = (value: unknown) => value === 'healthy' || value === 'ready' ? 'success' : ['degraded', 'unavailable', 'disabled'].includes(String(value)) ? 'danger' : 'warning';
 const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.live_effect ?? runtime.promotion.value.live_effect ?? 'none');
 </script>
@@ -52,6 +67,22 @@ const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.
     <el-col :xs="12" :md="6"><el-card shadow="never" class="metric-card"><span>扫描时间</span><strong class="metric-text">{{ dateText(runtime.latestScan.value.scan?.observed_at) }}</strong></el-card></el-col>
     <el-col :xs="12" :md="6"><el-card shadow="never" class="metric-card"><span>扫描新鲜度</span><strong><el-tag :type="scanFreshness === 'fresh' ? 'success' : 'warning'">{{ freshnessLabel(scanFreshness) }}</el-tag></strong></el-card></el-col>
   </el-row>
+
+  <el-card shadow="never" class="section-gap" header="实时扫描性能（研究遥测）">
+    <el-alert title="阶段耗时只用于判断并行收益和数据库瓶颈，不参与信号、阈值或任何执行路径。" type="info" :closable="false" show-icon />
+    <el-descriptions :column="mobileLayout ? 1 : 4" border size="small" class="section-gap">
+      <el-descriptions-item label="总耗时">{{ scanPerformance.total_ms != null ? `${scanPerformance.total_ms} ms` : '-' }}</el-descriptions-item>
+      <el-descriptions-item label="遥测状态"><el-tag :type="scanPerformance.persistence_status === 'persisted' ? 'success' : 'warning'">{{ scanPerformance.persistence_status ?? '暂无' }}</el-tag></el-descriptions-item>
+      <el-descriptions-item label="并行边界">{{ Object.keys(scanPerformance.overlap ?? {}).length || 0 }} 处</el-descriptions-item>
+      <el-descriptions-item label="版本">{{ scanPerformance.schema_version ?? '-' }}</el-descriptions-item>
+    </el-descriptions>
+    <el-table v-if="scanStageRows.length" :data="scanStageRows" size="small" max-height="260">
+      <el-table-column label="阶段" min-width="190"><template #default="{ row }">{{ scanStageLabel(row.stage) }}</template></el-table-column>
+      <el-table-column prop="stage" label="内部键" min-width="220" show-overflow-tooltip />
+      <el-table-column label="耗时" width="120"><template #default="{ row }">{{ row.milliseconds }} ms</template></el-table-column>
+    </el-table>
+    <el-empty v-else description="最新扫描尚未提供阶段遥测" :image-size="48" />
+  </el-card>
 
   <el-card shadow="never" class="section-gap" header="观察池与同花顺看盘">
     <el-table :data="runtime.watchlistItems.value" size="small" max-height="330">

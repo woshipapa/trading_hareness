@@ -11,6 +11,7 @@ promotion registry.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from time import monotonic
@@ -152,7 +153,9 @@ class XiaojieLeaderFlowRuntime:
         return value
 
     async def run(self, *, scan_id: uuid.UUID, observed_at: datetime,
-                                      all_a_rows: list[dict[str, Any]]) -> dict[str, Any]:
+                                      all_a_rows: list[dict[str, Any]],
+                                      before_persist: Callable[[], Awaitable[None]] | None = None,
+                                      ) -> dict[str, Any]:
         """Evaluate the leader pool from this scan's own cross-section.
 
         Research-only throughout: the emitted signal events carry a dedicated
@@ -171,6 +174,8 @@ class XiaojieLeaderFlowRuntime:
         if not reference.get("limits"):
             return {"status": "blocked", "reason": "session trade limits unavailable"}
         board_flow = await self.board_flow_point(trading_date, observed_at)
+        ma5_break_state_before = deepcopy(self.ma5_break_state)
+        launch_velocity_state_before = deepcopy(self.launch_velocity_state)
         result = evaluate_xiaojie_leader_pool(
             all_a_rows, limits=reference["limits"], membership=reference["membership"],
             references=reference["references"], observed_at=observed_at,
@@ -201,6 +206,21 @@ class XiaojieLeaderFlowRuntime:
                     item.setdefault("risk_flags", []).append("order_book_missing")
                 if order_book_error:
                     item.setdefault("evidence", {})["order_book_error"] = order_book_error
+        # The evaluation above has no database write carrying this scan's
+        # foreign key.  A caller may overlap it with primary persistence, but
+        # rows carrying the scan foreign key must wait until that receipt is
+        # committed and visible to their own connection.
+        if before_persist is not None:
+            try:
+                await before_persist()
+            except BaseException:
+                # A failed primary scan must not leave the in-memory
+                # evaluation cursors ahead of durable research evidence.
+                self.ma5_break_state.clear()
+                self.ma5_break_state.update(ma5_break_state_before)
+                self.launch_velocity_state.clear()
+                self.launch_velocity_state.update(launch_velocity_state_before)
+                raise
         await self.deps.refresh_confluence(trading_date, observed_at, candidates)
         fresh = await self.deps.run_database(
             lambda: self.deps.with_connection(lambda connection: record_xiaojie_candidates(

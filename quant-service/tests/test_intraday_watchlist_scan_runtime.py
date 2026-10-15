@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 import unittest
 import uuid
+from unittest.mock import patch
 
 from app.intraday_watchlist_scan_runtime import (
     IntradayWatchlistScanRuntime,
@@ -74,6 +75,60 @@ class IntradayWatchlistScanRuntimeTests(unittest.TestCase):
         self.assertEqual(durations, [("blocked", 2.5)])
         self.assertEqual(calls[0], ("database", None))
         self.assertEqual(calls[1][0], "terminal")
+
+    def test_capture_health_write_is_joined_after_capture_without_blocking_it(self) -> None:
+        database = object()
+        async_database = object()
+        health_started = asyncio.Event()
+        health_release = asyncio.Event()
+        health_finished = []
+
+        async def run_database(operation, *args, **kwargs):
+            return operation(*args)
+
+        async def health(_captured):
+            health_started.set()
+            await health_release.wait()
+            health_finished.append(True)
+
+        async def fake_capture(*_args):
+            return SimpleNamespace()
+
+        async def run_scan(_request, dependencies):
+            await dependencies.capture_quotes(["000001.SZ"], dependencies.now_utc(), 20.0)
+            await asyncio.sleep(0)
+            self.assertTrue(health_started.is_set())
+            self.assertEqual(health_finished, [])
+            health_release.set()
+            return {"status": "completed"}
+
+        async def empty_async(*_args, **_kwargs):
+            return {}
+
+        dependencies = IntradayWatchlistScanRuntimeDependencies(
+            clock=iter((10.0, 12.5)).__next__, observe_duration=lambda *_: None,
+            now_utc=lambda: datetime(2026, 8, 24, tzinfo=timezone.utc), new_scan_id=uuid.uuid4,
+            async_database=async_database, database=database, run_database=run_database,
+            watchlist_capacity=lambda _: {"max_symbols": 40}, read_watchlists=empty_async,
+            persist_terminal=lambda *_: None, realtime_session=empty_async, prune_rule_inputs=empty_async,
+            retry_pending_alerts=empty_async, read_exact_memberships=empty_async,
+            mapped_peers=lambda *_: {}, high_frequency_window=lambda _: False,
+            quote_capture_dependencies=object(), surge_context=empty_async, peer_context=lambda *_: {},
+            watch_priority_key=lambda row: row["symbol"], realtime_validation_slice=lambda symbols, offset, limit: (symbols, offset),
+            board_cache_evidence=empty_async, build_source_status=lambda **_: {}, persist_signals=empty_async,
+            read_shadow_pool=empty_async, shadow_rotation_due=lambda _: False, shadow_rotation_slice=lambda *_: ([], 0),
+            tencent_watch_quotes=empty_async, merge_watch_prices=lambda *_: None, safe_error=lambda value, _: value,
+            shadow_quote_errors=(ValueError,), rotation_persistence_dependencies=object(),
+            persist_rotation_observations=lambda **_: {}, persist_rotation_scan_status=lambda *_args, **_kwargs: None,
+            json_safe=lambda value: value, deliver_alert=empty_async, alert_text=lambda *_args, **_: "",
+            decision_card_url=lambda _: None, run_scan=run_scan, persist_quote_health=health,
+        )
+
+        with patch("app.intraday_watchlist_scan_runtime.capture_watch_quotes", new=fake_capture):
+            result = asyncio.run(IntradayWatchlistScanRuntime(dependencies).run(SimpleNamespace(symbols=[])))
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(health_finished, [True])
 
 
 if __name__ == "__main__":

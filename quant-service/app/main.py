@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from time import monotonic
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Awaitable, Callable, Literal, Mapping
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -1911,8 +1911,13 @@ def _with_connection(action: Any) -> Any:
 
 
 async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
-                                  all_a_rows: list[dict[str, Any]]) -> dict[str, Any]:
-    return await xiaojie_leader_flow.run(scan_id=scan_id, observed_at=observed_at, all_a_rows=all_a_rows)
+                                  all_a_rows: list[dict[str, Any]],
+                                  before_persist: Callable[[], Awaitable[None]] | None = None,
+                                  ) -> dict[str, Any]:
+    return await xiaojie_leader_flow.run(
+        scan_id=scan_id, observed_at=observed_at, all_a_rows=all_a_rows,
+        before_persist=before_persist,
+    )
 
 
 strategy_confluence = ConfluenceBook()

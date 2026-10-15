@@ -7,11 +7,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 import re
+from time import perf_counter
 from typing import Any
 import uuid
 
 from .all_a_snapshot_sources import fallback_provenance, scan_snapshot_decision_eligible
 from .intraday_features import strongest_group_peer_context
+from .intraday_scan_timing import build_scan_performance
 from .platform.strategy_data_needs import strategy_taxonomies
 from . import settings
 
@@ -117,6 +119,8 @@ class IntradayWatchlistScanDependencies:
     decision_card_url: Callable[[str], str | None]
     xiaojie_leader_flow: Callable[..., Awaitable[dict[str, Any]]] | None = None
     persist_xiaojie_status: Callable[[uuid.UUID, dict[str, Any]], Awaitable[None]] | None = None
+    persist_scan_performance: Callable[[uuid.UUID, dict[str, Any]], Awaitable[None]] | None = None
+    monotonic: Callable[[], float] = perf_counter
 
 
 def build_peer_contexts(
@@ -166,6 +170,7 @@ LEADER_FLOW_SNAPSHOT_NOT_ELIGIBLE_REASON = "the all-A snapshot's source is not d
 
 async def _leader_flow(
     scan_id: Any, observed_at: Any, quote_capture: Any, dependencies: "IntradayWatchlistScanDependencies",
+    *, before_persist: Callable[[], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Run the leader-flow strategy on this scan's cross-section, when its source may be acted on.
 
@@ -180,9 +185,22 @@ async def _leader_flow(
         return {"status": "skipped",
                 "reason": f"{LEADER_FLOW_SNAPSHOT_NOT_ELIGIBLE_REASON}: {provider}",
                 **fallback_provenance(status)}
-    return await dependencies.xiaojie_leader_flow(
-        scan_id=scan_id, observed_at=observed_at, all_a_rows=quote_capture.all_a_rows,
-    )
+    try:
+        return await dependencies.xiaojie_leader_flow(
+            scan_id=scan_id, observed_at=observed_at, all_a_rows=quote_capture.all_a_rows,
+            before_persist=before_persist,
+        )
+    except TypeError as error:
+        # Replay/test adapters written before the receipt barrier remain
+        # usable.  The production runtime accepts it; never hide a TypeError
+        # raised by the adapter body itself.
+        if "before_persist" not in str(error):
+            raise
+        if before_persist is not None:
+            await before_persist()
+        return await dependencies.xiaojie_leader_flow(
+            scan_id=scan_id, observed_at=observed_at, all_a_rows=quote_capture.all_a_rows,
+        )
 
 
 async def _market_wide_research(
@@ -240,31 +258,144 @@ async def _deliver_confirmed(
     return list(await asyncio.gather(*(deliver(signal) for signal in confirmed)))
 
 
+async def _cancel_tasks(tasks: list[asyncio.Task[Any]]) -> None:
+    """Cancel sibling scan tasks after one bounded input fails.
+
+    ``asyncio.gather`` does not cancel already-running siblings when one task
+    raises.  A provider timeout must therefore not leave a membership read or
+    cache read running into the next scan.  The tasks only own local reads or
+    provider calls; cancellation does not discard the captured evidence.
+    """
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _capture_with_memberships(
+    dependencies: IntradayWatchlistScanDependencies,
+    selected_symbols: list[str],
+    observed_at: datetime,
+    quote_timestamp_slo_seconds: float,
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Overlap the local point-in-time membership read with provider capture.
+
+    Both operations use the same scan timestamp.  Memberships are consumed
+    only after both complete, so the peer mapping still describes exactly the
+    captured batch and no partially-fetched quote can enter strategy inputs.
+    """
+    capture_observed_at = max(observed_at, dependencies.now_utc())
+    membership_task = asyncio.create_task(
+        dependencies.load_exact_memberships(selected_symbols, observed_at),
+        name="intraday-scan-memberships",
+    )
+    capture_task = asyncio.create_task(
+        dependencies.capture_quotes(
+            selected_symbols, capture_observed_at, quote_timestamp_slo_seconds,
+        ),
+        name="intraday-scan-quotes",
+    )
+    tasks = [membership_task, capture_task]
+    try:
+        membership_rows, quote_capture = await asyncio.gather(membership_task, capture_task)
+    except BaseException:
+        await _cancel_tasks(tasks)
+        raise
+    return quote_capture, membership_rows
+
+
+async def _surge_and_board_evidence(
+    dependencies: IntradayWatchlistScanDependencies,
+    watches: list[dict[str, Any]],
+    mapped_peer_groups: dict[str, dict[str, Any]],
+    anomaly_symbols: list[str],
+    observed_at: datetime,
+) -> tuple[tuple[dict[str, dict[str, Any]], dict[str, Any]], dict[str, Any]]:
+    """Overlap minute enrichment with the already-cached board-flow read."""
+    surge_task = asyncio.create_task(
+        _surge_context_with_priority(
+            dependencies.surge_context, watches, mapped_peer_groups, anomaly_symbols,
+        ),
+        name="intraday-scan-minute-enrichment",
+    )
+    board_task = asyncio.create_task(
+        dependencies.board_cache_evidence(observed_at),
+        name="intraday-scan-board-cache",
+    )
+    tasks = [surge_task, board_task]
+    try:
+        surge_result, board_cache_evidence = await asyncio.gather(surge_task, board_task)
+    except BaseException:
+        await _cancel_tasks(tasks)
+        raise
+    return surge_result, board_cache_evidence
+
+
 async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDependencies) -> dict[str, Any]:
     """Run one scan without owning database transactions or provider clients."""
+    started_at = dependencies.monotonic()
+    stage_started_at = started_at
+    stage_ms: dict[str, float] = {}
+
+    def mark_stage(stage: str) -> None:
+        """Close one sequential orchestration stage using the monotonic clock."""
+        nonlocal stage_started_at
+        now = dependencies.monotonic()
+        stage_ms[stage] = round(max(0.0, now - stage_started_at) * 1000.0, 1)
+        stage_started_at = now
+
+    def performance(status: str, *, persistence_status: str = "pending") -> dict[str, Any]:
+        now = dependencies.monotonic()
+        return build_scan_performance(
+            status=status, stage_ms=stage_ms,
+            total_ms=max(0.0, now - started_at) * 1000.0,
+            persistence_status=persistence_status,
+        )
+
+    async def persist_performance(scan_id: uuid.UUID, value: dict[str, Any]) -> dict[str, Any]:
+        """Persist telemetry best-effort so an observability outage cannot fail a scan."""
+        callback = dependencies.persist_scan_performance
+        if callback is None:
+            value["persistence_status"] = "not_configured"
+            return value
+        try:
+            await callback(scan_id, value)
+        except Exception:  # noqa: BLE001 - performance evidence is non-critical
+            value["persistence_status"] = "degraded"
+        return value
+
     observed_at = dependencies.now_utc()
     active, reason = await dependencies.realtime_session()
     watches = await dependencies.load_watches(list(request.symbols))
     selected_symbols = [str(row["symbol"]) for row in watches]
     scan_id = dependencies.new_scan_id()
     capacity = dependencies.watchlist_capacity(len(watches))
+    mark_stage("session_and_watchlist")
     if capacity["blocked"]:
+        scan_performance = performance("blocked", persistence_status="terminal")
         await dependencies.persist_terminal(
             scan_id, observed_at, "blocked", list(request.symbols),
-            {"watchlist_capacity": capacity}, {"watched": len(watches)},
+            {"watchlist_capacity": capacity, "scan_performance": scan_performance}, {"watched": len(watches)},
         )
         return {
             "status": "blocked", "scan_id": str(scan_id), "observed_at": observed_at.isoformat(),
             "reason": capacity["reason"], "watchlist_capacity": capacity, "alerts": [],
+            "scan_performance": scan_performance,
         }
     if not active:
+        scan_performance = performance("blocked", persistence_status="terminal")
         await dependencies.persist_terminal(
             scan_id, observed_at, "blocked", list(request.symbols),
-            {"session": reason}, {"watched": len(watches)},
+            {"session": reason, "scan_performance": scan_performance}, {"watched": len(watches)},
         )
-        return {"status": "blocked", "scan_id": str(scan_id), "observed_at": observed_at.isoformat(), "reason": reason, "alerts": []}
+        return {
+            "status": "blocked", "scan_id": str(scan_id), "observed_at": observed_at.isoformat(),
+            "reason": reason, "alerts": [], "scan_performance": scan_performance,
+        }
     await dependencies.prune_rule_inputs(observed_at)
     retry_summary = await dependencies.retry_pending_alerts()
+    mark_stage("pre_capture")
     if not watches:
         # An empty observation pool means there is nothing to *watch*, not that
         # there is nothing to research. Leader-flow reads the all-A
@@ -272,31 +403,58 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         # where its candidates come from, so returning here used to silence the
         # market-wide strategy for the whole session whenever the pool was
         # cleared - the one moment its recommendations matter most.
+        market_started_at = dependencies.monotonic()
         market_only = await _market_wide_research(
             scan_id, observed_at, quote_timestamp_slo_seconds=45.0, dependencies=dependencies,
         )
+        stage_ms["market_wide_research"] = round(
+            max(0.0, dependencies.monotonic() - market_started_at) * 1000.0, 1,
+        )
+        scan_performance = performance("completed", persistence_status="terminal")
         await dependencies.persist_terminal(
             scan_id, observed_at, "completed", list(request.symbols),
-            {"tencent": "skipped", **market_only["source_status"]}, {"watched": 0},
+            {"tencent": "skipped", **market_only["source_status"], "scan_performance": scan_performance},
+            {"watched": 0},
         )
         return {
             "status": "completed", "scan_id": str(scan_id), "observed_at": observed_at.isoformat(), "alerts": [],
             "xiaojie_leader_flow": market_only["xiaojie"],
+            "scan_performance": scan_performance,
             "notice": "观察池为空：全市场策略研究照常运行，逐票盯盘需要先通过 watchlists API 添加标的。",
         }
 
-    membership_rows = await dependencies.load_exact_memberships(selected_symbols, observed_at)
-    mapped_peer_groups = dependencies.mapped_peers(selected_symbols, membership_rows)
     quote_timestamp_slo_seconds = 20.0 if dependencies.high_frequency_window(observed_at) else 45.0
     # Judge quote freshness against the clock when quotes are fetched, not the
     # scan start: the watch/membership reads above cross the database tunnel
     # and took >5 s at times on 2026-09-22, which made every fresh Longhu row a
     # "future_timestamp" and every Tencent row not-fresh in the same scan.
-    quote_capture = await dependencies.capture_quotes(
-        selected_symbols, max(observed_at, dependencies.now_utc()), quote_timestamp_slo_seconds)
+    quote_capture, membership_rows = await _capture_with_memberships(
+        dependencies, selected_symbols, observed_at, quote_timestamp_slo_seconds,
+    )
+    mark_stage("capture_and_memberships")
+    # The leader-flow branch can evaluate its all-A snapshot and local
+    # references while the primary scan is being persisted.  It must wait
+    # before its first scan_id foreign-key write; the event is released only
+    # after persist_signals returns from the committed transaction.
+    receipt_ready = asyncio.Event()
+
+    async def run_xiaojie_safely() -> dict[str, Any]:
+        try:
+            return await _leader_flow(
+                scan_id, observed_at, quote_capture, dependencies,
+                before_persist=receipt_ready.wait,
+            )
+        except Exception as error:  # noqa: BLE001 - never fail the primary scan
+            return {"status": "degraded", "reason": str(error)[:240]}
+
+    xiaojie_task = (
+        asyncio.create_task(run_xiaojie_safely(), name="intraday-scan-xiaojie-research")
+        if dependencies.xiaojie_leader_flow is not None else None
+    )
+    mapped_peer_groups = dependencies.mapped_peers(selected_symbols, membership_rows)
     anomaly_symbols = quote_volume_anomaly_symbols(watches, quote_capture.quotes)
-    surge_features, surge_source = await _surge_context_with_priority(
-        dependencies.surge_context, watches, mapped_peer_groups, anomaly_symbols,
+    (surge_features, surge_source), board_cache_evidence = await _surge_and_board_evidence(
+        dependencies, watches, mapped_peer_groups, anomaly_symbols, observed_at,
     )
     surge_source["minute_enrichment_priority"] = {
         "symbols": anomaly_symbols,
@@ -323,7 +481,6 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     # rt_min validation and the rt_k cross-check came only from Tushare, retired on 2026-10-08.
     realtime_minutes: dict[str, dict[str, Any]] = {}
     fast_confirmations: dict[str, dict[str, Any]] = {}
-    board_cache_evidence = await dependencies.board_cache_evidence(observed_at)
     source_status = dependencies.build_source_status(
         selected_symbols=selected_symbols, quotes=quote_capture.quotes, all_a_rows=quote_capture.all_a_rows,
         fresh_watch_rows=quote_capture.fresh_watch_rows, sina_watch_rows=quote_capture.sina_watch_rows,
@@ -344,17 +501,49 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         fast_confirmations=fast_confirmations, board_cache_evidence=board_cache_evidence,
         quote_timestamp_slo_seconds=quote_timestamp_slo_seconds,
     )
-    signals = await dependencies.persist_signals(
-        scan_id, observed_at, selected_symbols, source_status, watches, quote_capture.quotes,
-        quote_capture.all_a_rows, quote_capture.latency_ms, realtime_minutes, surge_features,
-        peer_contexts, fast_confirmations,
+    mark_stage("enrichment_and_strategy_prepare")
+    source_status["scan_performance"] = performance("running")
+    persist_started_at = dependencies.monotonic()
+    try:
+        signals = await dependencies.persist_signals(
+            scan_id, observed_at, selected_symbols, source_status, watches, quote_capture.quotes,
+            quote_capture.all_a_rows, quote_capture.latency_ms, realtime_minutes, surge_features,
+            peer_contexts, fast_confirmations,
+        )
+    except BaseException:
+        if xiaojie_task is not None:
+            await _cancel_tasks([xiaojie_task])
+        raise
+    persist_finished_at = dependencies.monotonic()
+    stage_ms["signal_persist"] = round(
+        max(0.0, persist_finished_at - persist_started_at) * 1000.0, 1,
     )
-    # Deliver confirmed alerts before anything else: the shadow rotation and
-    # 小杰 research below never change these signals.  Running them while the
-    # delivery was only scheduled let their work hold the outbox write back by
-    # ~10 s on 2026-09-22; deliveries themselves take well under a second.
+    stage_started_at = persist_finished_at
+    receipt_ready.set()
+    # The primary signal transaction is committed above.  Join the independent
+    # all-A research branch while the confirmed alert outbox performs its
+    # network calls.  It consumes this immutable capture and has its own
+    # research-only stage, so it cannot alter the primary signal state.
     confirmed = [signal for signal in signals if signal["state"] == "confirmed"]
-    deliveries = await _deliver_confirmed(confirmed, dependencies)
+
+    if dependencies.xiaojie_leader_flow is not None:
+        # Put the primary delivery coroutine first so its outbox tasks are
+        # scheduled before the independent research branch.  The research
+        # task has already evaluated while persistence ran; the receipt barrier
+        # above made its foreign-key writes safe.  Both branches are still
+        # awaited as one bounded pair, so cancellation cannot leave a detached
+        # task behind.
+        deliveries, xiaojie_observation = await asyncio.gather(
+            _deliver_confirmed(confirmed, dependencies), xiaojie_task,
+        )
+    else:
+        deliveries = await _deliver_confirmed(confirmed, dependencies)
+        xiaojie_observation = {"status": "disabled"}
+    delivery_finished_at = dependencies.monotonic()
+    stage_ms["delivery_and_research"] = round(
+        max(0.0, delivery_finished_at - stage_started_at) * 1000.0, 1,
+    )
+    stage_started_at = delivery_finished_at
     shadow_observation: dict[str, Any] = {"status": "standby", "reason": "awaiting_next_minute_rotation"}
     if dependencies.shadow_rotation_due(observed_at):
         try:
@@ -394,23 +583,25 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         except Exception as error:  # noqa: BLE001 - preserve the independent primary scan
             shadow_observation = {"status": "degraded", "reason": str(error)[:240]}
         await dependencies.persist_shadow_status(scan_id, shadow_observation)
+    shadow_finished_at = dependencies.monotonic()
+    stage_ms["shadow_rotation"] = round(
+        max(0.0, shadow_finished_at - stage_started_at) * 1000.0, 1,
+    )
     if shadow_observation.get("status") != "standby":
         source_status["ten_day_leader_rotation_shadow"] = shadow_observation
     # Leader-flow research runs on the all-A cross-section this scan already
-    # fetched, so it adds no provider call.  Like the rotation shadow above it
-    # is fully independent: any failure is recorded and the primary watchlist
-    # scan continues untouched.
-    xiaojie_observation: dict[str, Any] = {"status": "disabled"}
+    # fetched, so it adds no provider call.  It started beside alert delivery
+    # above and is joined before returning so persisted status and the response
+    # cannot disagree.  Like the rotation shadow, a failure never changes the
+    # primary watchlist scan.
     if dependencies.xiaojie_leader_flow is not None:
-        try:
-            xiaojie_observation = await _leader_flow(scan_id, observed_at, quote_capture, dependencies)
-        except Exception as error:  # noqa: BLE001 - never fail the primary scan
-            xiaojie_observation = {"status": "degraded", "reason": str(error)[:240]}
         source_status["xiaojie_leader_flow"] = xiaojie_observation
         # The row was written with the primary signals above, so the in-memory
         # mutation alone never reaches the database.
         if dependencies.persist_xiaojie_status is not None:
             await dependencies.persist_xiaojie_status(scan_id, xiaojie_observation)
+    scan_performance = performance("completed", persistence_status="persisted")
+    source_status["scan_performance"] = await persist_performance(scan_id, scan_performance)
     alerts: list[dict[str, Any]] = [
         {"signal_event_id": str(signal["signal_event_id"]), "symbol": signal["symbol"],
          "signal_type": signal["signal_type"], "severity": signal["severity"], "delivery": delivery}
@@ -419,6 +610,7 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     return {
         "status": "completed", "scan_id": str(scan_id), "observed_at": observed_at.isoformat(),
         "source_status": source_status,
+        "scan_performance": scan_performance,
         "signals": [{key: value for key, value in signal.items() if key not in {"watch", "quote"}} for signal in signals],
         "alerts": alerts,
         "realtime_validation": {

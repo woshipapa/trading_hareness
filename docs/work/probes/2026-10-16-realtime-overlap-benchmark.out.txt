@@ -1,0 +1,3 @@
+command: docker compose -f compose.yaml run --rm --no-deps -T -v "$PWD:/src:ro" -w /src/quant-service quant-research env PYTHONPATH=/src/quant-service python /src/docs/work/probes/2026-10-16-realtime-overlap-benchmark.py
+container: quant-research overlay, local deterministic synthetic I/O sleeps
+result: {"runs": 200, "clock": "perf_counter", "capture_membership_speedup": {"p50_x": 1.808, "p95_x": 2.377}, "minute_board_speedup": {"p50_x": 1.765, "p95_x": 2.345}, "scope": "synthetic bounded I/O sleeps; validates orchestration overlap, not provider throughput"}

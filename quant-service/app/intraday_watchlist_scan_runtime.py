@@ -7,11 +7,14 @@ to compose ports without embedding transactional closures in a route helper.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 import uuid
+
+from psycopg.types.json import Json
 
 from .intraday_watch_quote_capture import WatchQuoteCaptureDependencies, capture_watch_quotes
 from .intraday_watchlist_scan_service import IntradayWatchlistScanDependencies
@@ -70,8 +73,9 @@ class IntradayWatchlistScanRuntime:
     def __init__(self, dependencies: IntradayWatchlistScanRuntimeDependencies) -> None:
         self._dependencies = dependencies
 
-    def _scan_dependencies(self) -> IntradayWatchlistScanDependencies:
+    def _scan_dependencies(self) -> tuple[IntradayWatchlistScanDependencies, list[asyncio.Task[Any]]]:
         dependencies = self._dependencies
+        capture_health_tasks: list[asyncio.Task[Any]] = []
 
         async def load_watches(requested_symbols: list[str]) -> list[dict[str, Any]]:
             capacity = int(dependencies.watchlist_capacity(0)["max_symbols"])
@@ -99,7 +103,13 @@ class IntradayWatchlistScanRuntime:
                 dependencies.quote_capture_dependencies,
             )
             if dependencies.persist_quote_health is not None:
-                await dependencies.persist_quote_health(captured)
+                # Provider health is auxiliary telemetry.  Let the strategy
+                # pipeline consume the immutable capture immediately, then
+                # join this bounded write before the runtime returns.
+                capture_health_tasks.append(asyncio.create_task(
+                    dependencies.persist_quote_health(captured),
+                    name="intraday-capture-provider-health",
+                ))
             return captured
 
         async def persist_signals(*args: Any) -> list[dict[str, Any]]:
@@ -145,6 +155,18 @@ class IntradayWatchlistScanRuntime:
                     )
             await dependencies.run_database(write, timeout_seconds=10)
 
+        async def persist_scan_performance(scan_id: uuid.UUID, performance: dict[str, Any]) -> None:
+            """Merge timing evidence after the primary scan receipt commits."""
+            def write() -> None:
+                with dependencies.database.transaction() as connection:
+                    connection.execute(
+                        """UPDATE quant.intraday_scan_runs
+                              SET source_status=source_status || %s::jsonb
+                            WHERE scan_id=%s""",
+                        (Json({"scan_performance": dependencies.json_safe(performance)}), scan_id),
+                    )
+            await dependencies.run_database(write, timeout_seconds=10)
+
         async def persist_shadow_status(scan_id: uuid.UUID, status: dict[str, Any]) -> None:
             def write() -> None:
                 with dependencies.database.transaction() as connection:
@@ -181,14 +203,21 @@ class IntradayWatchlistScanRuntime:
             persist_shadow_status=persist_shadow_status,
             xiaojie_leader_flow=dependencies.xiaojie_leader_flow,
             persist_xiaojie_status=persist_xiaojie_status,
+            persist_scan_performance=persist_scan_performance,
+            monotonic=dependencies.clock,
             deliver_alert=dependencies.deliver_alert,
             alert_text=dependencies.alert_text,
             decision_card_url=dependencies.decision_card_url,
-        )
+        ), capture_health_tasks
 
     async def run(self, request: Any) -> dict[str, Any]:
         started_at = self._dependencies.clock()
-        payload = await self._dependencies.run_scan(request, self._scan_dependencies())
+        scan_dependencies, capture_health_tasks = self._scan_dependencies()
+        try:
+            payload = await self._dependencies.run_scan(request, scan_dependencies)
+        finally:
+            if capture_health_tasks:
+                await asyncio.gather(*capture_health_tasks, return_exceptions=True)
         self._dependencies.observe_duration(
             str(payload.get("status") or "unknown"),
             max(0.0, self._dependencies.clock() - started_at),

@@ -127,6 +127,61 @@ class LeaderFlowRuntimeTests(unittest.TestCase):
         self.assertEqual(len(marked[0]), 2)
         self.assertEqual(result["live_effect"], "none")
 
+    def test_scan_receipt_barrier_precedes_candidate_write(self):
+        flow, patches, _delivered, _marked = build(sent=0)
+        ready = []
+
+        async def before_persist():
+            ready.append("committed")
+
+        def record_candidates(*_args):
+            self.assertEqual(ready, ["committed"])
+            return [{"symbol": "000001.SZ", "mode": "trend", "evidence": {"board": {}}}]
+
+        patches[1].side_effect = record_candidates
+        for item in patches:
+            item.start()
+        try:
+            result = asyncio.run(flow.run(
+                scan_id=uuid.uuid4(), observed_at=OBSERVED, all_a_rows=[{"symbol": "x"}],
+                before_persist=before_persist,
+            ))
+        finally:
+            for item in patches:
+                item.stop()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(ready, ["committed"])
+
+    def test_failed_scan_receipt_restores_in_memory_evaluation_cursors(self):
+        flow, patches, _delivered, _marked = build(sent=0)
+        flow.ma5_break_state = {"old": 1}
+        flow.launch_velocity_state = {"old": 2}
+
+        def evaluate(*_args, **_kwargs):
+            flow.ma5_break_state["new"] = 3
+            flow.launch_velocity_state["new"] = 4
+            return {"candidates": [], "pool_size": 0, "evaluated": 0, "main_sector_count": 0,
+                    "regime": "normal", "market_gate": {"elapsed_session_minutes": 0}}
+
+        patches[0].side_effect = evaluate
+
+        async def failed_receipt():
+            raise RuntimeError("primary scan rolled back")
+
+        for item in patches:
+            item.start()
+        try:
+            with self.assertRaises(RuntimeError):
+                asyncio.run(flow.run(
+                    scan_id=uuid.uuid4(), observed_at=OBSERVED, all_a_rows=[{"symbol": "x"}],
+                    before_persist=failed_receipt,
+                ))
+        finally:
+            for item in patches:
+                item.stop()
+        self.assertEqual(flow.ma5_break_state, {"old": 1})
+        self.assertEqual(flow.launch_velocity_state, {"old": 2})
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

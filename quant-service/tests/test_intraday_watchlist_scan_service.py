@@ -67,6 +67,7 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
         observed_at = datetime(2026, 8, 24, 2, tzinfo=timezone.utc)
         event_id = uuid.uuid4()
         calls = []
+        persisted_performance = []
 
         async def session():
             return True, "continuous auction"
@@ -125,6 +126,9 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
             self.assertIn("card:000001.SZ", text)
             return {"status": "sent"}
 
+        async def persist_performance(scan_id, performance):
+            persisted_performance.append((scan_id, performance))
+
         dependencies = self.dependencies(
             now_utc=lambda: observed_at, realtime_session=session, load_watches=watches, persist_terminal=terminal,
             prune_rule_inputs=prune, retry_pending_alerts=retry, load_exact_memberships=memberships,
@@ -136,13 +140,156 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
             persist_signals=persist, deliver_alert=deliver,
             alert_text=lambda *_args, decision_card_url=None: f"alert {decision_card_url}",
             decision_card_url=lambda symbol: f"card:{symbol}",
+            persist_scan_performance=persist_performance,
         )
         result = asyncio.run(run_watchlist_scan(self.request(), dependencies))
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["source_status"], {"direct": 1})
+        self.assertEqual(result["source_status"]["direct"], 1)
+        self.assertEqual(result["scan_performance"]["schema_version"], "intraday-scan-timing-v1")
+        self.assertIn("capture_and_memberships", result["scan_performance"]["stage_ms"])
+        self.assertEqual(len(persisted_performance), 1)
+        self.assertEqual(persisted_performance[0][0], calls[1][1][0])
         self.assertEqual(result["alerts"][0]["delivery"]["status"], "sent")
         self.assertNotIn("watch", result["signals"][0])
         self.assertTrue(any(name == "persist" for name, _ in calls))
+
+    def test_capture_and_membership_reads_overlap_inside_one_scan(self):
+        observed_at = datetime(2026, 8, 24, 2, tzinfo=timezone.utc)
+        membership_started = asyncio.Event()
+        capture_started = asyncio.Event()
+
+        async def session():
+            return True, "continuous auction"
+
+        async def watches(_):
+            return [{"symbol": "000001.SZ"}]
+
+        async def memberships(_symbols, _observed_at):
+            membership_started.set()
+            await capture_started.wait()
+            return []
+
+        async def capture(symbols, _observed, _slo):
+            capture_started.set()
+            await membership_started.wait()
+            return SimpleNamespace(
+                quotes={symbol: {"price": 10.0} for symbol in symbols}, all_a_rows=[],
+                fresh_watch_rows=[], sina_watch_rows=[], eastmoney_watch_flow_rows=[],
+                eastmoney_watch_flow_status={"status": "fresh"}, derived_flow_status={"status": "fresh"},
+                all_a_snapshot_status={"status": "unavailable"}, latency_ms=1,
+            )
+
+        async def surge(*_args, **_kwargs):
+            return {}, {}
+
+        dependencies = self.dependencies(
+            now_utc=lambda: observed_at, realtime_session=session, load_watches=watches,
+            load_exact_memberships=memberships, capture_quotes=capture, surge_context=surge,
+            persist_signals=lambda *_args, **_kwargs: asyncio.sleep(0, result=[]),
+        )
+        result = asyncio.run(run_watchlist_scan(self.request(), dependencies))
+        self.assertEqual(result["status"], "completed")
+
+    def test_minute_enrichment_and_board_cache_overlap_after_capture(self):
+        observed_at = datetime(2026, 8, 24, 2, tzinfo=timezone.utc)
+        surge_started = asyncio.Event()
+        board_started = asyncio.Event()
+
+        async def session():
+            return True, "continuous auction"
+
+        async def watches(_):
+            return [{"symbol": "000001.SZ"}]
+
+        async def capture(_symbols, _observed, _slo):
+            return SimpleNamespace(
+                quotes={"000001.SZ": {"price": 10.0}}, all_a_rows=[],
+                fresh_watch_rows=[], sina_watch_rows=[], eastmoney_watch_flow_rows=[],
+                eastmoney_watch_flow_status={"status": "fresh"}, derived_flow_status={"status": "fresh"},
+                all_a_snapshot_status={"status": "unavailable"}, latency_ms=1,
+            )
+
+        async def surge(*_args, **_kwargs):
+            surge_started.set()
+            await board_started.wait()
+            return {}, {}
+
+        async def board(_observed_at):
+            board_started.set()
+            await surge_started.wait()
+            return {"status": "cached"}
+
+        dependencies = self.dependencies(
+            now_utc=lambda: observed_at, realtime_session=session, load_watches=watches,
+            capture_quotes=capture, surge_context=surge, board_cache_evidence=board,
+            build_source_status=lambda **kwargs: {"eastmoney_board_flow": kwargs["board_cache_evidence"]},
+            persist_signals=lambda *_args, **_kwargs: asyncio.sleep(0, result=[]),
+        )
+        result = asyncio.run(run_watchlist_scan(self.request(), dependencies))
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["source_status"]["eastmoney_board_flow"], {"status": "cached"})
+
+    def test_research_branch_overlaps_confirmed_alert_delivery_after_persist(self):
+        observed_at = datetime(2026, 8, 24, 2, tzinfo=timezone.utc)
+        xiaojie_started = asyncio.Event()
+        receipt_released = asyncio.Event()
+        delivery_started = asyncio.Event()
+        persisted_status = []
+        event_id = uuid.uuid4()
+
+        async def session():
+            return True, "continuous auction"
+
+        async def watches(_):
+            return [{"symbol": "000001.SZ"}]
+
+        async def capture(_symbols, _observed, _slo):
+            return SimpleNamespace(
+                quotes={"000001.SZ": {"price": 10.0}}, all_a_rows=[],
+                fresh_watch_rows=[], sina_watch_rows=[], eastmoney_watch_flow_rows=[],
+                eastmoney_watch_flow_status={"status": "fresh"}, derived_flow_status={"status": "fresh"},
+                all_a_snapshot_status={"status": "fresh", "cross_sectional": True}, latency_ms=1,
+            )
+
+        async def surge(*_args, **_kwargs):
+            return {}, {}
+
+        async def persist(*_args, **_kwargs):
+            await asyncio.sleep(0)
+            self.assertTrue(xiaojie_started.is_set())
+            self.assertFalse(receipt_released.is_set())
+            return [{
+                "signal_event_id": event_id, "symbol": "000001.SZ", "signal_type": "entry",
+                "severity": "high", "state": "confirmed", "watch": {"symbol": "000001.SZ"},
+                "quote": {"price": 10.0}, "minute": {},
+            }]
+
+        async def xiaojie(*, before_persist, **_kwargs):
+            xiaojie_started.set()
+            await before_persist()
+            receipt_released.set()
+            await delivery_started.wait()
+            return {"status": "completed", "live_effect": "none"}
+
+        async def deliver(_event_id, _text):
+            delivery_started.set()
+            await xiaojie_started.wait()
+            return {"status": "sent"}
+
+        async def persist_xiaojie(_scan_id, status):
+            persisted_status.append(status)
+
+        dependencies = self.dependencies(
+            now_utc=lambda: observed_at, realtime_session=session, load_watches=watches,
+            capture_quotes=capture, surge_context=surge, persist_signals=persist,
+            xiaojie_leader_flow=xiaojie, persist_xiaojie_status=persist_xiaojie,
+            deliver_alert=deliver,
+        )
+        result = asyncio.run(run_watchlist_scan(self.request(), dependencies))
+        self.assertEqual(result["alerts"][0]["delivery"]["status"], "sent")
+        self.assertEqual(result["xiaojie_leader_flow"]["status"], "completed")
+        self.assertTrue(receipt_released.is_set())
+        self.assertEqual(persisted_status, [{"status": "completed", "live_effect": "none"}])
 
     @staticmethod
     def dependencies(**overrides):
