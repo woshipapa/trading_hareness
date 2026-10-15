@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   auctionRows, bandCounts, breadthText, displayRows, failingChecks, fieldHealthText, pctText, radarHeadline, radarOption, radarRows,
-  radarTooltip, stars, tone, yi, type RadarDay,
+  radarTooltip, stars, timingPhaseGroups, tone, yi, type RadarDay, type StrategyTimingRow,
 } from './session-radar';
 
 const cell = (turnover: number, count = 1) => ({ turnover, count });
@@ -149,5 +149,22 @@ describe('session radar', () => {
     expect([pctText(11.4498), pctText(-2.88), pctText(null)]).toEqual(['+11.45%', '-2.88%', '-']);
     expect([tone(1), tone(-1), tone(0)]).toEqual(['up', 'down', 'flat']);
     expect([stars(0), stars(2), yi(undefined)]).toEqual(['—', '★★', '-']);
+  });
+
+  it('projects the timing board into extensible phase groups', () => {
+    const row = (phase: string, symbol?: string): StrategyTimingRow => ({
+      strategy_key: 'dragon_leader_research', name: '龙头研究', maturity: 'shadow', status: symbol ? 'candidates_available' : 'waiting_for_candidates',
+      active_phase: phase, timing_plans: [
+        { phase: 'auction', window: '09:15-09:25', entry_mode: 'auction_candidate', buy_point: '竞价快照', why: '连板承接', evidence: ['auction'] },
+        { phase: 'intraday', window: '09:30-14:20', entry_mode: 'intraday_confirmation', buy_point: '回封', why: '量价确认', evidence: ['entry_signals'] },
+      ],
+      candidates: symbol ? [{ strategy_key: 'dragon_leader_research', symbol, status: 'research_candidate', research_action: 'buy_candidate', phase, window: '09:15-09:25', entry_mode: 'auction_candidate', buy_point: '竞价快照', selection_reasons: ['连板承接'], missing_evidence: [], research_only: true, live_effect: 'none' }] : [],
+      research_only: true, live_effect: 'none',
+    });
+    const groups = timingPhaseGroups({ active_phase: 'auction', strategies: [row('auction', '000001.SZ'), row('auction')] });
+    expect(groups.map((group) => [group.key, group.active, group.rows.length, group.candidates.length])).toEqual([
+      ['auction', true, 2, 1], ['intraday', false, 2, 0], ['near_close', false, 0, 0], ['post_close', false, 0, 0],
+    ]);
+    expect(groups[0].candidates[0].strategy_name).toBe('龙头研究');
   });
 });

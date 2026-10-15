@@ -279,6 +279,44 @@ export type StrategyTimingRow = {
   active_phase: string; timing_plans: TimingPlan[]; candidates: TimingCandidate[];
   research_only: boolean; live_effect: string;
 };
+export type TimingPhase = 'auction' | 'intraday' | 'near_close' | 'post_close';
+export type TimingPhaseDefinition = {
+  key: TimingPhase; label: string; window: string; description: string;
+};
+export type TimingPhaseGroup = TimingPhaseDefinition & {
+  active: boolean; rows: StrategyTimingRow[]; candidates: Array<TimingCandidate & { strategy_name: string }>;
+};
+
+/**
+ * The phase strip is intentionally data driven. Adding a new research phase
+ * means adding one definition here; the cards and the detail table consume
+ * the same projection and do not need another branch in the view.
+ */
+export const TIMING_PHASES: readonly TimingPhaseDefinition[] = [
+  { key: 'auction', label: '竞价', window: '09:15–09:25', description: '竞价快照、封单、换手与连板高度' },
+  { key: 'intraday', label: '盘中', window: '09:30–14:20', description: '承接、回踩、回封与大单回流' },
+  { key: 'near_close', label: '尾盘', window: '14:30–15:00', description: '收盘强度与次日观察参考' },
+  { key: 'post_close', label: '盘后', window: '15:10–18:00', description: '结算样本、失效原因与 AI 复盘' },
+] as const;
+
+/** Group every registered strategy by its declared phase, including rows that
+ * are still waiting for today's source. Candidates are kept with their
+ * strategy name so the active-phase cards can be rendered without duplicating
+ * the backend contract or losing attribution.
+ */
+export function timingPhaseGroups(
+  board: { active_phase?: string | null; strategies?: StrategyTimingRow[] } | null | undefined,
+): TimingPhaseGroup[] {
+  const strategies = board?.strategies ?? [];
+  const activePhase = board?.active_phase;
+  return TIMING_PHASES.map((definition) => {
+    const rows = strategies.filter((row) => row.active_phase === definition.key || row.timing_plans.some((plan) => plan.phase === definition.key));
+    const candidates = rows.flatMap((row) => row.candidates
+      .filter((candidate) => candidate.phase === definition.key)
+      .map((candidate) => ({ ...candidate, strategy_name: row.name })));
+    return { ...definition, active: activePhase === definition.key, rows, candidates };
+  });
+}
 export type LeaderboardCell = {
   days: number; picks: number; scored: number; mean_open_to_close_pct: number | null; rose_share: number | null;
   opened_at_limit: number; without_bar: number;

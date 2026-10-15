@@ -6,8 +6,8 @@ import { getJson } from '../../api/http';
 import {
   BAND_LABELS, GATE_LABELS, HEALTH_LABELS, HEALTH_TYPES, SEGMENT_LABELS, auctionRows, bandCounts, boardText,
   breadthText, failingChecks, fieldHealthText, lineRankText,
-  pctText, radarHeadline, radarOption, radarRows, shanghaiTime, shanghaiToday, stars, tone, yi,
-  type CardPick, type IndicatorHealth, type LimitDetailDay, type RadarDay, type StrategyCardsDay, type StrategyTimingRow,
+  pctText, radarHeadline, radarOption, radarRows, shanghaiTime, shanghaiToday, stars, timingPhaseGroups, tone, yi,
+  TIMING_PHASES, type CardPick, type IndicatorHealth, type LimitDetailDay, type RadarDay, type StrategyCardsDay, type StrategyTimingRow, type TimingPhase,
 } from '../../research/session-radar';
 
 const tradeDate = ref(shanghaiToday());
@@ -21,12 +21,15 @@ const cards = ref<StrategyCardsDay | null>(null);
 const limits = ref<LimitDetailDay | null>(null);
 const health = ref<IndicatorHealth | null>(null);
 const errors = ref<Record<string, string>>({});
+const selectedPhase = ref<TimingPhase>('auction');
+const phaseSelectionTouched = ref(false);
 let timer: ReturnType<typeof setInterval> | undefined;
 let readVersion = 0;
+let activeController: AbortController | undefined;
 
-async function read<T>(key: string, path: string, version: number): Promise<T | null> {
+async function read<T>(key: string, path: string, version: number, signal: AbortSignal): Promise<T | null> {
   try {
-    const result = await getJson<T>(path);
+    const result = await getJson<T>(path, { signal });
     if (version === readVersion) {
       const next = { ...errors.value };
       delete next[key];
@@ -34,6 +37,7 @@ async function read<T>(key: string, path: string, version: number): Promise<T | 
     }
     return result;
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return null;
     if (version === readVersion) {
       errors.value = { ...errors.value, [key]: error instanceof Error ? error.message : String(error) };
     }
@@ -45,16 +49,16 @@ function dayParam(): string {
   return encodeURIComponent(tradeDate.value);
 }
 
-async function loadRadar(version: number) {
+async function loadRadar(version: number, signal: AbortSignal) {
   const segments = segment.value === 'all' ? '' : '&segments=true';
-  const radarDay = await read<RadarDay>('radar', `/api/research/market/radar?trade_date=${dayParam()}${segments}`, version);
+  const radarDay = await read<RadarDay>('radar', `/api/research/market/radar?trade_date=${dayParam()}${segments}`, version, signal);
   if (version === readVersion) radar.value = radarDay;
 }
 
-async function loadCardsAndHealth(version: number) {
+async function loadCardsAndHealth(version: number, signal: AbortSignal) {
   const [cardDay, healthDay] = await Promise.all([
-    read<StrategyCardsDay>('cards', `/api/research/strategy/cards?trade_date=${dayParam()}&per_line=${perLine.value}`, version),
-    read<IndicatorHealth>('health', `/api/research/indicators/health?trade_date=${dayParam()}`, version),
+    read<StrategyCardsDay>('cards', `/api/research/strategy/cards?trade_date=${dayParam()}&per_line=${perLine.value}`, version, signal),
+    read<IndicatorHealth>('health', `/api/research/indicators/health?trade_date=${dayParam()}`, version, signal),
   ]);
   if (version === readVersion) {
     cards.value = cardDay;
@@ -62,18 +66,43 @@ async function loadCardsAndHealth(version: number) {
   }
 }
 
-// Everything at once on open, a date change or the refresh button.
+function shanghaiMinutes(now: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0);
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0);
+  return hour * 60 + minute;
+}
+
+/** Limit detail is a close/replay archive. It does not belong in every live
+ * refresh before the market has produced a close, so keep that request on the
+ * useful side of the wire and preserve parallelism for the live paths. */
+function shouldFetchLimits(): boolean {
+  return tradeDate.value !== shanghaiToday() || shanghaiMinutes() >= (15 * 60 + 10);
+}
+
+// Live reads are issued together. The close archive is fetched only for a
+// historical date or after the close window, avoiding an irrelevant request
+// during the pre-open loop while keeping owner-side capacity available for the
+// three real-time projections.
 async function load() {
+  activeController?.abort();
+  const controller = new AbortController();
+  activeController = controller;
   const version = ++readVersion;
   loading.value = true;
   errors.value = {};
-  const [, , limitDay] = await Promise.all([
-    loadRadar(version), loadCardsAndHealth(version),
-    read<LimitDetailDay>('limits', `/api/research/market/limit-detail?trade_date=${dayParam()}`, version),
-  ]);
+  const fetchLimits = shouldFetchLimits();
+  if (!fetchLimits) limits.value = null;
+  const limitRead = fetchLimits
+    ? read<LimitDetailDay>('limits', `/api/research/market/limit-detail?trade_date=${dayParam()}`, version, controller.signal)
+    : Promise.resolve(null);
+  const [, , limitDay] = await Promise.all([loadRadar(version, controller.signal), loadCardsAndHealth(version, controller.signal), limitRead]);
   if (version === readVersion) {
     limits.value = limitDay;
     loading.value = false;
+    activeController = undefined;
   }
 }
 
@@ -82,8 +111,12 @@ async function load() {
 // snapshot; limit detail remains an explicit post-close read.
 async function autoRefresh_() {
   if (loading.value) return;
+  activeController?.abort();
+  const controller = new AbortController();
+  activeController = controller;
   const version = ++readVersion;
-  await Promise.all([loadRadar(version), loadCardsAndHealth(version)]);
+  await Promise.all([loadRadar(version, controller.signal), loadCardsAndHealth(version, controller.signal)]);
+  if (version === readVersion) activeController = undefined;
 }
 
 const rows = computed(() => radarRows(radar.value, band.value, segment.value));
@@ -99,6 +132,16 @@ const gate = computed(() => cards.value?.direction_gate);
 const gateType = computed(() => ({ up: 'danger', down: 'success', mixed: 'warning' } as Record<string, string>)[gate.value?.label ?? ''] ?? 'info');
 const bandMeaning = computed(() => (BAND_LABELS[band.value] ?? band.value).replace(/^±/, ''));
 const cardsFreshness = computed(() => cards.value?.freshness);
+const activeTimingPhase = computed<TimingPhase>(() => {
+  const phase = cards.value?.timing_board?.active_phase;
+  return TIMING_PHASES.some((definition) => definition.key === phase) ? phase as TimingPhase : 'auction';
+});
+const phaseGroups = computed(() => timingPhaseGroups(cards.value?.timing_board));
+const selectedPhaseGroup = computed(() => phaseGroups.value.find((group) => group.key === selectedPhase.value) ?? phaseGroups.value[0]);
+const selectedPhaseRows = computed(() => selectedPhaseGroup.value?.rows ?? []);
+const selectedPhaseCandidates = computed(() => selectedPhaseGroup.value?.candidates ?? []);
+const phaseCandidateCount = (phase: TimingPhase): number => phaseGroups.value.find((group) => group.key === phase)?.candidates.length ?? 0;
+const phaseRowCount = (phase: TimingPhase): number => phaseGroups.value.find((group) => group.key === phase)?.rows.length ?? 0;
 const freshnessType = (status: string | undefined): string => ({ fresh: 'success', available: 'success', historical_available: 'info', stale: 'warning', missing: 'danger' }[status ?? ''] ?? 'info');
 const freshnessLabel = (status: string | undefined): string => ({ fresh: '实时', available: '当日可用', historical_available: '历史可用', stale: '已变旧', missing: '缺失' }[status ?? ''] ?? '未知');
 const sourceTime = (key: string): string => {
@@ -134,6 +177,24 @@ function timingReasons(row: StrategyTimingRow): string {
   return row.candidates.flatMap((candidate) => candidate.selection_reasons).slice(0, 4).join('；') || row.timing_plans[0]?.why || '-';
 }
 
+function choosePhase(phase: TimingPhase) {
+  selectedPhase.value = phase;
+  phaseSelectionTouched.value = true;
+}
+
+function phaseStatus(phase: TimingPhase): string {
+  const count = phaseCandidateCount(phase);
+  if (count) return `${count} 个候选`;
+  const rows = phaseRowCount(phase);
+  return rows ? `${rows} 条策略待观察` : '暂无策略计划';
+}
+
+function phaseCandidateReasons(candidate: { selection_reasons: string[]; missing_evidence: string[] }): string {
+  const reasons = candidate.selection_reasons.slice(0, 3).join('；');
+  const missing = candidate.missing_evidence.length ? `缺：${candidate.missing_evidence.join('、')}` : '';
+  return [reasons, missing].filter(Boolean).join(' · ') || '等待来源证据';
+}
+
 function schedule() {
   if (timer) clearInterval(timer);
   timer = undefined;
@@ -142,9 +203,13 @@ function schedule() {
 
 watch([tradeDate, perLine], () => { void load(); schedule(); });
 watch(segment, (value, previous) => { if (value === 'all' || previous === 'all') void load(); });
+watch(activeTimingPhase, (phase, previous) => {
+  if (!phaseSelectionTouched.value || selectedPhase.value === previous) selectedPhase.value = phase;
+});
+watch(tradeDate, () => { phaseSelectionTouched.value = false; });
 watch(autoRefresh, schedule);
 onMounted(() => { void load(); schedule(); });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+onBeforeUnmount(() => { if (timer) clearInterval(timer); activeController?.abort(); });
 </script>
 
 <template>
@@ -271,7 +336,55 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
         </el-card>
       </el-col>
     </el-row>
-    <el-card shadow="never" class="section-gap" header="分时策略候选 · 买点假设与理由">
+    <el-card shadow="never" class="section-gap timing-workbench">
+      <template #header>
+        <div class="card-header">
+          <el-space wrap>
+            <strong>开盘前策略工作台</strong>
+            <el-tag size="small" type="warning">当前阶段：{{ phaseText(activeTimingPhase) }}</el-tag>
+            <el-tag size="small" :type="freshnessType(cardsFreshness?.overall)">来源：{{ freshnessLabel(cardsFreshness?.overall) }}</el-tag>
+          </el-space>
+          <el-text type="info" size="small">候选、参考价和理由均为研究样本，实时刷新不会沿用旧日期台账</el-text>
+        </div>
+      </template>
+      <el-alert v-if="activeTimingPhase === 'auction' && !selectedPhaseCandidates.length" type="warning" :closable="false" show-icon
+        :title="cardsFreshness?.overall === 'missing' ? '竞价实时源尚未到达：旧台账只作为回放基线，当前候选保持为空；09:25 定格后自动刷新。' : '竞价阶段暂未形成候选；页面会在下一个实时快照到达后更新。'" />
+      <el-row :gutter="10" class="phase-strip section-gap">
+        <el-col v-for="group in phaseGroups" :key="group.key" :md="6" :sm="12" :xs="24">
+          <el-card shadow="never" :class="['phase-card', { active: group.active, selected: group.key === selectedPhase }]" @click="choosePhase(group.key)">
+            <div class="phase-card-title">
+              <strong>{{ group.label }}</strong>
+              <el-tag size="small" :type="group.candidates.length ? 'success' : group.active ? 'warning' : 'info'">{{ phaseStatus(group.key) }}</el-tag>
+            </div>
+            <el-text size="small" type="info">{{ group.window }}</el-text>
+            <div class="phase-card-description">{{ group.description }}</div>
+          </el-card>
+        </el-col>
+      </el-row>
+      <div class="phase-panel-header">
+        <div>
+          <strong>{{ selectedPhaseGroup?.label }}候选</strong>
+          <el-text type="info" size="small">{{ selectedPhaseGroup?.window }} · {{ selectedPhaseGroup?.description }}</el-text>
+        </div>
+        <el-text type="info" size="small">策略计划 {{ selectedPhaseRows.length }} 条 · 候选 {{ selectedPhaseCandidates.length }} 个</el-text>
+      </div>
+      <el-row v-if="selectedPhaseCandidates.length" :gutter="10" class="candidate-grid">
+        <el-col v-for="candidate in selectedPhaseCandidates" :key="`${candidate.strategy_key}-${candidate.symbol}`" :xl="8" :lg="12" :xs="24" class="section-gap">
+          <el-card shadow="hover" class="timing-candidate-card">
+            <div class="candidate-title">
+              <div><strong>{{ candidate.name ?? candidate.symbol }}</strong><el-text size="small" type="info">{{ candidate.symbol }}</el-text></div>
+              <el-tag size="small" type="success">{{ candidate.status === 'research_candidate' ? '研究候选' : candidate.status }}</el-tag>
+            </div>
+            <el-text size="small" type="info">策略：{{ candidate.strategy_name }} · {{ candidate.entry_mode }}</el-text>
+            <div class="candidate-buy-point"><span>参考买点</span><strong>{{ candidate.buy_point }}</strong></div>
+            <div class="candidate-reference">参考价：{{ candidate.entry_reference === null || candidate.entry_reference === undefined ? '-' : candidate.entry_reference.toFixed(2) }}</div>
+            <el-text size="small" class="candidate-reasons">{{ phaseCandidateReasons(candidate) }}</el-text>
+          </el-card>
+        </el-col>
+      </el-row>
+      <el-empty v-else :image-size="48" :description="selectedPhaseGroup?.active ? '当前阶段等待实时来源；不会展示旧候选' : '该阶段暂时没有当天候选，仍保留策略计划供扩展'" />
+    </el-card>
+    <el-card shadow="never" class="section-gap" header="策略全量审计 · 分时计划、买点与理由">
       <el-alert type="info" :closable="false" show-icon
         :title="`当前阶段：${phaseText(cards?.timing_board?.active_phase ?? '-') }。候选是研究样本，不是订单；缺失证据会留给盘后复盘。`" />
       <el-table :data="cards?.timing_board?.strategies ?? []" size="small" class="section-gap" max-height="620">
@@ -375,8 +488,24 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .event-stars { color: #e6a23c; letter-spacing: 1px; }
 .missing-evidence { color: #b88230; }
 .strategy-card :deep(.ticket-row) { background: #fff4f2; }
+.phase-strip { margin-top: 12px; }
+.phase-card { height: 100%; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+.phase-card:hover, .phase-card.selected { border-color: var(--el-color-primary); box-shadow: 0 0 0 1px var(--el-color-primary-light-5); }
+.phase-card.active { background: var(--el-color-primary-light-9); }
+.phase-card-title, .phase-panel-header, .candidate-title, .candidate-buy-point { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.phase-card-description { margin-top: 8px; color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.4; }
+.phase-panel-header { padding: 2px 0 12px; }
+.phase-panel-header > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.candidate-title > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.candidate-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.candidate-buy-point { align-items: flex-start; margin-top: 12px; }
+.candidate-buy-point span, .candidate-reference { color: var(--el-text-color-secondary); font-size: 12px; }
+.candidate-buy-point strong { flex: 1; text-align: right; font-size: 13px; line-height: 1.45; }
+.candidate-reference { margin-top: 5px; text-align: right; }
+.candidate-reasons { display: block; margin-top: 10px; line-height: 1.5; }
 @media (max-width: 720px) {
   .radar-visual { grid-template-columns: 1fr; }
   .radar-headline-main { flex-direction: row; gap: 24px; }
+  .phase-panel-header { align-items: flex-start; flex-direction: column; }
 }
 </style>
