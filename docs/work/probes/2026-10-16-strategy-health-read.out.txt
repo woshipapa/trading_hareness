@@ -1,0 +1,1 @@
+{"statement_count": 1, "elapsed_ms": [19.267, 4.068, 3.746, 3.653, 3.628], "median_ms": 3.746, "scope": "local compose PostgreSQL; no owner tunnel/provider access"}
