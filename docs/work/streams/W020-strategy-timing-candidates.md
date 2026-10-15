@@ -7,8 +7,8 @@
 - updated: 2026-10-15
 - plan: none
 - branch: main
-- head: 279d1256
-- release: owner-code-20261015-live-cards-fix；edge-2026.10.15-timing；console-20261015T130233Z-f9db189e9287
+- head: bfd180e3
+- release: owner-code-20261015-live-freshness-3；edge-2026.10.15-timing；console-20261015T161623Z-13bde20b2b62
 
 ## Requirements
 
@@ -45,6 +45,8 @@
 - 2026-10-15 Codex：发布后经 owner 路由读取 `timing_board`：`version=strategy-timing-board-v1`、16 行、`research_only=true`、`active_phase=post_close`；下一交易日只收集样本并交给 AI 复盘，不自动改阈值。
 - 2026-10-15 Codex：owner 先发布慢事务优化 `82240ac3`（schema `20261015_ow0122`），随后发布 live-card overlay `14ac629d`，修正竞价候选排序后以 `279d1256` 重发；主服务和 scheduler 均报告 `owner-code-20261015-live-cards-fix`。
 - 2026-10-15 Codex：`/api/v1/strategies/cards?trade_date=2026-10-15` 实读到百洋股份 `002696.SZ`、慈文传媒 `002343.SZ` 的老师 entry 候选，以及竞价龙头线的 4 板样本；每条候选含参考价、来源理由、`research_only=true`、`live_effect=none`。证据见 `docs/work/probes/2026-10-15-live-cards-release.out.txt`。
+- 2026-10-16 Codex：策略卡片增加 `freshness`（读取时间、竞价源、盘中信号源、台账基线）；当前交易日只显示当天实时源，实时源缺失时返回空卡片和 `missing`，历史日期明确为 `historical_available`，旧台账只作 `replay_baseline`。
+- 2026-10-16 Codex：Session Radar 的雷达、策略卡片和指标健康统一每分钟并行刷新；失败清空对应面板，读取序号阻止旧请求晚返回覆盖新结果。owner `bfd180e3` 与 edge console `13bde20b2b62` 已通过运行时/健康核验。
 
 ## Waiting on the user
 
