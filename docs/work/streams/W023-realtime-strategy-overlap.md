@@ -42,6 +42,7 @@
 - 2026-10-16 03:13 Asia/Shanghai: session gate 与 watchlist 读取、规则保留清理与 outbox retry 改为有界并行并在 capture 前统一 join。扫描事务先计算整个观察池，再批量读取事件状态；200 标的合成探针从 600 次状态 SQL 降为 3 次。报价证据、规则快照和拒绝原因也通过 cursor batch 写入，单写事件顺序保持不变。
 - 2026-10-16 03:42 Asia/Shanghai: 扫描准备复用同一事务刚写入的纸面持仓与组合快照，并把 cash/equity 的准备读合并为一个标量查询；市场事件非空分页用窗口计数消除第二次 count 往返，空页保留精确回退。策略形态页的 board 与龙虎榜上下文改为通过既有有界 runner 并行读取；新增 `20261016_ow0123` 读模型索引迁移。
 - 2026-10-16：影子轮换读取同一观察时刻的成员关系与影子行情改为有界并行，结果在特征构建前统一汇合；主扫描信号事务、研究表边界和失败降级语义不变。新增 overlap 回归，focused overlay 14 项通过；全量 overlay 3324 项仍只有共享工作树 `local_spool_*` 环境变量未登记导致的既有 settings failure。
+- 2026-10-16：最新扫描只读投影在原单条 SQL 内增加最多 30 条 `scan_performance` 历史，前端新增最近扫描总耗时趋势图；不改变信号/策略输入。local compose 五次中位约 6.315 ms → 7.166 ms，statement count 仍为 1，证据为 `docs/work/probes/2026-10-16-latest-scan-history.py` / `.out.txt`。
 
 ## Waiting on the user
 
@@ -61,6 +62,7 @@
 - `quant-service/app/intraday_scan_timing.py` 与 `quant-service/tests/test_intraday_scan_timing.py`: 阶段键、毫秒归一化和只读边界的纯函数契约。
 - `docs/work/probes/2026-10-16-realtime-overlap-benchmark.out.txt`: 200 次本地 overlap 编排测量输出。
 - `docs/work/probes/2026-10-16-intraday-event-state-batch.out.txt`: 200 标的事件状态 repository statement-count 探针。
+- `docs/work/probes/2026-10-16-latest-scan-history.out.txt`: 单条最新扫描查询增加有界历史后的本地耗时与行数。
 - `docs/decisions/0032-batched-realtime-scan-evidence.md`: 批量读取/写入与回退边界。
 - `docs/decisions/0033-realtime-read-round-trips.md`: 扫描准备与研究读模型的往返收敛、索引和发布闸门。
 
