@@ -7,7 +7,7 @@
 - updated: 2026-10-16
 - plan: docs/work/plans/realtime-strategy-overlap.md
 - branch: main
-- head: 980f08c9
+- head: eb2a7a61
 - release: none
 
 ## Requirements
