@@ -116,7 +116,10 @@ def historical_capacity_plan(years: int, universe_symbols: int, trading_days_per
 def current_data_coverage(connection: Any) -> dict[str, Any]:
     row = connection.execute(
         _tiered_capacity_sql(connection, """WITH daily_counts AS (
-             SELECT trading_date,count(DISTINCT symbol)::int symbols FROM quant.canonical_bars_daily
+             -- The canonical primary key makes (trading_date, symbol) unique;
+             -- count rows directly so this display-only estimate can stream
+             -- the coverage index without a DISTINCT sort.
+             SELECT trading_date,count(*)::int symbols FROM quant.canonical_bars_daily
               WHERE symbol<>'000300.SH' AND adj_factor>0 GROUP BY trading_date
            ), universe AS (
              SELECT greatest(1,(SELECT count(*)::int FROM quant.universe_members WHERE universe_key='all_a' AND enabled)) AS symbols
@@ -181,5 +184,5 @@ def historical_estimate_from_db(database: Any, request: Any) -> dict[str, Any]:
     return {**historical_capacity_plan(request.years, int(universe_symbols), request.trading_days_per_year,
                                         request.include_minute, {row["api_name"]: row["avg_bytes"] for row in samples}, int(sector_count or 0)),
             "current_coverage": coverage,
-            "assumptions": {"storage_multiplier": 1.35, "row_size_source": "current raw samples when present, otherwise conservative constants",
+            "assumptions": {"storage_multiplier": 1.35, "row_size_source": "newest 256 raw samples per API when present, otherwise conservative constants",
                             "minute_policy": "not included unless include_minute=true; historical minute remains offline-file only"}}

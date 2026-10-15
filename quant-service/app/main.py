@@ -562,6 +562,7 @@ from .routers.sector_reads import build_sector_reads_router
 from .routers.intraday_evidence_reads import build_intraday_evidence_reads_router
 from .routers.market_result_reads import build_market_result_reads_router
 from .routers.market_flow_reads import build_market_flow_reads_router
+from .async_research_readiness_repository import historical_estimate as async_historical_estimate
 from .routers.l2_research import L2ResearchDependencies, build_l2_research_router
 from .routers.provider_actions import ProviderActionDependencies, build_provider_actions_router
 from .routers.market_actions import MarketActionDependencies, build_market_actions_router
@@ -4546,6 +4547,9 @@ app.include_router(build_market_result_reads_router(
     db, TUSHARE_CATALOG, current_data_coverage, feature_readiness_state,
     lambda: historical_estimate_from_db(HistoricalCoverageEstimateRequest(years=3, include_minute=False)),
     offline_data_root, analyst_scorecard_readiness, async_db,
+    async_history_estimate_fn=lambda: async_historical_estimate(
+        async_db, HistoricalCoverageEstimateRequest(years=3, include_minute=False),
+    ),
 ))
 app.include_router(build_raw_overflow_router(RawOverflowDependencies(
     database=db,

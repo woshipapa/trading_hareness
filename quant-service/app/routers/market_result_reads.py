@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Awaitable, Callable, Iterable
 
 from fastapi import APIRouter
 
@@ -21,6 +22,7 @@ def build_market_result_reads_router(
     offline_root_fn: Callable[[], Path],
     analyst_scorecard_readiness_fn: Callable[..., dict[str, Any]],
     async_database: Any | None = None,
+    async_history_estimate_fn: Callable[[], Awaitable[dict[str, Any]]] | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["market-result-reads"])
 
@@ -31,8 +33,19 @@ def build_market_result_reads_router(
     @router.get("/api/v1/research/overview")
     async def overview() -> dict[str, Any]:
         if async_database:
-            history_estimate = await run_database_blocking(history_estimate_fn, timeout_seconds=15)
-            return await async_read_model.research_overview(async_database, history_estimate)
+            if async_history_estimate_fn is None:
+                history_estimate = await run_database_blocking(history_estimate_fn, timeout_seconds=15)
+                return await async_read_model.research_overview(async_database, history_estimate)
+            # These are independent read-only snapshots.  The old path waited
+            # for the four-query history estimate before opening the overview
+            # transaction, serializing two pool connections and all tunnel
+            # latency.  Keep both transactions isolated, as they already were,
+            # while allowing the async pool and CPU to overlap them.
+            history_task = asyncio.create_task(async_history_estimate_fn())
+            overview_task = asyncio.create_task(async_read_model.research_overview(async_database, {}))
+            overview_payload, history_estimate = await asyncio.gather(overview_task, history_task)
+            overview_payload["history_estimate"] = history_estimate
+            return overview_payload
         return read_model.research_overview(
             database, current_data_coverage_fn=current_data_coverage_fn, feature_readiness_fn=feature_readiness_fn,
             history_estimate_fn=history_estimate_fn,

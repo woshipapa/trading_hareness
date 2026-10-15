@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 
@@ -12,6 +13,74 @@ from .replay_readiness import (
 from .replay_readiness_coverage import MATERIALIZED_DAILY_METRICS_SQL
 from .research_capacity import feature_readiness_projection, historical_capacity_plan
 from .research_framework_readiness import enrich_framework_rows
+
+
+_HISTORICAL_SAMPLE_APIS = (
+    "daily", "adj_factor", "daily_basic", "stk_limit", "moneyflow_dc",
+    "moneyflow", "cyq_perf", "cyq_chips", "stk_factor_pro", "suspend_d",
+)
+
+_HISTORICAL_UNIVERSE_SQL = """SELECT coalesce(
+        nullif((SELECT count(*)::int FROM quant.universe_members
+                 WHERE universe_key='all_a' AND enabled),0),
+        nullif((SELECT count(*)::int FROM quant.instruments
+                 WHERE symbol ~ '^\\d{6}\\.(SH|SZ|BJ)$'),0),5500
+    ) symbols"""
+
+_HISTORICAL_SAMPLES_SQL = """WITH requested(api_name) AS (SELECT unnest(%s::text[])),
+         sampled AS (
+             SELECT requested.api_name, raw.row_data
+               FROM requested
+               CROSS JOIN LATERAL (
+                   SELECT row_data
+                     FROM quant.tushare_raw_records
+                    WHERE api_name=requested.api_name
+                    ORDER BY available_at DESC
+                    LIMIT 256
+               ) raw
+         )
+    SELECT api_name,ceil(avg(pg_column_size(row_data)))::int avg_bytes
+      FROM sampled GROUP BY api_name"""
+
+_HISTORICAL_BARS_COVERAGE_SQL = """WITH daily_counts AS (
+         SELECT trading_date,count(*)::int symbols
+           FROM quant.canonical_bars_daily
+          WHERE symbol<>'000300.SH' AND adj_factor>0
+          GROUP BY trading_date
+       ), universe AS (
+         SELECT greatest(1,(SELECT count(*)::int FROM quant.universe_members
+                            WHERE universe_key='all_a' AND enabled)) AS symbols
+       )
+       SELECT (SELECT min(trading_date) FROM quant.canonical_bars_daily
+                WHERE adj_factor>0) first_bar_date,
+              (SELECT max(trading_date) FROM quant.canonical_bars_daily
+                WHERE adj_factor>0) latest_bar_date,
+              (SELECT count(*)::int FROM daily_counts) bar_days,
+              (SELECT count(*)::int FROM daily_counts,universe
+                WHERE daily_counts.symbols>=greatest(ceil(universe.symbols*0.8)::int,1000))
+                full_cross_section_days,
+              (SELECT max(symbols) FROM daily_counts) max_symbols_on_day"""
+
+_HISTORICAL_FUNDAMENTALS_SQL = """SELECT count(DISTINCT symbol)::int fundamental_symbols
+                                     FROM quant.daily_fundamentals"""
+_HISTORICAL_LIMITS_SQL = """SELECT count(DISTINCT symbol)::int limit_symbols
+                               FROM quant.daily_trade_limits"""
+_HISTORICAL_MINUTES_SQL = """SELECT count(DISTINCT symbol)::int minute_symbols
+                                FROM quant.market_bars_minute"""
+
+
+async def _fetchone(async_database: Any, sql: str, params: Any = ()) -> dict[str, Any]:
+    """Run one independent read in its own transaction/pooled connection."""
+    async with async_database.transaction() as connection:
+        result = await connection.execute(sql, params)
+        return dict(await result.fetchone() or {})
+
+
+async def _fetchall(async_database: Any, sql: str, params: Any = ()) -> list[dict[str, Any]]:
+    """Run one bounded list read in its own transaction/pooled connection."""
+    async with async_database.transaction() as connection:
+        result = await connection.execute(sql, params)
+        return [dict(row) for row in await result.fetchall()]
 
 
 async def frameworks(async_database: Any) -> dict[str, Any]:
@@ -82,55 +151,40 @@ async def replay_readiness(async_database: Any) -> dict[str, Any]:
 
 async def historical_estimate(async_database: Any, request: Any) -> dict[str, Any]:
     """Estimate local research capacity without a synchronous DB handoff."""
-    async with async_database.transaction() as connection:
-        if request.universe_symbols:
-            universe_symbols = int(request.universe_symbols)
-        else:
-            result = await connection.execute(
-                """SELECT coalesce(nullif((SELECT count(*)::int FROM quant.universe_members
-                                             WHERE universe_key='all_a' AND enabled),0),
-                              nullif((SELECT count(*)::int FROM quant.instruments
-                                       WHERE symbol ~ '^\\d{6}\\.(SH|SZ|BJ)$'),0),5500) symbols"""
-            )
-            universe_symbols = int((await result.fetchone())["symbols"])
-        result = await connection.execute(
-            """SELECT api_name,ceil(avg(pg_column_size(row_data)))::int avg_bytes
-                 FROM quant.tushare_raw_records
-                WHERE api_name = ANY(%s) GROUP BY api_name""",
-            (["daily", "adj_factor", "daily_basic", "stk_limit", "moneyflow_dc", "moneyflow",
-              "cyq_perf", "cyq_chips", "stk_factor_pro", "suspend_d"],),
-        )
-        samples = await result.fetchall()
-        result = await connection.execute("SELECT count(*)::int total FROM quant.sectors")
-        sector_count = int((await result.fetchone())["total"])
-        coverage_result = await connection.execute(
-            """WITH daily_counts AS (
-                 SELECT trading_date,count(DISTINCT symbol)::int symbols
-                   FROM quant.canonical_bars_daily WHERE symbol<>'000300.SH' AND adj_factor>0 GROUP BY trading_date
-               ), universe AS (
-                 SELECT greatest(1,(SELECT count(*)::int FROM quant.universe_members
-                                    WHERE universe_key='all_a' AND enabled)) AS symbols
-               )
-               SELECT (SELECT min(trading_date) FROM quant.canonical_bars_daily WHERE adj_factor>0) first_bar_date,
-                      (SELECT max(trading_date) FROM quant.canonical_bars_daily WHERE adj_factor>0) latest_bar_date,
-                      (SELECT count(*)::int FROM daily_counts) bar_days,
-                      (SELECT count(*)::int FROM daily_counts,universe
-                        WHERE daily_counts.symbols>=greatest(ceil(universe.symbols*0.8)::int,1000)) full_cross_section_days,
-                      (SELECT max(symbols) FROM daily_counts) max_symbols_on_day,
-                      (SELECT count(DISTINCT symbol)::int FROM quant.daily_fundamentals) fundamental_symbols,
-                      (SELECT count(DISTINCT symbol)::int FROM quant.daily_trade_limits) limit_symbols,
-                      (SELECT count(DISTINCT symbol)::int FROM quant.market_bars_minute) minute_symbols"""
-        )
-        coverage = dict(await coverage_result.fetchone() or {})
+    # Each query is read-only and independent.  PostgreSQL's READ COMMITTED
+    # transaction already gives every statement its own snapshot; using one
+    # pooled connection per aggregate preserves the values while allowing the
+    # CPU, storage and owner tunnel to overlap the expensive scans.
+    universe_task = (
+        asyncio.sleep(0, result=int(request.universe_symbols))
+        if request.universe_symbols
+        else _fetchone(async_database, _HISTORICAL_UNIVERSE_SQL)
+    )
+    universe, samples, sectors, bars, fundamentals, limits, minutes = await asyncio.gather(
+        universe_task,
+        _fetchall(async_database, _HISTORICAL_SAMPLES_SQL, ([*_HISTORICAL_SAMPLE_APIS],)),
+        _fetchone(async_database, "SELECT count(*)::int total FROM quant.sectors"),
+        _fetchone(async_database, _HISTORICAL_BARS_COVERAGE_SQL),
+        _fetchone(async_database, _HISTORICAL_FUNDAMENTALS_SQL),
+        _fetchone(async_database, _HISTORICAL_LIMITS_SQL),
+        _fetchone(async_database, _HISTORICAL_MINUTES_SQL),
+    )
+    universe_symbols = int(universe if isinstance(universe, int) else universe.get("symbols") or 5500)
+    coverage = {
+        **bars,
+        **fundamentals,
+        **limits,
+        **minutes,
+    }
     return {
         **historical_capacity_plan(
             request.years, universe_symbols, request.trading_days_per_year, request.include_minute,
-            {row["api_name"]: row["avg_bytes"] for row in samples}, sector_count,
+            {row["api_name"]: row["avg_bytes"] for row in samples}, int(sectors.get("total") or 0),
         ),
         "current_coverage": coverage,
         "assumptions": {
             "storage_multiplier": 1.35,
-            "row_size_source": "current raw samples when present, otherwise conservative constants",
+            "row_size_source": "newest 256 raw samples per API when present, otherwise conservative constants",
             "minute_policy": "not included unless include_minute=true; historical minute remains offline-file only",
         },
     }

@@ -9,6 +9,37 @@ def _full_market_request(*, trade_date=None):
 
 
 class PlatformBoundaryTests(unittest.TestCase):
+    def test_market_overview_overlaps_native_history_estimate_and_read_snapshot(self):
+        events = []
+        history_started = asyncio.Event()
+        overview_started = asyncio.Event()
+
+        async def history():
+            events.append("history-start")
+            history_started.set()
+            await overview_started.wait()
+            events.append("history-end")
+            return {"estimate": "native-async"}
+
+        async def overview(_database, history_estimate):
+            events.append(("overview-start", history_estimate))
+            overview_started.set()
+            await history_started.wait()
+            events.append("overview-end")
+            return {"history_estimate": history_estimate, "counts": {"ok": True}}
+
+        router = build_market_result_reads_router(
+            object(), {"daily"}, lambda _connection: {}, lambda _connection: {}, lambda: {},
+            lambda: Path("/tmp/offline"), lambda _connection: {}, async_database=object(),
+            async_history_estimate_fn=history,
+        )
+        with patch("app.routers.market_result_reads.async_read_model.research_overview", new=overview):
+            payload = asyncio.run(router.routes[1].endpoint())
+
+        self.assertEqual(payload["history_estimate"], {"estimate": "native-async"})
+        self.assertEqual(events[:2], ["history-start", ("overview-start", {})])
+        self.assertEqual(set(events[2:]), {"history-end", "overview-end"})
+
     def test_post_close_refresh_orchestrator_continues_after_stage_failure_and_releases_lease(self):
         calls: list[str] = []
         lease = AsyncMock(side_effect=[True, True, True, True])

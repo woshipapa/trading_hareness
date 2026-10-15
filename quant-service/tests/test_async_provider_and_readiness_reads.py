@@ -253,6 +253,9 @@ class AsyncProviderAndReadinessReadTests(unittest.IsolatedAsyncioTestCase):
             async def execute(self, sql, params=()):
                 self.calls.append((sql, params))
                 if "quant.sectors" in sql: return Result({"total": 0})
+                if "daily_fundamentals" in sql: return Result({"fundamental_symbols": 0})
+                if "daily_trade_limits" in sql: return Result({"limit_symbols": 0})
+                if "market_bars_minute" in sql: return Result({"minute_symbols": 0})
                 if "canonical_bars_daily" in sql: return Result({"first_bar_date": None, "latest_bar_date": None,
                     "bar_days": 0, "full_cross_section_days": 0, "max_symbols_on_day": 0,
                     "fundamental_symbols": 0, "limit_symbols": 0, "minute_symbols": 0})
@@ -271,7 +274,7 @@ class AsyncProviderAndReadinessReadTests(unittest.IsolatedAsyncioTestCase):
         database = Database()
         payload = await async_historical_estimate(database, HistoricalCoverageEstimateRequest())
         self.assertEqual(payload["current_coverage"]["bar_days"], 0)
-        self.assertEqual(len(database.connection.calls), 4)
+        self.assertEqual(len(database.connection.calls), 7)
 
     async def test_event_router_prefers_async_local_projection(self) -> None:
         async def announcements(*_args, **_kwargs):
