@@ -515,15 +515,16 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
         if len(by_line[row["strategy_key"]]) < per_line:
             by_line[row["strategy_key"]].append(row)
     for line, rows in live_by_line.items():
+        live_symbols = {str(row["symbol"]) for row in rows}
         for row in rows:
             symbol = str(row["symbol"])
             if line not in resonance[symbol]:
                 resonance[symbol].append(line)
-            # Current session evidence is shown first.  A previous-session
-            # ledger row for the same symbol is retained only once.
-            if not any(str(item.get("symbol")) == symbol for item in by_line[line]):
-                by_line[line].insert(0, row)
-        by_line[line] = by_line[line][:per_line]
+        # Current-session evidence is shown first while preserving the source
+        # ranking.  A previous-session ledger row for the same symbol is kept
+        # out of the duplicate tail.
+        previous = [item for item in by_line[line] if str(item.get("symbol")) not in live_symbols]
+        by_line[line] = (list(rows) + previous)[:per_line]
     shown = sorted({row["symbol"] for rows in by_line.values() for row in rows})
     names = {row["symbol"]: row["name"] for row in _rows(
         connection, "SELECT symbol,name FROM quant.instruments WHERE symbol=ANY(%s)", (shown,))}
