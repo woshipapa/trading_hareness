@@ -53,6 +53,11 @@ defineEmits<{ refresh: [] }>();
         <el-text v-if="loop.last_error" class="realtime-service-error" type="danger"> · {{ loop.last_error }}</el-text>
       </el-descriptions-item>
     </el-descriptions>
+    <el-descriptions v-if="Object.keys(runtimeHealth.blocking_executors ?? {}).length" class="section-gap" title="本地执行器水位" :column="2" border size="small">
+      <el-descriptions-item v-for="(executor, key) in runtimeHealth.blocking_executors" :key="key" :label="String(key)">
+        活跃 {{ executor.occupied ?? 0 }} / {{ executor.workers ?? '-' }}；排队余量 {{ executor.queue_capacity ?? 0 }}；可用槽位 {{ executor.available_slots ?? '-' }}
+      </el-descriptions-item>
+    </el-descriptions>
     <el-descriptions v-if="Object.keys(services.edge_handoff?.runtime?.runtime_loops ?? {}).length" class="section-gap" title="远端盘中采集循环" :column="1" border size="small">
       <el-descriptions-item v-for="(loop, key) in services.edge_handoff.runtime.runtime_loops" :key="key" :label="String(key)">
         <el-tag :type="stateType(loop.state)" size="small">{{ stateText(loop.state) }}</el-tag>
