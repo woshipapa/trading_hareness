@@ -17,6 +17,38 @@ from psycopg.types.json import Json
 from .xiaojie_leader_flow import MODEL_VERSION
 
 
+def latest_order_book_features(connection: Any, symbols: list[str], observed_at: datetime) -> dict[str, dict[str, Any]]:
+    """Read the newest bounded depth evidence for research watches only."""
+    requested = sorted({str(symbol).upper() for symbol in symbols if str(symbol)})
+    if not requested:
+        return {}
+    rows = connection.execute(
+        """SELECT DISTINCT ON (symbol) symbol,source_name,observed_at,raw
+             FROM quant.intraday_quote_observations
+            WHERE symbol=ANY(%s) AND source_name IN ('tencent_order_book','longhu_order_book')
+              AND observed_at <= %s
+            ORDER BY symbol,observed_at DESC,
+                     CASE WHEN source_name='longhu_order_book' THEN 0 ELSE 1 END""",
+        (requested, observed_at),
+    ).fetchall()
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        raw = row["raw"] if isinstance(row["raw"], dict) else {}
+        features = raw.get("order_book_features") if isinstance(raw.get("order_book_features"), dict) else {}
+        result[str(row["symbol"])] = {
+            "status": "observed" if features else "missing",
+            "source_name": row["source_name"],
+            "observed_at": row["observed_at"].isoformat() if row["observed_at"] else None,
+            "qi1": features.get("qi1"), "qi5": features.get("qi5"),
+            "ofi_best_level": features.get("ofi_best_level"),
+            "one_sided_book": features.get("one_sided_book"),
+            "seal_volume_lot": features.get("seal_volume_lot"),
+            "outer_inner_delta_lot": features.get("outer_inner_delta_lot"),
+            "feature_version": features.get("feature_version"),
+        }
+    return result
+
+
 def record_candidates(connection: Any, trading_date: date, observed_at: datetime,
                       scan_id: Any, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Upsert this scan's candidates and return only the newly appearing ones.
@@ -142,5 +174,5 @@ def unalerted_research_candidates(connection: Any, trading_date: date, mode: str
 
 __all__ = [
     "alerted_count", "mark_alerted", "persist_scan_status", "record_candidates",
-    "session_observations", "unalerted_research_candidates",
+    "latest_order_book_features", "session_observations", "unalerted_research_candidates",
 ]

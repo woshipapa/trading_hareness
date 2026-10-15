@@ -8,8 +8,9 @@ from unittest.mock import MagicMock, patch
 
 from app.xiaojie_reference_repository import (
     BOARD_FLOW_TAXONOMY, QIANLONG_MARKER_VOLUME_RATIO, latest_board_flow, load_session_reference,
-    qianlong_references,
+    opening_auction_references, qianlong_references,
 )
+from app.xiaojie_observation_repository import latest_order_book_features
 
 
 def _connection(fetchall=None, fetchone=None):
@@ -60,6 +61,30 @@ class QianlongReferenceTests(unittest.TestCase):
             reference = load_session_reference(MagicMock(), date(2026, 9, 22))
         self.assertEqual(reference["references"]["001216.SZ"], {"ma20": 17.0, "high_60d": 24.06})
         self.assertEqual(reference["references"]["600000.SH"], {"high_60d": 9.0})
+
+    def test_opening_auction_is_joined_only_for_the_same_session(self):
+        payload = {"trade_date": "2026-09-22", "rows": [{
+            "symbol": "001216.SZ", "gap": 0.03, "opens_at_limit": False,
+            "amount": 2_000_000, "unmatched": 1000,
+        }]}
+        refs = opening_auction_references(
+            _connection(fetchone={"normalized": payload}), date(2026, 9, 22))
+        self.assertEqual(refs["001216.SZ"]["gap"], 0.03)
+        self.assertTrue(refs["001216.SZ"]["final"])
+        stale = opening_auction_references(
+            _connection(fetchone={"normalized": {**payload, "trade_date": "2026-09-21"}}),
+            date(2026, 9, 22))
+        self.assertEqual(stale, {})
+
+    def test_latest_order_book_features_keep_source_and_imbalance_fields(self):
+        observed = datetime(2026, 9, 22, 1, 0, tzinfo=timezone.utc)
+        row = {"symbol": "001216.SZ", "source_name": "tencent_order_book",
+               "observed_at": observed, "raw": {"order_book_features": {
+                   "qi5": 0.42, "ofi_best_level": 1200, "one_sided_book": False,
+                   "feature_version": "v3"}}}
+        result = latest_order_book_features(_connection(fetchall=[row]), ["001216.SZ"], observed)
+        self.assertEqual(result["001216.SZ"]["qi5"], 0.42)
+        self.assertEqual(result["001216.SZ"]["source_name"], "tencent_order_book")
 
 
 class LatestBoardFlowTests(unittest.TestCase):

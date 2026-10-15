@@ -29,6 +29,7 @@ from .xiaojie_leader_flow import alert_priority as xiaojie_alert_priority
 from .xiaojie_leader_flow import research_alert_allowed as xiaojie_research_alert_allowed
 from .xiaojie_observation_repository import (
     alerted_count as xiaojie_alerted_count, mark_alerted as mark_xiaojie_alerted,
+    latest_order_book_features as read_latest_order_book_features,
     record_candidates as record_xiaojie_candidates,
     unalerted_research_candidates as read_unalerted_xiaojie_candidates,
 )
@@ -178,6 +179,28 @@ class XiaojieLeaderFlowRuntime:
             sector_flow=board_flow, membership_taxonomy=reference.get("membership_taxonomy"),
         )
         candidates = result["candidates"]
+        research_watches = result.get("research_watches") or []
+        continuation_watches = result.get("continuation_watches") or []
+        pullback_watches = result.get("pullback_watches") or []
+        if research_watches:
+            try:
+                order_books = await self.deps.run_database(
+                    lambda: self.deps.with_connection(lambda connection: read_latest_order_book_features(
+                        connection, [item["symbol"] for item in research_watches], observed_at)),
+                    timeout_seconds=30,
+                )
+            except Exception as error:  # noqa: BLE001 - depth is optional evidence
+                order_books = {}
+                order_book_error = self.deps.safe_error(str(error), 160)
+            else:
+                order_book_error = None
+            for item in research_watches:
+                book = order_books.get(str(item.get("symbol") or ""))
+                item.setdefault("evidence", {})["order_book"] = book or {"status": "missing"}
+                if not book:
+                    item.setdefault("risk_flags", []).append("order_book_missing")
+                if order_book_error:
+                    item.setdefault("evidence", {})["order_book_error"] = order_book_error
         await self.deps.refresh_confluence(trading_date, observed_at, candidates)
         fresh = await self.deps.run_database(
             lambda: self.deps.with_connection(lambda connection: record_xiaojie_candidates(
@@ -185,6 +208,11 @@ class XiaojieLeaderFlowRuntime:
             timeout_seconds=60,
         ) if candidates else []
         new_candidate_count = len(fresh)
+        fresh_watches = await self.deps.run_database(
+            lambda: self.deps.with_connection(lambda connection: record_xiaojie_candidates(
+                connection, trading_date, observed_at, scan_id, research_watches)),
+            timeout_seconds=60,
+        ) if research_watches else []
 
         # A policy widening must also reach candidates recorded by an earlier
         # scan. Only the explicit sealed 潜龙出海 research mode is reread, and
@@ -205,7 +233,8 @@ class XiaojieLeaderFlowRuntime:
         # the user asked to receive a research reminder even when it is sealed.
         # The alert text labels it as research-only and this strategy remains at
         # zero live weight; it never becomes an order candidate.
-        actionable = [item for item in fresh if xiaojie_research_alert_allowed(item)]
+        actionable = [item for item in fresh if item.get("decision", "research_candidate") == "research_candidate"
+                      and xiaojie_research_alert_allowed(item)]
         sealed_skipped = sum(
             1 for item in fresh
             if ((item.get("evidence") or {}).get("board") or {}).get("sealed")
@@ -280,6 +309,12 @@ class XiaojieLeaderFlowRuntime:
             "main_sector_count": result["main_sector_count"],
             "regime": result["regime"],
             "candidates": len(candidates), "new_candidates": new_candidate_count, "alerted": len(alerted),
+            "continuation_watches": len(continuation_watches),
+            "pullback_watches": len(pullback_watches),
+            "research_watches": len(research_watches),
+            "new_research_watches": len(fresh_watches),
+            "continuation_watch_symbols": [item.get("symbol") for item in continuation_watches[:20]],
+            "pullback_watch_symbols": [item.get("symbol") for item in pullback_watches[:20]],
             "sector_flow": result.get("sector_flow"),
             "actionable_candidates": len(actionable),
             "sealed_skipped": sealed_skipped,

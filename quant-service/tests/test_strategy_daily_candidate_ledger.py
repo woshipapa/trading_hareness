@@ -257,6 +257,11 @@ class TeacherAndLeaderFlowLedgerTests(unittest.TestCase):
                         """INSERT INTO quant.xiaojie_leader_flow_observations(trading_date,symbol,mode,model_version,first_seen_at,
                                last_seen_at,observation_count,decision) VALUES(%s,%s,%s,'test',%s,%s,%s,'research_candidate')""",
                         (self.run_date, self.relay_symbol, mode, seen, seen, count))
+                connection.execute(
+                    """INSERT INTO quant.xiaojie_leader_flow_observations(trading_date,symbol,mode,model_version,first_seen_at,
+                           last_seen_at,observation_count,decision) VALUES(%s,%s,'continuation_watch','test',%s,%s,9,'research_watch')""",
+                    (self.run_date, self.relay_symbol, seen, seen),
+                )
             with db.transaction() as connection:
                 stored = materialize_leader_flow_candidates(connection, self.run_date)
                 rows = {row["strategy_key"]: row for row in connection.execute(

@@ -72,6 +72,16 @@ VWAP_BAND_PCT = 1.0
 #: 002084.SZ and 002742.SZ both showed a 0.00% VWAP distance for exactly this
 #: reason, and names sitting at their session high qualified alongside them.
 PULLBACK_MIN_EXTENSION_PCT = 2.0
+#: A two-board continuation is the smallest chain worth retaining as a
+#: research watch when the normal market gate is risk-off. This is a
+#: diagnostic floor, not an entry threshold.
+CONTINUATION_MIN_PRIOR_STREAK = 2
+#: Bound the separate deep-pullback research lane. It is intentionally much
+#: smaller than the all-A cross-section and never competes with leader alerts.
+MAX_PULLBACK_WATCHES = 100
+#: The teacher's "深水低吸" language is represented as an observation floor;
+#: it does not relax any entry rule.
+EXTREME_PULLBACK_PCT = -5.0
 
 
 def _number(value: Any) -> float | None:
@@ -94,6 +104,7 @@ def snapshot_fields(row: Mapping[str, Any]) -> dict[str, float | None]:
         "volume": _number(row.get("volume")),
         "turnover": _number(row.get("turnover")),
         "pct_change": _number(row.get("pct_change")),
+        "turnover_rate": _number(row.get("turnover_rate", raw.get("turnover_rate"))),
     }
 
 
@@ -219,6 +230,24 @@ def leader_pool(rows: list[dict[str, Any]], limits: Mapping[str, float],
             scored.append((distance, symbol))
     scored.sort()
     return [symbol for _distance, symbol in scored[:max(0, max_candidates)]]
+
+
+def extreme_pullback_pool(rows: list[dict[str, Any]], references: Mapping[str, Any],
+                          *, max_candidates: int = MAX_PULLBACK_WATCHES) -> list[str]:
+    """Bounded deep-pullback pool for research-only low-吸承接 observations."""
+    scored: list[tuple[float, str]] = []
+    for row in rows:
+        symbol = str(row.get("symbol") or "")
+        pct = _number(row.get("pct_change"))
+        fields = snapshot_fields(row)
+        reference = references.get(symbol) or {}
+        ma5 = _number(reference.get("ma5"))
+        price = fields.get("price")
+        below_ma5 = ma5 is not None and price is not None and price <= ma5 * 0.98
+        if symbol and pct is not None and pct <= EXTREME_PULLBACK_PCT and below_ma5:
+            scored.append((pct, symbol))
+    scored.sort()
+    return [symbol for _pct, symbol in scored[:max(0, max_candidates)]]
 
 
 def sector_context(pool: list[str], rows_by_symbol: Mapping[str, dict[str, Any]],
@@ -483,6 +512,20 @@ def candidate_snapshot(symbol: str, row: Mapping[str, Any], *, market: Mapping[s
     overhead_distance = (max(0.0, (float(high_60d) - price) / price * 100)
                          if (high_60d and price) else None)
     fundamental = reference.get("fundamental") or {}
+    auction = reference.get("auction") if isinstance(reference.get("auction"), Mapping) else {}
+    auction_gap = _number(auction.get("gap"))
+    auction_amount = _number(auction.get("amount"))
+    auction_unmatched = _number(auction.get("unmatched"))
+    large_order_inflow = _number(reference.get("large_order_inflow"))
+    auction_evidence = {
+        "final": bool(auction.get("final")),
+        "gap_pct": auction_gap * 100 if auction_gap is not None else None,
+        "amount": auction_amount,
+        "unmatched": auction_unmatched,
+        "opens_at_limit": auction.get("opens_at_limit"),
+        "bucket": auction.get("bucket"),
+        "source": auction.get("source"),
+    }
 
     return {
         # market gate
@@ -560,6 +603,12 @@ def candidate_snapshot(symbol: str, row: Mapping[str, Any], *, market: Mapping[s
         "candidate_in_main_sector": in_main,
         "fundamental_pe": fundamental.get("pe"),
         "overhead_high_distance_pct": overhead_distance,
+        # These fields feed only the research continuation lane below. They
+        # are deliberately separate from the normal entry modes.
+        "prior_limit_streak": int(reference.get("prior_limit_streak") or 0),
+        "turnover_rate": fields["turnover_rate"],
+        "auction_evidence": auction_evidence,
+        "large_order_inflow": large_order_inflow,
         # observability, not consumed by the decision function
         "_evidence": {
             "vwap": vwap, "vwap_distance_pct": vwap_distance, "limit_up": limit_up,
@@ -571,6 +620,10 @@ def candidate_snapshot(symbol: str, row: Mapping[str, Any], *, market: Mapping[s
             "decline_from_10_sessions_pct": decline_pct,
             "board": board, "session_high": fields["high"], "price": price,
             "pct_change": fields["pct_change"],
+            "turnover_rate": fields["turnover_rate"],
+            "prior_limit_streak": int(reference.get("prior_limit_streak") or 0),
+            "auction": auction_evidence,
+            "large_order_inflow": large_order_inflow,
             "qianlong_inputs": {
                 "distance_from_ma20_pct": distance_from_ma20,
                 "pre_signal_5d_return_pct": pre_signal_5d_return,
@@ -594,6 +647,128 @@ def candidate_snapshot(symbol: str, row: Mapping[str, Any], *, market: Mapping[s
     }
 
 
+def continuation_watch(symbol: str, snapshot: Mapping[str, Any], result: Mapping[str, Any],
+                       evidence: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Retain a multi-board continuation that the normal gate suppressed.
+
+    This is a research-only lane. It requires a prior two-board chain and a
+    current limit touch, then reports which of auction, turnover, VWAP
+    acceptance and large-order evidence are present. Unknown inputs remain
+    unknown; they never become a positive signal by default.
+    """
+    try:
+        streak = int(snapshot.get("prior_limit_streak") or 0)
+    except (TypeError, ValueError):
+        streak = 0
+    board = evidence.get("board") if isinstance(evidence.get("board"), Mapping) else {}
+    if streak < CONTINUATION_MIN_PRIOR_STREAK or not board.get("touched"):
+        return None
+
+    auction = snapshot.get("auction_evidence") if isinstance(snapshot.get("auction_evidence"), Mapping) else {}
+    auction_observed = bool(auction.get("final"))
+    auction_gap_pct = _number(auction.get("gap_pct"))
+    auction_supportive = auction_observed and (
+        auction.get("opens_at_limit") is True
+        or (auction_gap_pct is not None and auction_gap_pct >= -2.0)
+    )
+    turnover = _number(snapshot.get("turnover_rate"))
+    turnover_observed = turnover is not None and turnover > 0
+    acceptance = snapshot.get("support_or_vwap_holds") is True
+    large_order = _number(snapshot.get("large_order_inflow"))
+    large_order_observed = large_order is not None
+    flags = list(result.get("risk_flags") or [])
+    missing: list[str] = []
+    if not auction_observed:
+        missing.append("auction")
+    if not turnover_observed:
+        missing.append("turnover")
+    if not acceptance:
+        missing.append("vwap_acceptance")
+    if not large_order_observed:
+        missing.append("large_order")
+    flags.extend(f"continuation_{name}_missing" for name in missing)
+    reasons = [f"前一交易日连续涨停 {streak} 天，当前仍触及涨停，保留为风险环境观察样本"]
+    if auction_supportive:
+        reasons.append("竞价证据支持高开/涨停开")
+    if turnover_observed:
+        reasons.append(f"盘中换手率已观测为 {turnover:g}%")
+    if acceptance:
+        reasons.append("价格仍在分时均价上方")
+    if large_order_observed:
+        reasons.append("大单流证据已到达")
+    return {
+        "symbol": symbol,
+        "mode": "continuation_watch",
+        "decision": "research_watch",
+        "position": {"target_fraction": 0.0, "staged_entry": False,
+                      "initial_fraction": 0.0, "confirmation_fraction": 0.0},
+        "stop_loss": {"mode": "observation_only", "min_pct": None, "max_pct": None},
+        "exit": {"action": "hold_or_wait", "codes": []},
+        "risk_flags": list(dict.fromkeys(flags)),
+        "reasons": reasons,
+        "market_gate": result.get("market_gate") or {},
+        "evidence": {
+            "board": dict(board), "prior_limit_streak": streak,
+            "auction": dict(auction), "auction_supportive": auction_supportive,
+            "turnover_rate": turnover, "turnover_observed": turnover_observed,
+            "vwap_acceptance": acceptance, "large_order_inflow": large_order,
+            "large_order_observed": large_order_observed,
+            "normal_decision": result.get("decision"),
+            "normal_mode": result.get("mode"),
+            "missing": missing,
+        },
+        "live_effect": "none",
+        "boundary": "research_only; observation_only; no_automatic_order",
+    }
+
+
+def extreme_pullback_watch(symbol: str, snapshot: Mapping[str, Any], result: Mapping[str, Any],
+                           evidence: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Retain a deep pullback so a later low/承接 can be reviewed.
+
+    The teacher review uses a low-point entry idea that is inherently
+    conditional. This lane records the name and the missing confirmation; it
+    does not turn a falling quote into a candidate or an alert.
+    """
+    pct = _number(evidence.get("pct_change"))
+    if pct is None or pct > EXTREME_PULLBACK_PCT:
+        return None
+    board = evidence.get("board") if isinstance(evidence.get("board"), Mapping) else {}
+    if board.get("touched"):
+        return None
+    price = _number(evidence.get("price"))
+    low = _number(evidence.get("session_low"))
+    vwap = _number(evidence.get("vwap"))
+    rebound = price is not None and low is not None and price > low
+    above_vwap = price is not None and vwap is not None and price >= vwap
+    flags = list(result.get("risk_flags") or [])
+    if not rebound:
+        flags.append("pullback_no_low_reclaim")
+    if not above_vwap:
+        flags.append("pullback_below_vwap")
+    if not snapshot.get("oversold_rebound_confirmed"):
+        flags.append("pullback_oversold_confirmation_missing")
+    return {
+        "symbol": symbol,
+        "mode": "extreme_pullback_watch",
+        "decision": "research_watch",
+        "position": {"target_fraction": 0.0, "staged_entry": False,
+                      "initial_fraction": 0.0, "confirmation_fraction": 0.0},
+        "stop_loss": {"mode": "observation_only", "min_pct": None, "max_pct": None},
+        "exit": {"action": "hold_or_wait", "codes": []},
+        "risk_flags": list(dict.fromkeys(flags)),
+        "reasons": [f"盘中跌幅 {pct:g}%，进入深水低吸研究池；等待低点回收和承接确认"],
+        "market_gate": result.get("market_gate") or {},
+        "evidence": {
+            "price": price, "session_low": low, "vwap": vwap,
+            "pct_change": pct, "low_reclaim": rebound, "above_vwap": above_vwap,
+            "normal_decision": result.get("decision"), "normal_mode": result.get("mode"),
+        },
+        "live_effect": "none",
+        "boundary": "research_only; observation_only; no_automatic_order",
+    }
+
+
 def evaluate_pool(rows: list[dict[str, Any]], *, limits: Mapping[str, float],
                   membership: Mapping[str, set[str]], references: Mapping[str, Any],
                   observed_at: datetime, ma5_break_state: dict[str, Any] | None = None,
@@ -609,7 +784,9 @@ def evaluate_pool(rows: list[dict[str, Any]], *, limits: Mapping[str, float],
     # Ranked once without the bound so the caller can see when the bound binds:
     # a cap that silently truncates reads as full coverage in every status it
     # reports, which is how the 2026-08-27 drop went unnoticed.
-    qualified = leader_pool(rows, limits, max_candidates=len(rows))
+    leader_qualified = leader_pool(rows, limits, max_candidates=len(rows))
+    pullback_qualified = extreme_pullback_pool(rows, references, max_candidates=MAX_PULLBACK_WATCHES)
+    qualified = list(dict.fromkeys((*leader_qualified, *pullback_qualified)))
     pool = qualified[:max(0, max_candidates)]
     sectors = sector_context(pool, rows_by_symbol, membership, limits)
     # Explicit overrides exist for replay; live scans derive both.
@@ -664,16 +841,31 @@ def evaluate_pool(rows: list[dict[str, Any]], *, limits: Mapping[str, float],
             evidence["qianlong_evidence"] = result["qianlong_evidence"]
             evidence["qianlong_swing_overheat"] = result["qianlong_swing_overheat"]
             evidence["qianlong_warning"] = result["qianlong_warning"]
+        watch = continuation_watch(symbol, snapshot, result, evidence)
+        pullback_watch = extreme_pullback_watch(symbol, snapshot, result, evidence)
         evaluations.append({"symbol": symbol, "decision": result["decision"], "mode": result["mode"],
                             "position": result["position"], "exit": result["exit"],
                             "stop_loss": result["stop_loss"],
                             "risk_flags": result["risk_flags"], "reasons": result["reasons"],
-                            "market_gate": result["market_gate"], "evidence": evidence})
+                            "market_gate": result["market_gate"], "evidence": evidence,
+                            "continuation_watch": watch, "pullback_watch": pullback_watch})
     candidates = [item for item in evaluations if item["decision"] == "research_candidate"]
+    research_watches = [item["continuation_watch"] for item in evaluations
+                        if item.get("continuation_watch") is not None]
+    research_watches.extend(item["pullback_watch"] for item in evaluations
+                            if item.get("pullback_watch") is not None)
+    continuation_watches = [item for item in research_watches
+                            if item.get("mode") == "continuation_watch"]
+    pullback_watches = [item for item in research_watches
+                        if item.get("mode") == "extreme_pullback_watch"]
     return {
         "observed_at": observed_at.isoformat(), "pool_size": len(pool),
         "pool_qualified": len(qualified), "pool_truncated": len(qualified) - len(pool),
         "evaluated": len(evaluations), "candidates": candidates,
+        "continuation_watches": continuation_watches,
+        "pullback_watches": pullback_watches,
+        "research_watches": research_watches,
+        "leader_pool_size": len(leader_qualified), "pullback_pool_size": len(pullback_qualified),
         "sector_flow": {key: value for key, value in flow_view.items() if key != "boards"}
                        | {"boards": len(flow_view.get("boards") or {})},
         "main_sector_count": len(sectors["main_sectors"]),
@@ -686,7 +878,10 @@ __all__ = [
     "LIMIT_TOLERANCE", "MAIN_SECTOR_MIN_LIMIT_UPS", "MAX_CANDIDATES", "NEAR_LIMIT_PCT",
     "OVERSOLD_DECLINE_MIN_PCT", "RIGHT_SIDE_BREADTH_MIN", "RIGHT_SIDE_VOLUME_RATIO_MIN",
     "SECTOR_FLOW_MAX_AGE_SECONDS", "SUPPLEMENT_MIN_RANK",
-    "PULLBACK_MIN_EXTENSION_PCT", "VWAP_BAND_PCT", "board_state", "candidate_snapshot", "evaluate_pool", "leader_pool",
+    "PULLBACK_MIN_EXTENSION_PCT", "VWAP_BAND_PCT", "CONTINUATION_MIN_PRIOR_STREAK",
+    "EXTREME_PULLBACK_PCT", "MAX_PULLBACK_WATCHES", "board_state",
+    "candidate_snapshot", "continuation_watch", "evaluate_pool", "extreme_pullback_pool",
+    "extreme_pullback_watch", "leader_pool",
     "market_gate_inputs", "market_regime_inputs", "sector_context",
     "sector_flow_view", "sector_strength_percentiles",
     "session_vwap", "snapshot_fields", "track_ma5_break",

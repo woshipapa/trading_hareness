@@ -12,7 +12,8 @@ reading its own outcome.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
+import json
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
@@ -253,6 +254,15 @@ def candidate_references(connection: Any, trading_date: date) -> dict[str, dict[
                      avg(volume) FILTER (WHERE rn <= %s) * 100 AS mean_volume_5d,
                      max(close) FILTER (WHERE rn = 10) AS close_10_sessions_ago
                 FROM recent WHERE rn <= %s GROUP BY symbol
+           ), prior_limit_streak AS (
+              SELECT symbol, count(*)::int AS prior_limit_streak
+                FROM recent r
+               WHERE r.rn < coalesce((
+                         SELECT min(b.rn) FROM recent b
+                          WHERE b.symbol = r.symbol
+                            AND (b.limit_up IS NULL OR b.close < b.limit_up - 0.005)
+                     ), 91)
+               GROUP BY symbol
            ), no_new_high AS (
               SELECT symbol, count(*) AS days FROM recent r
                WHERE rn <= %s
@@ -271,10 +281,12 @@ def candidate_references(connection: Any, trading_date: date) -> dict[str, dict[
                   window_stats.high_20d, window_stats.low_20d, window_stats.ma5,
                   window_stats.ma20, window_stats.mean_volume_5d,
                   window_stats.close_10_sessions_ago,
+                  coalesce(prior_limit_streak.prior_limit_streak, 0) AS prior_limit_streak,
                   coalesce(no_new_high.days, 0) AS days_without_new_high,
                   coalesce(no_rise.days, 0) AS days_without_rise
              FROM prior
              LEFT JOIN window_stats USING (symbol)
+             LEFT JOIN prior_limit_streak USING (symbol)
              LEFT JOIN no_new_high USING (symbol)
              LEFT JOIN no_rise USING (symbol)""",
         (trading_date, trading_date, MA_SESSIONS, MA_SESSIONS, LOOKBACK_SESSIONS,
@@ -298,10 +310,58 @@ def candidate_references(connection: Any, trading_date: date) -> dict[str, dict[
             "mean_volume_5d": float(row["mean_volume_5d"]) if row["mean_volume_5d"] is not None else None,
             "close_10_sessions_ago": (float(row["close_10_sessions_ago"])
                                       if row["close_10_sessions_ago"] is not None else None),
+            "prior_limit_streak": int(row["prior_limit_streak"] or 0),
             "days_without_new_high": int(row["days_without_new_high"] or 0),
             "days_without_rise": int(row["days_without_rise"] or 0),
         }
     return references
+
+
+def opening_auction_references(connection: Any, trading_date: date) -> dict[str, dict[str, Any]]:
+    """Read the point-in-time 09:25 auction table when this session has one.
+
+    The table is a research reading written after the final auction tick.  A
+    missing or stale table is represented by an empty mapping; callers must
+    keep the auction inputs unknown instead of filling them from a previous
+    session.
+    """
+    close = datetime.combine(trading_date, time(15, 0), _CHINA)
+    row = connection.execute(
+        """SELECT normalized
+             FROM quant.raw_market_observations
+            WHERE provider_key='local_derived' AND capability='auction_open_desk_daily'
+              AND symbol IS NULL AND effective_at <= %s
+            ORDER BY effective_at DESC, available_at DESC LIMIT 1""",
+        (close,),
+    ).fetchone()
+    if row is None:
+        return {}
+    payload = row["normalized"] if isinstance(row, dict) else row[0]
+    try:
+        payload = json.loads(payload) if isinstance(payload, str) else dict(payload or {})
+    except (TypeError, ValueError):
+        return {}
+    if str(payload.get("trade_date") or "") != trading_date.isoformat():
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for item in payload.get("rows") or []:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").upper()
+        if not symbol:
+            continue
+        result[symbol] = {
+            "final": True,
+            "open": item.get("open"),
+            "gap": item.get("gap"),
+            "opens_at_limit": item.get("opens_at_limit"),
+            "bucket": item.get("bucket"),
+            "amount": item.get("amount"),
+            "volume": item.get("volume"),
+            "unmatched": item.get("unmatched"),
+            "source": "auction_open_desk_daily",
+        }
+    return result
 
 
 #: Completed sessions searched for a 潜龙 marker K and the MA-convergence low.
@@ -485,6 +545,8 @@ def load_session_reference(connection: Any, trading_date: date) -> dict[str, Any
     references = candidate_references(connection, trading_date)
     for symbol, extra in qianlong_references(connection, trading_date).items():
         references.setdefault(symbol, {}).update(extra)
+    for symbol, auction in opening_auction_references(connection, trading_date).items():
+        references.setdefault(symbol, {})["auction"] = auction
     return {
         "trading_date": trading_date,
         "limits": trade_limits(connection, trading_date),
@@ -499,7 +561,8 @@ def load_session_reference(connection: Any, trading_date: date) -> dict[str, Any
 __all__ = [
     "BOARD_FLOW_TAXONOMY", "LOOKBACK_SESSIONS", "MA_SESSIONS", "MINIMUM_TAXONOMY_COVERAGE",
     "QIANLONG_MARKER_LOOKBACK", "QIANLONG_MARKER_VOLUME_RATIO", "SECTOR_TAXONOMY_PREFERENCE",
-    "candidate_references", "ensure_session_trade_limits", "latest_board_flow", "qianlong_references",
+    "candidate_references", "ensure_session_trade_limits", "latest_board_flow", "opening_auction_references",
+    "qianlong_references",
     "instrument_names", "load_session_reference", "membership_for_taxonomy",
     "persist_trade_limit_rows", "market_volume_baseline", "sector_membership",
     "sector_membership_taxonomy", "trade_limits",

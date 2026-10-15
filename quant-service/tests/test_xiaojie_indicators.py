@@ -10,6 +10,9 @@ from app.xiaojie_indicators import (
     PULLBACK_MIN_EXTENSION_PCT,
     board_state,
     candidate_snapshot,
+    continuation_watch,
+    extreme_pullback_pool,
+    extreme_pullback_watch,
     evaluate_pool,
     leader_pool,
     market_gate_inputs,
@@ -46,6 +49,66 @@ class SnapshotFieldTests(unittest.TestCase):
     def test_vwap_is_absent_without_volume(self):
         self.assertIsNone(session_vwap({"volume": 0.0, "turnover": 10.0}))
         self.assertIsNone(session_vwap({"volume": None, "turnover": None}))
+
+    def test_turnover_rate_is_kept_when_the_provider_supplies_it(self):
+        row = _row("000001.SZ", 11.0)
+        row["turnover_rate"] = 8.5
+        self.assertEqual(snapshot_fields(row)["turnover_rate"], 8.5)
+
+
+class ContinuationWatchTests(unittest.TestCase):
+    def test_risk_off_multi_board_is_retained_as_observation_only(self):
+        result = continuation_watch(
+            "A.SZ",
+            {
+                "prior_limit_streak": 3,
+                "auction_evidence": {"final": True, "gap_pct": 1.2, "opens_at_limit": False},
+                "turnover_rate": 8.5,
+                "support_or_vwap_holds": True,
+                "large_order_inflow": None,
+            },
+            {"decision": "no_trade", "mode": None,
+             "risk_flags": ["market_regime_not_confirmed"], "market_gate": {"ok": False}},
+            {"board": {"touched": True, "sealed": True}},
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["decision"], "research_watch")
+        self.assertEqual(result["position"]["target_fraction"], 0.0)
+        self.assertTrue(result["evidence"]["auction_supportive"])
+        self.assertIn("continuation_large_order_missing", result["risk_flags"])
+        self.assertEqual(result["live_effect"], "none")
+
+    def test_a_single_board_or_untouched_name_is_not_promoted_to_watch(self):
+        base = {"prior_limit_streak": 1, "auction_evidence": {}, "support_or_vwap_holds": True}
+        result = continuation_watch("A.SZ", base, {"decision": "no_trade"}, {"board": {"touched": True}})
+        self.assertIsNone(result)
+        base["prior_limit_streak"] = 2
+        result = continuation_watch("A.SZ", base, {"decision": "no_trade"}, {"board": {"touched": False}})
+        self.assertIsNone(result)
+
+
+class ExtremePullbackWatchTests(unittest.TestCase):
+    def test_deep_pullback_pool_is_bounded_and_uses_daily_ma5(self):
+        rows = [
+            _row("A.SZ", 9.0, prev=10.0, pct=-10.0),
+            _row("B.SZ", 9.5, prev=10.0, pct=-5.0),
+            _row("C.SZ", 9.9, prev=10.0, pct=-1.0),
+        ]
+        refs = {"A.SZ": {"ma5": 10.0}, "B.SZ": {"ma5": 10.0}, "C.SZ": {"ma5": 10.0}}
+        self.assertEqual(extreme_pullback_pool(rows, refs), ["A.SZ", "B.SZ"])
+
+    def test_pullback_observation_keeps_missing_low_confirmation_explicit(self):
+        watch = extreme_pullback_watch(
+            "A.SZ",
+            {"oversold_rebound_confirmed": False},
+            {"decision": "no_trade", "mode": None, "risk_flags": ["market_regime_not_confirmed"]},
+            {"pct_change": -8.0, "price": 9.0, "session_low": 9.0, "vwap": 9.5,
+             "board": {"touched": False}},
+        )
+        self.assertEqual(watch["decision"], "research_watch")
+        self.assertEqual(watch["position"]["target_fraction"], 0.0)
+        self.assertIn("pullback_no_low_reclaim", watch["risk_flags"])
+        self.assertIn("pullback_below_vwap", watch["risk_flags"])
 
 
 class BoardStateTests(unittest.TestCase):
