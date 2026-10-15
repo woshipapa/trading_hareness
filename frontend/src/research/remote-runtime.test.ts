@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { freshnessOf, normalizeSymbol, scanOverlapRows, scanStageRows, symbolFromRow } from './remote-runtime';
+import { executorCapacityRows, freshnessOf, normalizeSymbol, scanOverlapRows, scanStageRows, symbolFromRow } from './remote-runtime';
 
 describe('remote runtime evidence helpers', () => {
 it('normalizes only exchange-qualified A-share symbols', () => {
@@ -34,5 +34,18 @@ it('keeps overlap telemetry displayable when newer keys arrive', () => {
     { key: 'unknown', value: '1' },
   ]);
   expect(scanOverlapRows([])).toEqual([]);
+});
+
+it('projects bounded executor capacity without trusting malformed health values', () => {
+  expect(executorCapacityRows({
+    database: { workers: 8, queue_capacity: 16, occupied: 19 },
+    public_source: { workers: 12, queue_capacity: 16, occupied: 40 },
+    malformed: { workers: -2, queue_capacity: 1, occupied: 1 },
+    ignored: null,
+  })).toEqual([
+    { key: 'database', workers: 8, queueCapacity: 16, occupied: 19, availableSlots: 5, utilizationPct: 79.2, state: 'ready' },
+    { key: 'public_source', workers: 12, queueCapacity: 16, occupied: 28, availableSlots: 0, utilizationPct: 100, state: 'saturated' },
+  ]);
+  expect(executorCapacityRows(null)).toEqual([]);
 });
 });

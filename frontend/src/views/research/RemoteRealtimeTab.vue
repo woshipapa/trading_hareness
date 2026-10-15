@@ -3,7 +3,7 @@ import { computed, inject, ref } from 'vue';
 import { Refresh, Link, Search } from '@element-plus/icons-vue';
 import { dashboardContextKey } from '../../dashboard-context';
 import { useRemoteQuantRuntime } from '../../composables/useRemoteQuantRuntime';
-import { freshnessOf, freshnessLabel, scanOverlapRows as buildScanOverlapRows, scanStageRows as buildScanStageRows, symbolFromRow } from '../../research/remote-runtime';
+import { executorCapacityRows, freshnessOf, freshnessLabel, scanOverlapRows as buildScanOverlapRows, scanStageRows as buildScanStageRows, symbolFromRow } from '../../research/remote-runtime';
 
 const dashboard = inject(dashboardContextKey);
 if (!dashboard) throw new Error('research tab requires the dashboard shell context');
@@ -30,6 +30,26 @@ const scanFreshness = computed(() => freshnessOf(runtime.latestScan.value?.scan?
 const scanPerformance = computed(() => runtime.latestScan.value?.scan?.source_status?.scan_performance ?? runtime.latestScan.value?.scan_performance ?? {});
 const scanStageRows = computed(() => buildScanStageRows(scanPerformance.value.stage_ms, scanPerformance.value.total_ms));
 const scanOverlapRows = computed(() => buildScanOverlapRows(scanPerformance.value.overlap));
+const executorRows = computed(() => executorCapacityRows(runtime.runtimeHealth.value.blocking_executors));
+const runtimeResources = computed(() => runtime.runtimeHealth.value.resources ?? {});
+const memoryResource = computed(() => runtimeResources.value.memory ?? {});
+const diskResource = computed(() => runtimeResources.value.disk ?? {});
+const resourcePercent = (value: unknown) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? Math.min(100, Math.round(numeric * 1000) / 10) : null;
+};
+const memoryUsagePct = computed(() => resourcePercent(memoryResource.value.ratio));
+const diskUsagePct = computed(() => {
+  const free = resourcePercent(diskResource.value.free_ratio);
+  return free === null ? null : Math.max(0, Math.round((100 - free) * 10) / 10);
+});
+const formatBytes = (value: unknown) => {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return '-';
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)} MiB`;
+  return `${(bytes / 1024).toFixed(0)} KiB`;
+};
 const scanStageLabel = (stage: string) => ({
   session_and_watchlist: '会话与观察池',
   pre_capture: '采集前准备',
@@ -55,6 +75,15 @@ const scanOverlapValue = (value: string) => ({
   concurrent_after_receipt: '回执后并行',
 }[value] ?? value);
 const healthState = (value: unknown) => value === 'healthy' || value === 'ready' ? 'success' : ['degraded', 'unavailable', 'disabled'].includes(String(value)) ? 'danger' : 'warning';
+const executorStateType = (value: string) => value === 'saturated' ? 'danger' : value === 'busy' ? 'warning' : 'success';
+const executorLabel = (value: string) => ({
+  public_source: '公共源读取',
+  realtime_vendor: '实时行情源',
+  database: '数据库阻塞读写',
+  tdx_shadow: 'TDX 影子写入',
+  auction_capture: '竞价采集',
+  super_get: 'Super GET',
+}[value] ?? value);
 const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.live_effect ?? runtime.promotion.value.live_effect ?? 'none');
 </script>
 
@@ -71,6 +100,27 @@ const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.
       <el-descriptions-item label="策略 live_effect"><el-tag type="warning">{{ liveEffect }}</el-tag></el-descriptions-item>
     </el-descriptions>
     <el-space wrap class="section-gap"><el-tag v-for="item in runtime.services.value.items ?? []" :key="item.key" :type="healthState(item.state)">{{ item.label ?? item.key }}：{{ item.state ?? '-' }}</el-tag></el-space>
+  </el-card>
+
+  <el-card shadow="never" class="section-gap" header="本地并发水位（研究观测）">
+    <el-alert title="仅展示当前进程的有界 executor 使用情况；达到饱和时应观察排队和拒绝率，不会自动突破 provider、数据库或硬件上限。" type="info" :closable="false" show-icon />
+    <div v-if="executorRows.length" class="executor-capacity-grid">
+      <div v-for="row in executorRows" :key="row.key" class="executor-capacity-item">
+        <div class="executor-capacity-heading"><strong>{{ executorLabel(row.key) }}</strong><el-tag size="small" :type="executorStateType(row.state)">{{ row.state === 'saturated' ? '已饱和' : row.state === 'busy' ? '繁忙' : '可用' }}</el-tag></div>
+        <el-progress :percentage="row.utilizationPct" :status="executorStateType(row.state) === 'success' ? 'success' : executorStateType(row.state) === 'warning' ? 'warning' : 'exception'" :stroke-width="8" :show-text="false" />
+        <small>占用 {{ row.occupied }}/{{ row.workers + row.queueCapacity }} · worker {{ row.workers }} · 排队 {{ row.queueCapacity }} · 可用槽位 {{ row.availableSlots }}</small>
+      </div>
+    </div>
+    <el-empty v-else description="当前发布未提供 executor 水位" :image-size="38" />
+  </el-card>
+
+  <el-card shadow="never" class="section-gap" header="资源与网络水位">
+    <el-alert title="资源读数来自 owner health；它们只用于容量判断和故障定位，不会改变研究策略或信号资格。" type="info" :closable="false" show-icon />
+    <el-row :gutter="12" class="resource-capacity-grid">
+      <el-col :xs="24" :sm="8"><div class="resource-capacity-item"><div class="executor-capacity-heading"><strong>进程内存</strong><el-tag size="small" :type="memoryUsagePct !== null && memoryUsagePct >= 85 ? 'danger' : memoryUsagePct !== null && memoryUsagePct >= 70 ? 'warning' : 'success'">{{ memoryUsagePct === null ? '-' : `${memoryUsagePct}%` }}</el-tag></div><el-progress v-if="memoryUsagePct !== null" :percentage="memoryUsagePct" :status="memoryUsagePct >= 85 ? 'exception' : memoryUsagePct >= 70 ? 'warning' : 'success'" :stroke-width="8" :show-text="false" /><small>{{ formatBytes(memoryResource.rss_bytes) }} / {{ formatBytes(memoryResource.cgroup_limit_bytes) }}</small></div></el-col>
+      <el-col :xs="24" :sm="8"><div class="resource-capacity-item"><div class="executor-capacity-heading"><strong>磁盘使用</strong><el-tag size="small" :type="diskUsagePct !== null && diskUsagePct >= 90 ? 'danger' : diskUsagePct !== null && diskUsagePct >= 75 ? 'warning' : 'success'">{{ diskUsagePct === null ? '-' : `${diskUsagePct}%` }}</el-tag></div><el-progress v-if="diskUsagePct !== null" :percentage="diskUsagePct" :status="diskUsagePct >= 90 ? 'exception' : diskUsagePct >= 75 ? 'warning' : 'success'" :stroke-width="8" :show-text="false" /><small>剩余 {{ formatBytes(diskResource.free_bytes) }} · {{ diskResource.free_ratio == null ? '-' : `${resourcePercent(diskResource.free_ratio)}%` }} 可用</small></div></el-col>
+      <el-col :xs="24" :sm="8"><div class="resource-capacity-item"><div class="executor-capacity-heading"><strong>网络观测</strong><el-tag size="small" :type="healthState(runtime.runtimeHealth.value.network?.state)">{{ runtime.runtimeHealth.value.network?.state ?? '-' }}</el-tag></div><small>最近成功：{{ dateText(runtime.runtimeHealth.value.network?.last_success_at) }}<br/>最近来源：{{ runtime.runtimeHealth.value.network?.last_source ?? '-' }}</small></div></el-col>
+    </el-row>
   </el-card>
 
   <el-row :gutter="14" class="section-gap">
@@ -156,6 +206,44 @@ const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.
   grid-template-columns: minmax(0, 1.25fr) minmax(240px, 0.75fr);
   gap: 16px;
   margin: 14px 0;
+}
+
+.executor-capacity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.executor-capacity-item {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank);
+}
+
+.executor-capacity-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.executor-capacity-item small {
+  display: block;
+  margin-top: 8px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+
+.resource-capacity-grid {
+  margin-top: 14px;
+}
+
+.resource-capacity-item {
+  height: 100%;
 }
 
 .scan-stage-visual,

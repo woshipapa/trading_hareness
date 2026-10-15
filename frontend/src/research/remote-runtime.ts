@@ -56,3 +56,46 @@ export function scanOverlapRows(overlap: unknown): ScanOverlapRow[] {
     .filter(([key, value]) => key.length > 0 && value !== null && value !== undefined)
     .map(([key, value]) => ({ key, value: String(value) }));
 }
+
+export type ExecutorCapacityRow = {
+  key: string;
+  workers: number;
+  queueCapacity: number;
+  occupied: number;
+  availableSlots: number;
+  utilizationPct: number;
+  state: 'ready' | 'busy' | 'saturated';
+};
+
+/**
+ * Normalize the local executor health payload for a bounded capacity view.
+ *
+ * The API is intentionally untyped JSON because the dashboard also reads
+ * older owner releases.  Invalid or negative values are discarded, and the
+ * displayed utilization is capped at 100% so a malformed health response
+ * cannot imply extra capacity or render a broken progress bar.
+ */
+export function executorCapacityRows(value: unknown): ExecutorCapacityRow[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>)
+    .map(([key, raw]) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+      const item = raw as Record<string, unknown>;
+      const numberValue = (candidate: unknown, fallback?: number): number | null => {
+        if (candidate === null || candidate === undefined || candidate === '') return fallback ?? null;
+        const parsed = Number(candidate);
+        return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+      };
+      const workers = numberValue(item.workers);
+      const queueCapacity = numberValue(item.queue_capacity ?? item.queueCapacity, 0);
+      const reportedOccupied = numberValue(item.occupied, 0);
+      if (workers === null || queueCapacity === null || reportedOccupied === null) return null;
+      const capacity = workers + queueCapacity;
+      const occupied = Math.min(capacity, reportedOccupied);
+      const availableSlots = Math.max(0, capacity - occupied);
+      const utilizationPct = capacity ? Math.min(100, Math.round((occupied / capacity) * 1000) / 10) : 0;
+      const state = occupied >= capacity && capacity > 0 ? 'saturated' : utilizationPct >= 80 ? 'busy' : 'ready';
+      return { key, workers, queueCapacity, occupied, availableSlots, utilizationPct, state };
+    })
+    .filter((row): row is ExecutorCapacityRow => row !== null && row.workers + row.queueCapacity > 0);
+}
