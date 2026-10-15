@@ -38,6 +38,7 @@
 - 2026-10-15 Codex：为全部 15 个 registry contract 添加至少一个时段计划；teacher、dragon、limit-up continuation、Longhu、ten-day rotation 明确提供竞价/盘中计划，base/pattern 明确提供尾盘/盘后计划。
 - 2026-10-15 Codex：`scripts/release plan edce7d7a` 判定 owner 为 code-only overlay（2 个运行时代码文件），数据库已在所需 schema head；当前北京时间 20:04 落在 18:45-22:05 的 post-close-scheduler 禁重启窗口，未执行发布。
 - 2026-10-15 Codex：Session Radar 新增“分时策略候选 · 买点假设与理由”表格，直接消费 `timing_board`；前端发布属于独立 edge-quant-console 单元。
+- 2026-10-15 Codex：最终提交 `5d3daf17` 的只读发布计划仍显示 owner 在 18:45-22:05 禁重启窗口；owner overlay 和 edge console 均未执行发布。
 
 ## Waiting on the user
 
