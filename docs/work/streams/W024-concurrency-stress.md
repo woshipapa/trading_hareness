@@ -7,7 +7,7 @@
 - updated: 2026-10-16
 - plan: docs/work/plans/concurrency-stress.md
 - branch: main
-- head: a0709f24
+- head: 00d237d8
 - release: none
 
 ## Requirements
