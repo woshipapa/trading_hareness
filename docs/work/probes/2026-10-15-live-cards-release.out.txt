@@ -1,0 +1,17 @@
+Live strategy-card release probe (Asia/Shanghai, 2026-10-15 close)
+
+Release:
+- owner source: 279d1256bf364e643d534fb9233e99ee4673855a
+- owner release: owner-code-20261015-live-cards-fix
+- schema: 20261015_ow0122
+- scripts/release status --owner-source-sha 279d1256 --skip-edge: ALL CHECKS PASSED
+- main and scheduler both reported the same source SHA and release; source-overlay=true
+
+Read:
+- GET /api/v1/strategies/cards?trade_date=2026-10-15&per_line=10: status=completed, picks_as_of=2026-09-29
+- teacher_review_playbooks live candidates: 002696.SZ, 002343.SZ (source intraday_signal_events)
+- longhu_multifactor_shadow, limit_up_continuation and dragon_leader_research live candidates begin with
+  002696.SZ, 002343.SZ and 603096.SH; the auction source records 4 boards for those names
+- timing candidates contain entry_reference, selection_reasons, missing_evidence, research_only=true and live_effect=none
+- all 15 registered contracts remain present in timing_board; lines without current source evidence retain
+  waiting_for_candidates rather than receiving invented picks

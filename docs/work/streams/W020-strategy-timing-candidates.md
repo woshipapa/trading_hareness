@@ -7,8 +7,8 @@
 - updated: 2026-10-15
 - plan: none
 - branch: main
-- head: f9db189e
-- release: owner-code-20261015-timing；edge-2026.10.15-timing；console-20261015T130233Z-f9db189e9287
+- head: 279d1256
+- release: owner-code-20261015-live-cards-fix；edge-2026.10.15-timing；console-20261015T130233Z-f9db189e9287
 
 ## Requirements
 
@@ -31,7 +31,8 @@
 - [x] 5 在 Session Radar 页面展示分时策略候选、参考买点和选股理由；frontend typecheck/build 通过
 - [x] 6 focused release-path suite（14 tests）、边界检查、API contract 和 diff check 通过；全量 release-path suite 的既有 `test_settings` 因其他会话新增 local-spool 环境变量未声明而失败
 - [x] 7 owner code-only、edge adapter 和量化控制台均已发布；owner schema gate、健康检查、运行时摘要/PID 1 和 timing board 路由已核对
-- [ ] 8 下一交易日核对竞价时段与盘中/尾盘阶段实际候选样本
+- [x] 8 将当日 `auction_open_desk_daily` 和 `intraday_signal_events` 投影到对应研究线；4 板竞价样本与老师 entry 信号经 owner 路由实读，排序和来源理由已核对
+- [ ] 9 下一交易日核对竞价时段与盘中/尾盘阶段实际候选样本
 
 ## Log
 
@@ -42,6 +43,8 @@
 - 2026-10-15 Codex：最终提交 `5d3daf17` 的只读发布计划仍显示 owner 在 18:45-22:05 禁重启窗口；owner overlay 和 edge console 均未执行发布。
 - 2026-10-15 Codex：用户确认北京时间已闭盘后执行发布。owner `owner-code-20261015-timing`（源 `f9db189e`）通过 schema gate 并切换；edge adapter `edge-2026.10.15-timing` 和控制台 `console-20261015T130233Z-f9db189e9287` 已激活。adapter/console 直接健康和源码指纹核对通过；bridge 保持独立的 `861ecbfa` 旧覆盖层。
 - 2026-10-15 Codex：发布后经 owner 路由读取 `timing_board`：`version=strategy-timing-board-v1`、16 行、`research_only=true`、`active_phase=post_close`；下一交易日只收集样本并交给 AI 复盘，不自动改阈值。
+- 2026-10-15 Codex：owner 先发布慢事务优化 `82240ac3`（schema `20261015_ow0122`），随后发布 live-card overlay `14ac629d`，修正竞价候选排序后以 `279d1256` 重发；主服务和 scheduler 均报告 `owner-code-20261015-live-cards-fix`。
+- 2026-10-15 Codex：`/api/v1/strategies/cards?trade_date=2026-10-15` 实读到百洋股份 `002696.SZ`、慈文传媒 `002343.SZ` 的老师 entry 候选，以及竞价龙头线的 4 板样本；每条候选含参考价、来源理由、`research_only=true`、`live_effect=none`。证据见 `docs/work/probes/2026-10-15-live-cards-release.out.txt`。
 
 ## Waiting on the user
 
@@ -70,4 +73,4 @@
 
 ## Resume here
 
-focused suite 已通过；全量 release-path suite 只剩其他会话的 settings 失败。发布已完成，下一交易日从 `/api/v1/strategies/cards` 读取 `timing_board`，再完成上面的交易日核对。
+focused suite 已通过；全量 release-path suite 只剩其他会话的 settings 失败。发布已完成，下一交易日从 `/api/v1/strategies/cards` 读取 `timing_board`，并继续完成上面的交易日核对；当日竞价池和 entry 信号已能进入相应研究线。
