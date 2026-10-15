@@ -93,7 +93,7 @@ def persist_observations(
             for item in previous_rows
         }
         # One batched multi-row INSERT instead of one round trip per symbol:
-        # this loop runs every 3s for up to 40 symbols, so a per-row INSERT
+        # this loop runs every 3s for up to 200 symbols, so a per-row INSERT
         # was ~19,000 individual statements/day for this table alone.
         value_placeholders: list[str] = []
         params: list[Any] = []
