@@ -48,6 +48,7 @@ from .owner_storage import tiered_sql_builder
 from .platform.strategy_registry import STRATEGY_CONTRACTS
 from .sector_membership_repository import point_in_time_membership_predicate, sector_group_predicate
 from .strategy_daily_candidate_ledger import candidate_direction
+from .strategy_timing_board import build_card_timing, build_timing_board
 from .xiaojie_indicators import snapshot_fields
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -138,7 +139,9 @@ def _document_quotes(connection: Any, trade_date: date, symbols: list[str]) -> d
         for symbol, row in minute_cross_section.rows_for(auction[1], symbols).items():
             fields = snapshot_fields(row)
             quotes.setdefault(symbol, {})["auction"] = {
-                "pct_change": fields["pct_change"], "turnover": fields["turnover"], "observed_at": auction[0].isoformat()}
+                "price": fields["price"], "open": fields["open"], "prev_close": fields["prev_close"],
+                "pct_change": fields["pct_change"], "turnover": fields["turnover"],
+                "volume": fields["volume"], "observed_at": auction[0].isoformat()}
     return quotes
 
 
@@ -166,7 +169,8 @@ def session_quotes(connection: Any, trade_date: date, symbols: list[str]) -> dic
     for row in auction:
         fields = snapshot_fields(_json(row["normalized"]) or {})
         quotes.setdefault(row["symbol"], {})["auction"] = {
-            "pct_change": fields["pct_change"], "turnover": fields["turnover"],
+            "price": fields["price"], "open": fields["open"], "prev_close": fields["prev_close"],
+            "pct_change": fields["pct_change"], "turnover": fields["turnover"], "volume": fields["volume"],
             "observed_at": row["effective_at"].isoformat()}
     return quotes
 
@@ -412,11 +416,13 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
         contract = STRATEGY_CONTRACTS.get(contract_key) if contract_key else None
         direction = candidate_direction(line, None)
         picks = [_pick(row, quotes.get(row["symbol"]), limits.get(row["symbol"]), **context) for row in by_line[line]]
+        timing = build_card_timing(line, picks, observed_at=now)
         cards.append({
             "strategy_key": line, "name": name, "style": style, "direction": "short" if direction < 0 else "long",
             "contract_key": contract_key, "model_version": contract.model_version if contract else None,
             "maturity": contract.maturity if contract else "ledger_only",
             "candidates": sum(row["strategy_key"] == line for row in ledger),
+            "timing_plans": timing["timing_plans"], "timing_candidates": timing["candidates"],
             "summary": _card_summary(picks, direction), "picks": picks, "leaderboard": board.get(line, {}),
         })
     ranking = {str(window): sorted(
@@ -431,6 +437,7 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
         "data_health": data_health(connection, trade_date, as_of, now or datetime.now(CN_TZ)),
         "previous_close_regime": dict(regime) if regime else None,
         "cards": cards, "leaderboard": ranking,
+        "timing_board": build_timing_board(cards, observed_at=now, trade_date=trade_date),
         "definitions": {
             "since_open_pct": "现价/今日开盘价-1（原图大号百分比的口径）；开盘即涨停的票买不进，不计入卡片均值",
             "ticket": "今日该股出现 confirmed/alerted 的 entry 信号（model 为触发它的模型版本）",
@@ -438,6 +445,7 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now
             "event_count": "我方掌握的事件种类数：今日定期报告披露、近三日业绩预告/快报、昨日龙虎榜、昨日涨停（不是原图的星级）",
             "themes": "同花顺概念（Fuyao 成分，按前一交易日概念涨停强度排序），剔除融资融券等资格类分组",
             "leaderboard": "各线最近 5/20 个台账日的前 N 名，次日开盘买入、收盘计的收益均值与上涨占比；流出线按做空方向计",
+            "timing_board": "按竞价、盘中、尾盘、盘后四个阶段输出每个策略的研究候选、参考买点、选股理由和缺失证据；缺失证据只进入盘后复盘，不删除候选",
         },
     }
 

@@ -1,0 +1,64 @@
+# W020 策略分时候选板与盘后样本回流
+
+- state: building
+- holder: Codex 主会话，2026-10-15
+- goal: 让每套龙头/竞价/盘中/尾盘研究策略在对应时段展示候选票、参考买点、选股理由和缺失证据，并把当天候选保留给盘后结算与 AI 复盘
+- next: 等待用户按 owner code-only 流程发布；下一交易日核对竞价、盘中和尾盘实际样本
+- updated: 2026-10-15
+- plan: none
+- branch: main
+- head: 1ce04ad9
+- release: none
+
+## Requirements
+
+- 2026-10-15 用户要求：“当前就是希望每套策略可以放心大胆的推出他选的票和买点，以及选他的原因。这里不需要因为过多的闸门担心而严格，这里需要的就是每个票选出来之后当天结束看看每个策略就有他的样本了再去让ai去总结修正就好了。”
+- 2026-10-15 用户要求：“每个策略比如竞价的这几个龙头策略，可以在开盘前竞价的时候结合条件给出他要买的票。有的盘中扫描的可能是盘中买或者尾盘买。”
+
+## Plan
+
+1. 在现有策略卡片上增加统一的分时计划：竞价、盘中、尾盘、盘后分别说明参考买点和理由。
+2. 不新增订单路径或硬闸门；已有候选始终输出为 `research_candidate`，缺失数据单列为 `missing_evidence`。
+3. 将 15 个注册契约策略全部列入 timing board；没有当天候选的策略仍显示计划和等待状态。
+4. 盘后继续复用 `strategy_daily_candidates` / `strategy_daily_candidate_outcomes`，把买点、理由、阶段和缺失证据作为 AI 复盘对比字段。
+
+## Steps
+
+- [x] 1 新增纯研究分时板模块 `quant-service/app/strategy_timing_board.py`
+- [x] 2 将竞价快照价格和成交量带入策略卡片，并输出每卡的 timing plan/candidates
+- [x] 3 在 `/api/v1/strategies/cards` 响应加入覆盖全部契约策略的 `timing_board`
+- [x] 4 为候选保留理由、参考价、缺失证据和盘后复盘字段；不改变 `live_effect=none`
+- [x] 5 focused release-path suite（14 tests）、边界检查、API contract 和 diff check 通过；全量 release-path suite 的既有 `test_settings` 因其他会话新增 local-spool 环境变量未声明而失败
+- [ ] 6 用户按 owner code-only 流程发布后，下一交易日核对竞价时段与盘中/尾盘阶段实际候选样本
+
+## Log
+
+- 2026-10-15 Codex：现有 `strategy_cards` 已能读取前一交易日候选台账、09:25 竞价、盘中 entry 信号和盘后 leaderboard，因此将分时解释层接在这里，避免新增孤立采集链。
+- 2026-10-15 Codex：为全部 15 个 registry contract 添加至少一个时段计划；teacher、dragon、limit-up continuation、Longhu、ten-day rotation 明确提供竞价/盘中计划，base/pattern 明确提供尾盘/盘后计划。
+- 2026-10-15 Codex：`scripts/release plan edce7d7a` 判定 owner 为 code-only overlay（2 个运行时代码文件），数据库已在所需 schema head；当前北京时间 20:04 落在 18:45-22:05 的 post-close-scheduler 禁重启窗口，未执行发布。
+
+## Waiting on the user
+
+- [ ] 2026-10-15 owner code-only release 仍由用户按仓库发布流程执行；本线不自动写 owner 库或切换生产服务。
+
+## Evidence
+
+- `quant-service/app/strategy_timing_board.py`
+- `quant-service/app/strategy_cards_read_model.py`
+- `quant-service/tests/test_strategy_timing_board.py`
+- `quant-service/tests/test_strategy_cards_read_model.py`
+
+## Running
+
+## Due
+
+- [ ] 2026-10-16 下一交易日首个竞价时段读取 timing board，核对各策略候选、参考价和缺失证据是否随阶段更新
+- [ ] 2026-10-16 收盘后检查 `strategy_daily_candidate_outcomes` 是否能按策略沉淀当天样本，再交给 AI 做归因总结
+
+## Open questions
+
+- 下一交易日要观察各策略当天是否都有候选，以及一字封死、充分换手回封、深水承接三类样本在盘后是否能被分开结算；先收集样本，不在本线直接调整阈值。
+
+## Resume here
+
+focused suite 已通过；全量 release-path suite 只剩其他会话的 settings 失败。发布后从 `/api/v1/strategies/cards` 读取 `timing_board`，再完成上面的交易日核对。
