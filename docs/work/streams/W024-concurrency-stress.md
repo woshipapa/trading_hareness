@@ -54,6 +54,7 @@
 - 2026-10-16 02:48 Asia/Shanghai：盘末分钟 profile 的 per-symbol fan-out 增加 semaphore，复用 `LONGHU_MINUTE_BATCH_WORKERS` 的默认 8/硬上限 8；200 只不会再一次性向 realtime executor 提交并触发饱和后逐票误 fallback。定向 minute/provider overlay 86 项仅保留既有 W016 local-spool settings 登记失败。
 - 2026-10-16 02:55 Asia/Shanghai：盘末分钟 capture 的 owner 写入再收敛：观察池 instrument 注册改为一次 `unnest` 批量 upsert，所有 symbol 的分钟参数合并为一次 `executemany`，历史 retention DELETE 也由逐票改为 `ANY(text[])`；这条路径的 200 只事务不再按 symbol 叠加 tunnel 往返，研究证据与幂等键不变。minute/provider overlay 78 项通过。
 - 2026-10-16 02:58 Asia/Shanghai：最新完整 overlay 运行 3298 项，仍只有工作区其他会话 `local_spool_*` 读取未登记环境变量的 `test_settings` 失败；本轮分钟 capture、scan overlap、盘口批次与 timing contract 无新增失败。
+- 2026-10-16：观察台新增 executor 容量、进程内存、磁盘和网络水位可视化；health payload 的异常或缺失值会显示为未知，不会推断出额外容量。前端 14 个测试文件、67 项通过，typecheck/build 通过，提交 `d3bb8b42`；未改变任何运行上限。
 
 ## Waiting on the user
 
