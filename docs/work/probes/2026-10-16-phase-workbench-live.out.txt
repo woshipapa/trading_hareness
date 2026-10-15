@@ -1,0 +1,38 @@
+measured_at=2026-10-16 01:36:59 CST
+release_status:
+host   check                          observed                                                                                        result  expected
+edge   adapter /health                ok                                                                                              PASS    ok
+edge   adapter git_sha                861ecbfaa96e5dc647f9e530ca9720b92089badc                                                        PASS    861ecbfaa96e
+edge   adapter release                hotfix-hotfix-20261015T173007Z-861ecbfaa96e-25717                                               PASS    hotfix source-overlay
+edge   adapter runtime_source         source-overlay                                                                                  PASS    source-overlay
+edge   hotfix base                    861ecbfaa96e5dc647f9e530ca9720b92089badc                                                        PASS    861ecbfaa96e
+edge   runtime.env image              ghcr.io/woshipapa/trading-hareness-feishu-adapter:f9db189e9287f78e65ea72329b30f2a677dc8922      PASS    not required for source-overlay
+edge   runtime.env overlay            true                                                                                            PASS    true
+edge   larkagentx bridge              ok                                                                                              PASS    ok
+edge   bridge release                 hotfix-20261015T173007Z-861ecbfaa96e-25717                                                      PASS    source-overlay from 861ecbfaa96e
+edge   XHS collector /health          ok                                                                                              PASS    ok / Spider_XHS / cookie configured
+edge   XHS source commit              83132b3331d5d15bfcbc0092841c7faf576b5c75                                                        PASS    pinned external commit
+edge   XHS source digest              c83f859682403587f098f74ab8aea182421b186fdccdcb347281c189e5c7d9a1                                PASS    64-char SHA-256
+edge   XHS component manifest         edge-xhs                                                                                        PASS    edge-xhs / clean source
+edge   retired quant-intraday-edge    inactive/not-found                                                                              PASS    inactive/disabled
+owner  ~/trading_hareness             /home/stockpeer/.local/share/trading-hareness/releases/owner-full-20261012-20/trading_hareness  PASS    release symlink
+owner  quant-research :15682 /health  ok                                                                                              PASS    ok
+owner  quant-research :15682 git_sha  bfd180e35a5b3a7c69407939331a808d961c3f0e                                                        PASS    bfd180e35a5b
+owner  quant-research :15682 release  owner-code-20261015-live-freshness-3                                                            PASS    non-empty source-overlay release
+owner  scheduler :15683 /health       ok                                                                                              PASS    ok
+owner  scheduler :15683 git_sha       bfd180e35a5b3a7c69407939331a808d961c3f0e                                                        PASS    bfd180e35a5b
+owner  scheduler :15683 release       owner-code-20261015-live-freshness-3                                                            PASS    non-empty source-overlay release
+owner  quant source-overlay           true                                                                                            PASS    true
+owner  main runtime profile           intraday_edge                                                                                   PASS    intraday_edge
+owner  alembic revision               20261015_ow0122                                                                                 PASS    20261015_ow0122
+owner  intraday-secrets.env           present                                                                                         PASS    present
+
+expected sha: 97e2a809ea974d51c53725742cae039216d0ee40
+ALL CHECKS PASSED
+edge_console_and_live_route:
+console_current=/opt/feishu-relay-edge/hotfix/quant-console/releases/console-20261015T171516Z-9828a9e19051
+console_base=9828a9e19051163c18e0c2dbe368dce856555c08
+
+asset_marker=开盘前策略工作台
+cards_route={"active_phase": "auction", "cards": 0, "freshness": "missing", "status": "missing", "timing_rows": 15}
+adapter_health={"build": {"build_created_at": "2026-10-15T17:30:07Z", "git_sha": "861ecbfaa96e5dc647f9e530ca9720b92089badc", "release": "hotfix-hotfix-20261015T173007Z-861ecbfaa96e-25717"}, "runtime_source": "source-overlay", "status": "ok"}

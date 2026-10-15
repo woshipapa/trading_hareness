@@ -65,6 +65,7 @@
 - `frontend/src/views/research/SessionRadarTab.vue`
 - `docs/RELEASE_SYNC_47.md` 附录 C
 - `docs/work/probes/2026-10-15-strategy-timing-release.out.txt`
+- `docs/work/probes/2026-10-16-phase-workbench-live.out.txt`
 
 ## Running
 
