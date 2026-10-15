@@ -37,6 +37,7 @@
 - 2026-10-16 02:19 Asia/Shanghai：`intraday_runtime_status` 把 16 个顺序查询收敛为 12 个，保留数据库原生时间戳和 JSONB 行形状；最新状态、投递历史和待重试计数的字段语义不变。
 - 2026-10-16 02:21 Asia/Shanghai：最新 focused release-path 回归运行 71 项通过；前端 14 个测试文件、64 项通过，typecheck/build 通过；共享前端同步守卫和组件边界检查通过；尚未执行生产发布。
 - 2026-10-16 02:21 Asia/Shanghai：全量 quant overlay 运行 3293 项，唯一失败仍是其他会话 `local_spool_*` 读取未登记 `DOCKER_HOST`、`SPOOL_*`、`XDG_RUNTIME_DIR` 等环境变量；本线状态读和 HTTP 测试未失败。
+- 2026-10-16 02:30 Asia/Shanghai：Provider 实时面板新增本地执行器水位展示，直接显示活跃数、worker 上限、排队余量和可用槽位；前端 typecheck/build 通过，未改任何运行上限。
 
 ## Waiting on the user
 
