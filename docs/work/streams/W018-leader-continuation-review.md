@@ -65,7 +65,3 @@
 ## Resume here
 
 owner overlay `owner-code-20261015-leader-v1` 已上线，数据库 schema ready，live_effect 仍为 none。下一交易日先读 `/api/v1/intraday/scans/latest` 的 continuation/pullback 计数和观察样本；先确认 all-A snapshot 的 `decision_eligible`，再解释空结果。不要把 `research_watch` 当候选或告警，也不要在不足 20 个交易日结算前放宽阈值。主工作区有其他会话未提交文件，提交时只触碰 W018 自己的记录。
-- 发布记录：2026-10-15（Asia/Shanghai），owner code-only overlay `owner-code-20261015-leader-v1`，目标提交 `547ef89dde3c401b8aee9624ee745ac74d6a15b1`，上一版 `7e9d61f3ea73ce9ac37ba7ca640439efce330442`，alembic `20261010_ow0121`；迁移闸门 `at_head`，发布脚本验证容器源码摘要与 `/app/hotfix/current` 一致。
-- 发布后验证：owner `/health` 为 `ok`，build.git_sha 与 running_git_sha 均为目标提交，主服务与 scheduler 均 healthy，数据库 lineage 为 ready。收盘后最新扫描仍是发布前的 `14:59:57` 记录，`decision_eligible=false`、`candidates=0`；未在收盘后强行触发行情扫描，下一交易日首扫复核新增观察字段。
-- 当前仍需用至少 20 个交易日的复盘结算区分“低吸池抓到机会”和“只是接住下跌”；不能根据一份老师复盘直接放宽低吸阈值。
-- 盘口 `qi1/qi5`、OFI 和封单变化只作证据，当前没有足够样本证明“大单流入”可独立作为条件。
