@@ -43,6 +43,7 @@
 - 2026-10-16 03:42 Asia/Shanghai: 扫描准备复用同一事务刚写入的纸面持仓与组合快照，并把 cash/equity 的准备读合并为一个标量查询；市场事件非空分页用窗口计数消除第二次 count 往返，空页保留精确回退。策略形态页的 board 与龙虎榜上下文改为通过既有有界 runner 并行读取；新增 `20261016_ow0123` 读模型索引迁移。
 - 2026-10-16：影子轮换读取同一观察时刻的成员关系与影子行情改为有界并行，结果在特征构建前统一汇合；主扫描信号事务、研究表边界和失败降级语义不变。新增 overlap 回归，focused overlay 14 项通过；全量 overlay 3324 项仍只有共享工作树 `local_spool_*` 环境变量未登记导致的既有 settings failure。
 - 2026-10-16：最新扫描只读投影在原单条 SQL 内增加最多 30 条 `scan_performance` 历史，前端新增最近扫描总耗时趋势图；不改变信号/策略输入。local compose 五次中位约 6.315 ms → 7.166 ms，statement count 仍为 1，证据为 `docs/work/probes/2026-10-16-latest-scan-history.py` / `.out.txt`。
+- 2026-10-16：扫描历史读模型同步/异步边界 focused overlay 85 项通过，前端 14 个测试文件、68 项通过，typecheck/build 和 `node scripts/verify-api-contract.mjs` 通过；全量 quant overlay 3324 项仍只剩共享工作树 `local_spool_*` settings 登记失败。
 
 ## Waiting on the user
 
