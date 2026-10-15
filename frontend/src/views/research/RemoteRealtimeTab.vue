@@ -90,7 +90,7 @@ const liveEffect = computed(() => runtime.strategyHealth.value.validation_gate?.
 <template>
   <el-alert title="远端 47 owner 只读观察台：实时数据、盘中扫描和策略/复盘结果来自已落库证据。所有结果保持研究模式，不会自动下单。" type="warning" show-icon :closable="false" class="section-gap" />
   <el-card shadow="never" class="section-gap">
-    <template #header><div class="card-header"><span>Owner 运行状态</span><el-button text :icon="Refresh" :loading="runtime.loading.value" @click="runtime.loadRemoteRuntimeCore">刷新</el-button></div></template>
+    <template #header><div class="card-header"><span>Owner 运行状态 <small class="block-note">水位/扫描 15 秒；盘后研究 60 秒</small></span><el-button text :icon="Refresh" :loading="runtime.loading.value" @click="runtime.loadRemoteRuntimeCore">刷新</el-button></div></template>
     <el-alert v-if="runtime.error.value" :title="runtime.error.value" type="warning" :closable="false" show-icon class="section-gap" />
     <el-descriptions :column="mobileLayout ? 1 : 5" border size="small">
       <el-descriptions-item label="最近读取">{{ runtime.lastAttemptAt.value ? dateText(runtime.lastAttemptAt.value) : '尚未发起读取' }}<small v-if="runtime.lastSuccessAt.value" class="block-note">成功 {{ dateText(runtime.lastSuccessAt.value) }}</small></el-descriptions-item>

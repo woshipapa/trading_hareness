@@ -11,6 +11,9 @@ export type RemoteScan = { scan?: Record<string, any> | null; signals?: Record<s
 export type RemoteStrategyDecision = { run?: Record<string, any> | null; recommendations?: Record<string, any>[]; [key: string]: any };
 export type RemotePostClose = { latest_completed?: Record<string, any> | null; candidates?: Record<string, any>[]; notice?: string; [key: string]: any };
 
+const HOT_REFRESH_INTERVAL_MS = 15_000;
+const SLOW_REFRESH_INTERVAL_MS = 60_000;
+
 export function useRemoteQuantRuntime() {
   const runtimeHealth = ref<RemoteRuntimeHealth>({});
   const services = ref<RemoteServices>({ items: [] });
@@ -32,62 +35,71 @@ export function useRemoteQuantRuntime() {
   const lastAttemptAt = ref<string | null>(null);
   const lastSuccessAt = ref<string | null>(null);
   const polling = usePolling();
-  let coreInFlight = false;
+  let hotInFlight = false;
+  let slowInFlight = false;
+  let loadingCount = 0;
+  const tierFailures: Record<'hot' | 'slow', string[]> = { hot: [], slow: [] };
 
   const signals = computed(() => latestScan.value.signals ?? []);
   const watchlistItems = computed(() => watchlist.value.items ?? []);
 
-  async function loadRemoteRuntimeCore() {
-    if (coreInFlight) return;
-    coreInFlight = true;
+  function beginLoad() {
+    loadingCount += 1;
     loading.value = true;
-    error.value = '';
-    lastAttemptAt.value = new Date().toISOString();
-    const requests = [
-      { label: '运行状态', promise: getJson<RemoteRuntimeHealth>('/api/research/runtime/health') },
-      { label: '服务状态', promise: getJson<RemoteServices>('/api/research/intraday/services/status') },
-      { label: '观察池', promise: getJson<RemoteWatchlist>('/api/research/intraday/watchlists') },
-      { label: '盘中扫描', promise: getJson<RemoteScan>('/api/research/intraday/scans/latest?limit=100') },
-      { label: '策略健康', promise: getJson<Record<string, any>>('/api/research/strategy/health') },
-      { label: '策略决策', promise: getJson<RemoteStrategyDecision>('/api/research/strategy/decisions/latest') },
-      { label: '收盘复盘', promise: getJson<Record<string, any>>('/api/research/strategy/reviews/latest?session=close') },
-      { label: '盘后策略', promise: getJson<RemotePostClose>('/api/research/strategy/post-close/latest') },
-      { label: '日终摘要', promise: getJson<Record<string, any>>('/api/research/strategy/daily-summary/latest') },
-      { label: '晋级门禁', promise: getJson<Record<string, any>>('/api/research/strategy/promotion') },
-      { label: '候选提案', promise: getJson<Record<string, any>>('/api/research/strategy/watchlist-proposals') },
+  }
+
+  function endLoad() {
+    loadingCount = Math.max(0, loadingCount - 1);
+    loading.value = loadingCount > 0;
+  }
+
+  function refreshErrorMessage() {
+    const failures = [...tierFailures.hot, ...tierFailures.slow];
+    error.value = failures.length ? `远端只读接口暂时不可用：${failures.join('、')}` : '';
+  }
+
+  async function loadRuntimeTier(tier: 'hot' | 'slow') {
+    const inFlight = tier === 'hot' ? hotInFlight : slowInFlight;
+    if (inFlight) return;
+    if (tier === 'hot') hotInFlight = true;
+    else slowInFlight = true;
+    beginLoad();
+    if (tier === 'hot') lastAttemptAt.value = new Date().toISOString();
+    const requests = tier === 'hot' ? [
+      { label: '运行状态', promise: getJson<RemoteRuntimeHealth>('/api/research/runtime/health'), set: (value: any) => { runtimeHealth.value = value; }, empty: {} },
+      { label: '服务状态', promise: getJson<RemoteServices>('/api/research/intraday/services/status'), set: (value: any) => { services.value = value; }, empty: { items: [] } },
+      { label: '观察池', promise: getJson<RemoteWatchlist>('/api/research/intraday/watchlists'), set: (value: any) => { watchlist.value = value; }, empty: { items: [] } },
+      { label: '盘中扫描', promise: getJson<RemoteScan>('/api/research/intraday/scans/latest?limit=100'), set: (value: any) => { latestScan.value = value; }, empty: { signals: [], deliveries: [] } },
+      { label: '策略健康', promise: getJson<Record<string, any>>('/api/research/strategy/health'), set: (value: any) => { strategyHealth.value = value; }, empty: {} },
+    ] : [
+      { label: '策略决策', promise: getJson<RemoteStrategyDecision>('/api/research/strategy/decisions/latest'), set: (value: any) => { strategyDecision.value = value; }, empty: { recommendations: [] } },
+      { label: '收盘复盘', promise: getJson<Record<string, any>>('/api/research/strategy/reviews/latest?session=close'), set: (value: any) => { closeReview.value = value; }, empty: {} },
+      { label: '盘后策略', promise: getJson<RemotePostClose>('/api/research/strategy/post-close/latest'), set: (value: any) => { postClose.value = value; }, empty: { candidates: [] } },
+      { label: '日终摘要', promise: getJson<Record<string, any>>('/api/research/strategy/daily-summary/latest'), set: (value: any) => { dailySummary.value = value; }, empty: {} },
+      { label: '晋级门禁', promise: getJson<Record<string, any>>('/api/research/strategy/promotion'), set: (value: any) => { promotion.value = value; }, empty: { strategies: [] } },
+      { label: '候选提案', promise: getJson<Record<string, any>>('/api/research/strategy/watchlist-proposals'), set: (value: any) => { watchlistProposals.value = value; }, empty: { proposals: [] } },
     ];
-    const results = await Promise.allSettled(requests.map((request) => request.promise));
-    const setters = [
-      (value: any) => { runtimeHealth.value = value; },
-      (value: any) => { services.value = value; },
-      (value: any) => { watchlist.value = value; },
-      (value: any) => { latestScan.value = value; },
-      (value: any) => { strategyHealth.value = value; },
-      (value: any) => { strategyDecision.value = value; },
-      (value: any) => { closeReview.value = value; },
-      (value: any) => { postClose.value = value; },
-      (value: any) => { dailySummary.value = value; },
-      (value: any) => { promotion.value = value; },
-      (value: any) => { watchlistProposals.value = value; },
-    ];
-    // A failed read must clear its panel. Retaining a previous successful
-    // payload makes a transient owner/relay failure look like current data.
-    const emptyValues = [
-      {}, { items: [] }, { items: [] }, { signals: [], deliveries: [] }, {},
-      { recommendations: [] }, {}, { candidates: [] }, {}, { strategies: [] }, { proposals: [] },
-    ];
-    let succeeded = 0;
-    const failures: string[] = [];
-    results.forEach((result, index) => {
-      if (result.status === 'fulfilled') { succeeded += 1; setters[index](result.value); }
-      else { setters[index](emptyValues[index]); failures.push(requests[index].label); }
-    });
-    if (succeeded) lastSuccessAt.value = new Date().toISOString();
-    if (failures.length) error.value = succeeded
-      ? `远端只读接口暂时不可用：${failures.join('、')}`
-      : '远端量化服务暂时无法读取，请稍后重试';
-    loading.value = false;
-    coreInFlight = false;
+    try {
+      const results = await Promise.allSettled(requests.map((request) => request.promise));
+      let succeeded = 0;
+      const failures: string[] = [];
+      results.forEach((result, index) => {
+        const request = requests[index];
+        if (result.status === 'fulfilled') { succeeded += 1; request.set(result.value); }
+        else { request.set(request.empty); failures.push(request.label); }
+      });
+      tierFailures[tier] = failures;
+      if (succeeded) lastSuccessAt.value = new Date().toISOString();
+      refreshErrorMessage();
+    } finally {
+      if (tier === 'hot') hotInFlight = false;
+      else slowInFlight = false;
+      endLoad();
+    }
+  }
+
+  async function loadRemoteRuntimeCore() {
+    await Promise.all([loadRuntimeTier('hot'), loadRuntimeTier('slow')]);
   }
 
   async function loadDecisionCard(symbol: string) {
@@ -106,7 +118,10 @@ export function useRemoteQuantRuntime() {
 
   function startPolling() {
     polling.stop();
-    if (document.visibilityState === 'visible') polling.every(15_000, () => { void loadRemoteRuntimeCore(); });
+    if (document.visibilityState === 'visible') {
+      polling.every(HOT_REFRESH_INTERVAL_MS, () => { void loadRuntimeTier('hot'); });
+      polling.every(SLOW_REFRESH_INTERVAL_MS, () => { void loadRuntimeTier('slow'); });
+    }
   }
   function handleVisibility() { if (document.visibilityState === 'visible') startPolling(); else polling.stop(); }
 
