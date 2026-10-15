@@ -49,6 +49,7 @@
 
 - `docs/work/probes/2026-10-15-teacher-review-leader.py`
 - `docs/work/probes/2026-10-15-teacher-review-leader.out.txt`
+- `docs/work/probes/2026-10-15-leader-release-status.out.txt`
 - `docs/RELEASE_SYNC_47.md` 的 2026-10-15 发布记录
 - `quant-service/app/xiaojie_indicators.py`
 - `quant-service/app/xiaojie_reference_repository.py`

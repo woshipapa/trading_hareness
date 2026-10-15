@@ -1,0 +1,15 @@
+host   check                          observed                                                                                        result  expected
+owner  ~/trading_hareness             /home/stockpeer/.local/share/trading-hareness/releases/owner-full-20261012-20/trading_hareness  PASS    release symlink
+owner  quant-research :15682 /health  ok                                                                                              PASS    ok
+owner  quant-research :15682 git_sha  547ef89dde3c401b8aee9624ee745ac74d6a15b1                                                        PASS    547ef89dde3c
+owner  quant-research :15682 release  owner-code-20261015-leader-v1                                                                   PASS    non-empty source-overlay release
+owner  scheduler :15683 /health       ok                                                                                              PASS    ok
+owner  scheduler :15683 git_sha       547ef89dde3c401b8aee9624ee745ac74d6a15b1                                                        PASS    547ef89dde3c
+owner  scheduler :15683 release       owner-code-20261015-leader-v1                                                                   PASS    non-empty source-overlay release
+owner  quant source-overlay           true                                                                                            PASS    true
+owner  main runtime profile           intraday_edge                                                                                   PASS    intraday_edge
+owner  alembic revision               20261010_ow0121                                                                                 PASS    20261010_ow0121
+owner  intraday-secrets.env           present                                                                                         PASS    present
+
+expected sha: aaeb0b9100a67e1c8a146d0d8a5c31aa52f8382d
+ALL CHECKS PASSED
