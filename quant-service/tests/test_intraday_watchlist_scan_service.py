@@ -291,6 +291,65 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
         self.assertTrue(receipt_released.is_set())
         self.assertEqual(persisted_status, [{"status": "completed", "live_effect": "none"}])
 
+    def test_shadow_rotation_overlaps_alert_delivery_after_primary_receipt(self):
+        observed_at = datetime(2026, 8, 24, 2, tzinfo=timezone.utc)
+        shadow_started = asyncio.Event()
+        delivery_started = asyncio.Event()
+        shadow_statuses = []
+        event_id = uuid.uuid4()
+
+        async def session():
+            return True, "continuous auction"
+
+        async def watches(_):
+            return [{"symbol": "000001.SZ"}]
+
+        async def capture(_symbols, _observed, _slo):
+            return SimpleNamespace(
+                quotes={"000001.SZ": {"price": 10.0}}, all_a_rows=[],
+                fresh_watch_rows=[], sina_watch_rows=[], eastmoney_watch_flow_rows=[],
+                eastmoney_watch_flow_status={"status": "fresh"}, derived_flow_status={"status": "fresh"},
+                all_a_snapshot_status={"status": "fresh", "cross_sectional": True}, latency_ms=1,
+            )
+
+        async def surge(*_args, **_kwargs):
+            return {}, {}
+
+        async def persist(*_args, **_kwargs):
+            return [{
+                "signal_event_id": event_id, "symbol": "000001.SZ", "signal_type": "entry",
+                "severity": "high", "state": "confirmed", "watch": {"symbol": "000001.SZ"},
+                "quote": {"price": 10.0}, "minute": {},
+            }]
+
+        async def deliver(_event_id, _text):
+            delivery_started.set()
+            await shadow_started.wait()
+            return {"status": "sent"}
+
+        async def shadow_pool():
+            shadow_started.set()
+            await delivery_started.wait()
+            return {"run": False, "candidates": []}
+
+        async def persist_shadow_status(_scan_id, status):
+            shadow_statuses.append(status)
+
+        dependencies = self.dependencies(
+            now_utc=lambda: observed_at, realtime_session=session, load_watches=watches,
+            capture_quotes=capture, surge_context=surge, persist_signals=persist,
+            deliver_alert=deliver, shadow_rotation_due=lambda _observed: True,
+            shadow_pool=shadow_pool, persist_shadow_status=persist_shadow_status,
+        )
+
+        async def bounded_scan():
+            return await asyncio.wait_for(run_watchlist_scan(self.request(), dependencies), timeout=1.0)
+
+        result = asyncio.run(bounded_scan())
+        self.assertEqual(result["alerts"][0]["delivery"]["status"], "sent")
+        self.assertEqual(result["ten_day_leader_rotation_shadow"]["status"], "standby")
+        self.assertEqual(shadow_statuses, [{"status": "standby", "reason": "no_completed_daily_shadow_cohort"}])
+
     @staticmethod
     def dependencies(**overrides):
         async def default_async(*_args, **_kwargs):

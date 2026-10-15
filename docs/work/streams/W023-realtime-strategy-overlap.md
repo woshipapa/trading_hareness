@@ -38,6 +38,7 @@
 - 2026-10-16 01:53 Asia/Shanghai: 增加 `intraday-scan-timing-v1` 只读遥测。每次 scan 在持久化前记录 session/watchlist、pre-capture、capture/membership、enrichment/strategy-prepare 和 signal-persist 阶段，提交后补写 delivery/research、shadow-rotation 与最终总耗时；遥测 JSONB 合并失败只标记 degraded，不改变主扫描结果。空观察池和 blocked scan 也保存 terminal timing。RemoteRealtime 观察台展示总耗时、阶段耗时和并行边界。
 - 2026-10-16 01:56 Asia/Shanghai: 200 次确定性本地 probe 显示 capture/membership overlap 中位数约 1.808x、p95 约 2.377x；minute/board overlap 中位数约 1.765x、p95 约 2.345x。该 probe 只验证编排层的有界 I/O overlap，不冒充 provider 吞吐或 owner 线上收益。
 - 2026-10-16 02:00 Asia/Shanghai: provider health 写入从 capture 返回前移出主等待点，改为每个 scan 一个有界 task 集合；策略链路立即消费 immutable capture，runtime 在响应前统一 join，失败不会留下 detached task，也不会改变 scan eligibility。
+- 2026-10-16 02:41 Asia/Shanghai: primary signal receipt 提交后，ten-day shadow rotation 改为与 alert delivery/teacher research 并行；shadow 仍只写 research evidence，独立失败继续降级，响应前统一 join。新增事件型回归验证串行实现会等待死锁、并行实现可完成。
 
 ## Waiting on the user
 

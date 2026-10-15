@@ -332,6 +332,66 @@ async def _surge_and_board_evidence(
     return surge_result, board_cache_evidence
 
 
+async def _run_shadow_rotation(
+    scan_id: Any,
+    observed_at: datetime,
+    quote_capture: Any,
+    dependencies: "IntradayWatchlistScanDependencies",
+) -> tuple[dict[str, Any], float]:
+    """Run the independent shadow cohort and return its timing evidence.
+
+    The primary signal transaction is already committed when this starts.
+    Shadow writes use separate research tables, so the provider/database work
+    can overlap alert delivery without changing the primary receipt boundary.
+    """
+    started_at = dependencies.monotonic()
+    shadow_observation: dict[str, Any] = {"status": "standby", "reason": "awaiting_next_minute_rotation"}
+    if not dependencies.shadow_rotation_due(observed_at):
+        return shadow_observation, round(
+            max(0.0, dependencies.monotonic() - started_at) * 1000.0, 1,
+        )
+    try:
+        shadow_pool = await dependencies.shadow_pool()
+        rotation_candidates, rotation_offset = dependencies.shadow_rotation_slice(
+            list(shadow_pool.get("candidates") or []), observed_at,
+        )
+        if shadow_pool.get("run") and rotation_candidates:
+            shadow_symbols = [str(item["symbol"]).upper() for item in rotation_candidates]
+            shadow_memberships = await dependencies.load_exact_memberships(shadow_symbols, observed_at)
+            shadow_mapped_peers = dependencies.mapped_peers(shadow_symbols, shadow_memberships)
+            shadow_watches = [
+                {"symbol": symbol, "metadata": {"surge_strategy": {"enabled": True}}}
+                for symbol in shadow_symbols
+            ]
+            shadow_quotes, shadow_quote_status = await dependencies.capture_shadow_quotes(shadow_symbols)
+            shadow_minutes, shadow_minute_status = await dependencies.surge_context(
+                shadow_watches, mapped_peers=shadow_mapped_peers,
+            )
+            shadow_peer_contexts = build_peer_contexts(
+                shadow_watches, shadow_mapped_peers, shadow_minutes, dependencies.peer_context,
+            )
+            shadow_observation = await dependencies.persist_shadow_observations(
+                scan_id=scan_id, observed_at=observed_at, pool=shadow_pool,
+                candidates=rotation_candidates, all_a_rows=quote_capture.all_a_rows,
+                quotes=shadow_quotes,
+                minute_features=shadow_minutes, peer_contexts=shadow_peer_contexts,
+            )
+            shadow_observation = {
+                **shadow_observation, "rotation_offset": rotation_offset,
+                "rotation_pool_size": len(shadow_pool.get("candidates") or []),
+                "quote_source": shadow_quote_status,
+                "minute_source": shadow_minute_status,
+            }
+        else:
+            shadow_observation = {"status": "standby", "reason": "no_completed_daily_shadow_cohort"}
+    except Exception as error:  # noqa: BLE001 - preserve the independent primary scan
+        shadow_observation = {"status": "degraded", "reason": str(error)[:240]}
+    await dependencies.persist_shadow_status(scan_id, shadow_observation)
+    return shadow_observation, round(
+        max(0.0, dependencies.monotonic() - started_at) * 1000.0, 1,
+    )
+
+
 async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDependencies) -> dict[str, Any]:
     """Run one scan without owning database transactions or provider clients."""
     started_at = dependencies.monotonic()
@@ -526,67 +586,39 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     # research-only stage, so it cannot alter the primary signal state.
     confirmed = [signal for signal in signals if signal["state"] == "confirmed"]
 
-    if dependencies.xiaojie_leader_flow is not None:
-        # Put the primary delivery coroutine first so its outbox tasks are
-        # scheduled before the independent research branch.  The research
-        # task has already evaluated while persistence ran; the receipt barrier
-        # above made its foreign-key writes safe.  Both branches are still
-        # awaited as one bounded pair, so cancellation cannot leave a detached
-        # task behind.
-        deliveries, xiaojie_observation = await asyncio.gather(
-            _deliver_confirmed(confirmed, dependencies), xiaojie_task,
-        )
-    else:
-        deliveries = await _deliver_confirmed(confirmed, dependencies)
-        xiaojie_observation = {"status": "disabled"}
+    async def deliver_and_research() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        if dependencies.xiaojie_leader_flow is not None:
+            # Put the primary delivery coroutine first so its outbox tasks are
+            # scheduled before the independent research branch.  The research
+            # task has already evaluated while persistence ran; the receipt
+            # barrier above made its foreign-key writes safe.  Both branches
+            # are still awaited as one bounded pair, so cancellation cannot
+            # leave a detached task behind.
+            return await asyncio.gather(_deliver_confirmed(confirmed, dependencies), xiaojie_task)
+        return await _deliver_confirmed(confirmed, dependencies), {"status": "disabled"}
+
+    # Shadow rotation writes only research evidence after the primary receipt
+    # commits.  Start it beside delivery/research so a slow minute/provider
+    # read cannot extend the alert path's critical wait.
+    delivery_research_task = asyncio.create_task(
+        deliver_and_research(), name="intraday-scan-delivery-and-research",
+    )
+    shadow_task = asyncio.create_task(
+        _run_shadow_rotation(scan_id, observed_at, quote_capture, dependencies),
+        name="intraday-scan-shadow-rotation",
+    )
+    try:
+        deliveries, xiaojie_observation = await delivery_research_task
+    except BaseException:
+        await _cancel_tasks([delivery_research_task, shadow_task])
+        raise
     delivery_finished_at = dependencies.monotonic()
     stage_ms["delivery_and_research"] = round(
         max(0.0, delivery_finished_at - stage_started_at) * 1000.0, 1,
     )
-    stage_started_at = delivery_finished_at
-    shadow_observation: dict[str, Any] = {"status": "standby", "reason": "awaiting_next_minute_rotation"}
-    if dependencies.shadow_rotation_due(observed_at):
-        try:
-            shadow_pool = await dependencies.shadow_pool()
-            rotation_candidates, rotation_offset = dependencies.shadow_rotation_slice(
-                list(shadow_pool.get("candidates") or []), observed_at,
-            )
-            if shadow_pool.get("run") and rotation_candidates:
-                shadow_symbols = [str(item["symbol"]).upper() for item in rotation_candidates]
-                shadow_memberships = await dependencies.load_exact_memberships(shadow_symbols, observed_at)
-                shadow_mapped_peers = dependencies.mapped_peers(shadow_symbols, shadow_memberships)
-                shadow_watches = [
-                    {"symbol": symbol, "metadata": {"surge_strategy": {"enabled": True}}}
-                    for symbol in shadow_symbols
-                ]
-                shadow_quotes, shadow_quote_status = await dependencies.capture_shadow_quotes(shadow_symbols)
-                shadow_minutes, shadow_minute_status = await dependencies.surge_context(
-                    shadow_watches, mapped_peers=shadow_mapped_peers,
-                )
-                shadow_peer_contexts = build_peer_contexts(
-                    shadow_watches, shadow_mapped_peers, shadow_minutes, dependencies.peer_context,
-                )
-                shadow_observation = await dependencies.persist_shadow_observations(
-                    scan_id=scan_id, observed_at=observed_at, pool=shadow_pool,
-                    candidates=rotation_candidates, all_a_rows=quote_capture.all_a_rows,
-                    quotes=shadow_quotes,
-                    minute_features=shadow_minutes, peer_contexts=shadow_peer_contexts,
-                )
-                shadow_observation = {
-                    **shadow_observation, "rotation_offset": rotation_offset,
-                    "rotation_pool_size": len(shadow_pool.get("candidates") or []),
-                    "quote_source": shadow_quote_status,
-                    "minute_source": shadow_minute_status,
-                }
-            else:
-                shadow_observation = {"status": "standby", "reason": "no_completed_daily_shadow_cohort"}
-        except Exception as error:  # noqa: BLE001 - preserve the independent primary scan
-            shadow_observation = {"status": "degraded", "reason": str(error)[:240]}
-        await dependencies.persist_shadow_status(scan_id, shadow_observation)
-    shadow_finished_at = dependencies.monotonic()
-    stage_ms["shadow_rotation"] = round(
-        max(0.0, shadow_finished_at - stage_started_at) * 1000.0, 1,
-    )
+    shadow_observation, shadow_elapsed_ms = await shadow_task
+    stage_ms["shadow_rotation"] = shadow_elapsed_ms
+    stage_started_at = max(delivery_finished_at, dependencies.monotonic())
     if shadow_observation.get("status") != "standby":
         source_status["ten_day_leader_rotation_shadow"] = shadow_observation
     # Leader-flow research runs on the all-A cross-section this scan already
