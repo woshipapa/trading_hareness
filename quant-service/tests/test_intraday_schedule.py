@@ -34,12 +34,14 @@ class IntradayScheduleCapacityTests(unittest.TestCase):
         self.assertIn("exceeds", str(overflow["reason"]))
 
     def test_expanded_pool_is_explicitly_configurable_but_bounded(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(intraday_watchlist_max_symbols(), 160)
         with patch.dict("os.environ", {"INTRADAY_WATCHLIST_MAX_SYMBOLS": "100"}):
             self.assertEqual(intraday_watchlist_max_symbols(), 100)
             self.assertFalse(intraday_watchlist_capacity(100)["blocked"])
             self.assertTrue(intraday_watchlist_capacity(101)["blocked"])
         with patch.dict("os.environ", {"INTRADAY_WATCHLIST_MAX_SYMBOLS": "1000"}):
-            self.assertEqual(intraday_watchlist_max_symbols(), 100)
+            self.assertEqual(intraday_watchlist_max_symbols(), 200)
 
 
 if __name__ == "__main__":

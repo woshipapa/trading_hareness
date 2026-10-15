@@ -71,14 +71,14 @@ class MarketSnapshotActions:
         except ValueError:
             batch_size = 80
         try:
-            concurrency = int(os.getenv("MARKET_SNAPSHOT_PUBLIC_CONCURRENCY", "2"))
+            concurrency = int(os.getenv("MARKET_SNAPSHOT_PUBLIC_CONCURRENCY", "4"))
         except ValueError:
-            concurrency = 2
+            concurrency = 4
         return {
             "enabled": enabled,
             "fallback_enabled": fallback_enabled,
             "batch_size": min(200, max(1, batch_size)),
-            "concurrency": min(8, max(1, concurrency)),
+            "concurrency": min(16, max(1, concurrency)),
         }
 
     @staticmethod

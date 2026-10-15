@@ -36,7 +36,7 @@ async def repair(day: date, *, db: Any, source_factory: Any, run_public_blocking
     try:
         source=source_factory()
         quote_source=source if hasattr(source,'raw_call') else source._source
-        quotes,health=await run_public_blocking(fetch,quote_source,required,day,workers=4,timeout_seconds=120)
+        quotes,health=await run_public_blocking(fetch,quote_source,required,day,workers=8,timeout_seconds=120)
         names={r['symbol']:r.get('name') or r['symbol'] for r in rows}
         quotes=[{**r,'name':names.get(r['ts_code'],r['ts_code'])} for r in quotes]
         merged=merge_cross_section(day,{},quotes)

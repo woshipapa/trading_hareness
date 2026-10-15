@@ -209,7 +209,7 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
 
     def test_database_pool_settings_are_bounded(self):
         self.assertEqual(pool_settings({"QUANT_DB_POOL_MIN_SIZE": "0", "QUANT_DB_POOL_MAX_SIZE": "999"}),
-                         {"min_size": 1, "max_size": 32, "timeout_seconds": 10})
+                         {"min_size": 1, "max_size": 64, "timeout_seconds": 10})
         self.assertEqual(pool_settings({"QUANT_DB_POOL_MIN_SIZE": "4", "QUANT_DB_POOL_MAX_SIZE": "3", "QUANT_DB_POOL_TIMEOUT_SECONDS": "2"}),
                          {"min_size": 4, "max_size": 4, "timeout_seconds": 2})
 
@@ -218,10 +218,10 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
             database = AsyncDatabase(Database())
         self.assertEqual(database._pool_settings["max_size"], 16)
 
-    def test_async_read_pool_clamps_values_above_owner_budget(self):
+    def test_async_read_pool_clamps_values_above_process_ceiling(self):
         with patch.dict("os.environ", {"QUANT_ASYNC_READ_POOL_MAX_SIZE": "999"}, clear=False):
             database = AsyncDatabase(Database())
-        self.assertEqual(database._pool_settings["max_size"], 16)
+        self.assertEqual(database._pool_settings["max_size"], 32)
 
     def test_akshare_retry_is_bounded_and_returns_the_first_success(self):
         with patch("app.akshare_provider._call", side_effect=[AkShareProviderError("temporary disconnect"), [{"code": "000001"}]] ) as call, \

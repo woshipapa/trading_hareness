@@ -68,10 +68,8 @@ def build_strategy_reads_router(database: Any, decision_model_version: str, asyn
     async def watchlist_proposals(as_of_date: date | None = None) -> dict[str, Any]:
         """Cross-strategy watchlist candidates for human review only.
 
-        Never written into quant.intraday_watchlists: that table has a
-        previously-verified 40-symbol capacity bound tied to the live
-        Tencent batched-quote request size, and a human-curated watchlist
-        already uses most of it.
+        Never written into quant.intraday_watchlists: admission is a separate
+        bounded runtime setting and a human still reviews every proposal.
         """
         today = cn_today()
         # A caller may ask for an older replay date, but never use a future

@@ -520,12 +520,12 @@ def _tencent_order_book_row(symbol: str, values: list[str]) -> dict[str, Any] | 
     }
 
 
-async def tencent_order_book_quotes(symbols: list[str], *, max_symbols: int = 20) -> list[dict[str, Any]]:
+async def tencent_order_book_quotes(symbols: list[str], *, max_symbols: int = 80) -> list[dict[str, Any]]:
     """Fetch one bounded Tencent depth snapshot for explicit watchlist symbols.
 
     A single comma-separated request is used for the whole watchlist.  This is
-    The caller supplies a bounded cap. Depth collection uses 20; the live
-    watch quote path may use 40 in the same batched request. Neither is a
+    The caller supplies a bounded cap. The request contract admits at most 80
+    symbols; callers may choose a smaller research slice. This is not a
     general market-depth scraper.
     """
     normalized = list(dict.fromkeys(str(symbol).upper() for symbol in symbols if re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", str(symbol).upper())))
@@ -553,17 +553,17 @@ async def tencent_order_book_quotes(symbols: list[str], *, max_symbols: int = 20
     return rows
 
 
-async def sina_quotes(symbols: list[str], *, batch_size: int = 80, concurrency: int = 2) -> list[dict[str, Any]]:
+async def sina_quotes(symbols: list[str], *, batch_size: int = 80, concurrency: int = 4) -> list[dict[str, Any]]:
     """Fetch bounded batches of public quotes for a supplemental market view.
 
-    This is intentionally a low-concurrency, best-effort adapter.  Callers
-    must mark its output as non-decision-eligible unless a licensed feed also
-    meets the same freshness and coverage requirements.
+    This remains a bounded, best-effort adapter.  Callers must mark its output
+    as non-decision-eligible unless a licensed feed also meets the same
+    freshness and coverage requirements.
     """
     if batch_size < 1 or batch_size > 200:
         raise ValueError("batch_size must be between 1 and 200")
-    if concurrency < 1 or concurrency > 8:
-        raise ValueError("concurrency must be between 1 and 8")
+    if concurrency < 1 or concurrency > 16:
+        raise ValueError("concurrency must be between 1 and 16")
     chunks = [symbols[index:index + batch_size] for index in range(0, len(symbols), batch_size)]
     semaphore = asyncio.Semaphore(concurrency)
 

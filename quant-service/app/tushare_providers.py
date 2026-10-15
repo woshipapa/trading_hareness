@@ -323,7 +323,7 @@ async def acquire_provider_request_slot(provider: TushareProvider, *, capability
 
 def _super_get_worker_count() -> int:
     try:
-        return min(16, max(1, int(os.getenv("TUSHARE_SUPER_GET_MAX_WORKERS", "8"))))
+        return min(32, max(1, int(os.getenv("TUSHARE_SUPER_GET_MAX_WORKERS", "8"))))
     except ValueError:
         return 8
 
@@ -332,7 +332,7 @@ def _super_get_worker_count() -> int:
 # which also runs AKShare calls used by the 30-second monitoring loop.
 _super_get_executor_workers = _super_get_worker_count()
 _super_get_executor = ThreadPoolExecutor(max_workers=_super_get_executor_workers, thread_name_prefix="super-get")
-_super_get_queue_capacity = bounded_queue_size("TUSHARE_SUPER_GET_MAX_QUEUE", 8)
+_super_get_queue_capacity = bounded_queue_size("TUSHARE_SUPER_GET_MAX_QUEUE", 16, 128)
 _super_get_executor_boundary = BlockingExecutorBoundary(
     "super_get", _super_get_executor_workers, _super_get_queue_capacity,
 )

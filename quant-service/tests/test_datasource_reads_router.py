@@ -23,6 +23,17 @@ class DatasourceReadRouterTests(unittest.TestCase):
     def setUp(self):
         adapter_calls._LAST_READ.clear()
 
+    def test_research_read_parallelism_raises_only_the_software_ceiling(self):
+        self.assertEqual(adapter_calls.bounded_research_read_parallelism({
+            "DATASOURCE_RESEARCH_READ_MAX_IN_FLIGHT": "0",
+        }), 1)
+        self.assertEqual(adapter_calls.bounded_research_read_parallelism({
+            "DATASOURCE_RESEARCH_READ_MAX_IN_FLIGHT": "8",
+        }), 8)
+        self.assertEqual(adapter_calls.bounded_research_read_parallelism({
+            "DATASOURCE_RESEARCH_READ_MAX_IN_FLIGHT": "999",
+        }), adapter_calls.RESEARCH_READ_MAX_IN_FLIGHT)
+
     def test_a_read_parses_the_typed_query_and_is_marked_research_only(self):
         async def fake(*, symbol: str, count: int) -> CapabilityEvidence:
             self.assertEqual((symbol, count), ("600519.SH", 2))

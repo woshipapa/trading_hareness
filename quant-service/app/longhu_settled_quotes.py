@@ -1,8 +1,10 @@
 """Date-addressed licensed OHLC. Live quotes cannot repair historical days."""
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from datetime import date
 from math import isfinite
 from time import monotonic
+
+from .longhu_vendor_source import LICENSED_READ_MAX_IN_FLIGHT
 
 
 def number(value):
@@ -46,7 +48,11 @@ def fetch(source, symbols, day, *, workers=8):
             if quote is not None:
                 return quote
         raise ValueError('requested_settled_day_missing_or_invalid_ohlc')
-    with ThreadPoolExecutor(max_workers=max(1,min(workers,12))) as pool:
+    # Every dated licensed request consumes one owner gateway slot.  Keep the
+    # fan-out aligned with the measured upstream ceiling even when a caller
+    # supplies an arbitrarily large worker value.
+    worker_count = max(1, min(workers, LICENSED_READ_MAX_IN_FLIGHT))
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
         tasks={pool.submit(one,s):s for s in unique}
         for task in as_completed(tasks):
             s=tasks[task]
@@ -59,7 +65,7 @@ def fetch(source, symbols, day, *, workers=8):
                    'physical_page_limit':300,'no_live_quote_substitution':True}
 
 
-def fetch_classified(source, symbols, day, *, workers=6, deadline_seconds=240):
+def fetch_classified(source, symbols, day, *, workers=8, deadline_seconds=240):
     """Fetch dated bars and retain the evidence needed to explain every gap."""
     unique = list(dict.fromkeys(symbols))
     target = day.strftime('%Y%m%d')
@@ -96,7 +102,8 @@ def fetch_classified(source, symbols, day, *, workers=6, deadline_seconds=240):
             return symbol, 'failed', None, False, f'{type(error).__name__}: {error}'
 
     results = []
-    pool = ThreadPoolExecutor(max_workers=max(1, min(workers, 6)))
+    worker_count = max(1, min(workers, LICENSED_READ_MAX_IN_FLIGHT))
+    pool = ThreadPoolExecutor(max_workers=worker_count)
     active = {}
     pending = iter(unique)
     deadline = monotonic() + deadline_seconds
@@ -111,7 +118,7 @@ def fetch_classified(source, symbols, day, *, workers=6, deadline_seconds=240):
         active[pool.submit(guarded, symbol)] = symbol
         return True
 
-    while len(active) < max(1, min(workers, 6)) and submit_next():
+    while len(active) < worker_count and submit_next():
         pass
     while active:
         remaining = deadline - monotonic()
@@ -123,7 +130,7 @@ def fetch_classified(source, symbols, day, *, workers=6, deadline_seconds=240):
         for task in done:
             active.pop(task)
             results.append(task.result())
-        while len(active) < max(1, min(workers, 6)) and submit_next():
+        while len(active) < worker_count and submit_next():
             pass
     reached = {symbol for symbol, _outcome, _quote, _marker, _error in results}
     deadline_failures = [symbol for symbol in unique if symbol not in reached]

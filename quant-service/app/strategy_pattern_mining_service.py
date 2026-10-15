@@ -30,7 +30,7 @@ class StrategyPatternMiningDependencies:
     run_database: Callable[..., Awaitable[Any]]
     model_version: str
     handled_errors: tuple[type[BaseException], ...]
-    max_in_flight: int = 4
+    max_in_flight: int = 8
     minute_timeout_seconds: float = 10.0
 
 

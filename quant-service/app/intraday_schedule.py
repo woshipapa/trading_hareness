@@ -8,7 +8,9 @@ from zoneinfo import ZoneInfo
 
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
-INTRADAY_WATCHLIST_MAX_SYMBOLS = 40
+# The owner overlay uses 160 explicit watches. Keep a lower policy floor of
+# 40 for smaller deployments while allowing the software ceiling to remain 200.
+INTRADAY_WATCHLIST_MAX_SYMBOLS = 160
 
 
 def seconds_until_slot(now_epoch: float, interval_seconds: int, offset_seconds: int) -> float:
@@ -21,17 +23,15 @@ def seconds_until_slot(now_epoch: float, interval_seconds: int, offset_seconds: 
 def intraday_watchlist_max_symbols() -> int:
     """Return the configured live-watch capacity without weakening the batch caps.
 
-    The historical default remains 40 (the audited single-batch size).  A
-    larger observation pool may be enabled explicitly, but is processed in
-    provider-sized batches by the capture layer.  Capping the setting at 100
-    keeps the bounded scan contract and prevents an accidental full-market
-    scrape from a stale environment file.
+    The owner default is 160. Smaller deployments may still choose a value
+    down to the 40-symbol policy floor; provider-sized batches keep the scan
+    bounded while the 4-core owner uses its network I/O headroom.
     """
     try:
         value = int(os.getenv("INTRADAY_WATCHLIST_MAX_SYMBOLS", str(INTRADAY_WATCHLIST_MAX_SYMBOLS)))
     except ValueError:
         value = INTRADAY_WATCHLIST_MAX_SYMBOLS
-    return max(INTRADAY_WATCHLIST_MAX_SYMBOLS, min(100, value))
+    return max(40, min(200, value))
 
 
 def intraday_scan_interval_seconds() -> int:
@@ -86,10 +86,9 @@ def intraday_watchlist_capacity(symbol_count: int, *, max_symbols: int | None = 
 
 
 def intraday_next_realtime_validation_offset(current_offset: int, step: int, slots: int = 20) -> int:
-    # The scanner itself has a 40-symbol explicit-watch bound.  Do not silently
-    # fold a larger enabled basket back to the first 20 symbols: callers pass
-    # their audited coverage cap and expose any remaining truncation.
-    bounded_slots = max(1, min(100, slots))
+    # Do not silently fold a larger enabled basket back to a smaller prefix:
+    # callers pass their coverage cap and expose any remaining truncation.
+    bounded_slots = max(1, min(200, slots))
     return (max(0, current_offset) + max(0, step)) % bounded_slots
 
 

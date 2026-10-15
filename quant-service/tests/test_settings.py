@@ -56,7 +56,7 @@ class RegistryTests(unittest.TestCase):
         rows = {row["name"]: row for row in settings.inventory()}
         self.assertTrue(rows["QUANT_WRITE_API_KEY"]["secret"])
         self.assertIsNone(rows["QUANT_WRITE_API_KEY"]["default"])
-        self.assertEqual(rows["INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS"]["default"], "40")
+        self.assertEqual(rows["INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS"]["default"], "80")
 
 
 class AccessorTests(unittest.TestCase):
@@ -68,9 +68,9 @@ class AccessorTests(unittest.TestCase):
         self.assertFalse(settings.flag("QUANT_LONGHU_FULL_MARKET_ENABLED", {}))  # declared default false
 
     def test_integers_clamp_and_fall_back(self) -> None:
-        read = lambda raw: settings.integer("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", minimum=1, maximum=100,
+        read = lambda raw: settings.integer("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", minimum=1, maximum=200,
                                             environ={} if raw is None else {"INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS": raw})
-        self.assertEqual([read(None), read("7"), read(" 7 "), read("0"), read("900"), read("many")], [40, 7, 7, 1, 100, 40])
+        self.assertEqual([read(None), read("7"), read(" 7 "), read("0"), read("900"), read("many")], [80, 7, 7, 1, 200, 80])
         self.assertEqual(settings.integer("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", fallback=3,
                                           environ={"INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS": "x"}), 3)
 

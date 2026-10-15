@@ -27,7 +27,7 @@ def bounded_worker_count(name: str, default: int, maximum: int) -> int:
         return default
 
 
-def bounded_queue_size(name: str, default: int, maximum: int = 64) -> int:
+def bounded_queue_size(name: str, default: int, maximum: int = 128) -> int:
     """Read a non-negative queue allowance without permitting unbounded backlog."""
     try:
         return min(maximum, max(0, int(os.getenv(name, str(default)))))
@@ -122,21 +122,24 @@ class BlockingExecutorBoundary:
 
 # Public/licensed reads are network-bound; batched Longhu quote/minute calls
 # hold one slot each, while the other intraday loops share the rest.
-public_source_executor_workers = bounded_worker_count("AKSHARE_MAX_WORKERS", 8, 32)
+# The owner is network-bound for these paths.  The previous 8/4 defaults left
+# idle I/O capacity on the 4-core host; the external provider limiter remains
+# the final gate for licensed calls.
+public_source_executor_workers = bounded_worker_count("AKSHARE_MAX_WORKERS", 12, 64)
 public_source_executor = ThreadPoolExecutor(
     max_workers=public_source_executor_workers,
     thread_name_prefix="akshare",
 )
-database_executor_workers = bounded_worker_count("QUANT_DB_BLOCKING_MAX_WORKERS", 4, 8)
+database_executor_workers = bounded_worker_count("QUANT_DB_BLOCKING_MAX_WORKERS", 8, 16)
 database_executor = ThreadPoolExecutor(
     max_workers=database_executor_workers,
     thread_name_prefix="quant-db",
 )
 
-public_source_queue_capacity = bounded_queue_size("AKSHARE_MAX_QUEUE", 16)
-database_executor_queue_capacity = bounded_queue_size("QUANT_DB_BLOCKING_MAX_QUEUE", 8)
-realtime_vendor_executor_workers = bounded_worker_count("REALTIME_VENDOR_MAX_WORKERS", 4, 16)
-realtime_vendor_queue_capacity = bounded_queue_size("REALTIME_VENDOR_MAX_QUEUE", 8, 32)
+public_source_queue_capacity = bounded_queue_size("AKSHARE_MAX_QUEUE", 16, 128)
+database_executor_queue_capacity = bounded_queue_size("QUANT_DB_BLOCKING_MAX_QUEUE", 16, 128)
+realtime_vendor_executor_workers = bounded_worker_count("REALTIME_VENDOR_MAX_WORKERS", 8, 32)
+realtime_vendor_queue_capacity = bounded_queue_size("REALTIME_VENDOR_MAX_QUEUE", 8, 64)
 public_source_boundary = BlockingExecutorBoundary("public_source", public_source_executor_workers, public_source_queue_capacity)
 database_executor_boundary = BlockingExecutorBoundary("database", database_executor_workers, database_executor_queue_capacity)
 realtime_vendor_executor = ThreadPoolExecutor(

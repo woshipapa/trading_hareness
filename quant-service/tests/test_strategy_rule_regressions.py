@@ -183,7 +183,7 @@ class StrategyRuleRegressionTests(unittest.TestCase):
     def test_public_market_batch_is_opt_in_and_bounded(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(market_snapshot_public_quote_settings(), {
-                "enabled": False, "fallback_enabled": True, "batch_size": 80, "concurrency": 2,
+                "enabled": False, "fallback_enabled": True, "batch_size": 80, "concurrency": 4,
             })
         with patch.dict("os.environ", {"MARKET_SNAPSHOT_ENABLE_PUBLIC_BATCH": "true", "MARKET_SNAPSHOT_PUBLIC_BATCH_SIZE": "999", "MARKET_SNAPSHOT_PUBLIC_CONCURRENCY": "0"}, clear=True):
             self.assertEqual(market_snapshot_public_quote_settings(), {

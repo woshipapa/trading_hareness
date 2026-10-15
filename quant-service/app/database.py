@@ -1846,7 +1846,9 @@ ON CONFLICT(framework_key) DO NOTHING;
 
 #: A queue this deep already means the pool cannot keep up; beyond it callers
 #: are rejected outright rather than waiting behind work that will time out.
-ASYNC_POOL_MAX_WAITING = 64
+#: The larger ceiling is a software admission limit.  Deployments should keep
+#: their configured value tied to the remote database/tunnel budget.
+ASYNC_POOL_MAX_WAITING = 128
 
 
 def pool_settings(environ: Mapping[str, str] | None = None) -> dict[str, int]:
@@ -1859,8 +1861,8 @@ def pool_settings(environ: Mapping[str, str] | None = None) -> dict[str, int]:
         except (TypeError, ValueError):
             return default
 
-    minimum = bounded("QUANT_DB_POOL_MIN_SIZE", 1, 1, 8)
-    maximum = bounded("QUANT_DB_POOL_MAX_SIZE", 12, minimum, 32)
+    minimum = bounded("QUANT_DB_POOL_MIN_SIZE", 1, 1, 16)
+    maximum = bounded("QUANT_DB_POOL_MAX_SIZE", 12, minimum, 64)
     return {"min_size": minimum, "max_size": maximum, "timeout_seconds": bounded("QUANT_DB_POOL_TIMEOUT_SECONDS", 10, 1, 60)}
 
 
@@ -1978,10 +1980,11 @@ class AsyncDatabase:
         self._connect_kwargs = {**source._connect_kwargs}
         self._pool_settings = dict(source._pool_settings)
         try:
-            async_min = max(1, min(4, int(os.getenv("QUANT_ASYNC_READ_POOL_MIN_SIZE", "1"))))
+            async_min = max(1, min(8, int(os.getenv("QUANT_ASYNC_READ_POOL_MIN_SIZE", "1"))))
             # Keep dashboard reads and edge lease heartbeats in one bounded
-            # pool while allowing the owner-provided sixteen read connections.
-            async_max = max(async_min, min(16, int(os.getenv("QUANT_ASYNC_READ_POOL_MAX_SIZE", "16"))))
+            # pool.  Thirty-two is the process-local software ceiling; the
+            # owner deployment may keep a smaller value for its DB budget.
+            async_max = max(async_min, min(32, int(os.getenv("QUANT_ASYNC_READ_POOL_MAX_SIZE", "16"))))
         except ValueError:
             async_min, async_max = 1, 16
         self._pool_settings["min_size"] = async_min

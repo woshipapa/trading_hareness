@@ -130,7 +130,7 @@ class SharedLonghuFullMarketTests(unittest.TestCase):
 
     def test_the_worker_count_stays_bounded_whatever_the_environment_says(self):
         self.assertEqual(gateway_workers({"QUANT_LONGHU_GATEWAY_WORKERS": "0"}), 1)
-        self.assertEqual(gateway_workers({"QUANT_LONGHU_GATEWAY_WORKERS": "999"}), 16)
+        self.assertEqual(gateway_workers({"QUANT_LONGHU_GATEWAY_WORKERS": "999"}), 32)
         self.assertEqual(gateway_workers({"QUANT_LONGHU_GATEWAY_WORKERS": "nonsense"}), 4)
 
     def test_tencent_batches_report_coverage_instead_of_raising(self):

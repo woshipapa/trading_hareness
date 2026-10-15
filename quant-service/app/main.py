@@ -2176,6 +2176,7 @@ def _strategy_pattern_mining_dependencies() -> StrategyPatternMiningDependencies
         persist_minute_health=persist_tencent_intraday_minute_health, persist_run=persist_strategy_pattern_run,
         run_database=run_database_blocking, model_version=STRATEGY_PATTERN_MODEL_VERSION,
         handled_errors=(asyncio.TimeoutError, httpx.HTTPError, FreeProviderError, ValueError),
+        max_in_flight=settings.integer("STRATEGY_PATTERN_MAX_IN_FLIGHT", minimum=1, maximum=32),
     )
 
 
@@ -2361,7 +2362,7 @@ def intraday_minute_profile_retention_days() -> int:
 
 def intraday_minute_profile_max_symbols() -> int:
     """Bound the close capture without silently reducing the normal pool."""
-    return settings.integer("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", minimum=1, maximum=100)
+    return settings.integer("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", minimum=1, maximum=200)
 
 
 def longhu_full_market_enabled() -> bool:
@@ -2408,7 +2409,7 @@ async def intraday_longhu_watch_quotes(
 
 
 async def intraday_longhu_order_book_quotes(
-    symbols: list[str], *, max_symbols: int = 40,
+    symbols: list[str], *, max_symbols: int = 80,
 ) -> list[dict[str, Any]]:
     """Flatten Longhu's verified ``GetStockPanKou`` ten-level book."""
     from .intraday_price_priority import order_book_from_row
@@ -2431,7 +2432,7 @@ async def intraday_longhu_order_book_quotes(
 
 
 async def intraday_primary_order_book_quotes(
-    symbols: list[str], *, max_symbols: int = 40,
+    symbols: list[str], *, max_symbols: int = 80,
 ) -> list[dict[str, Any]]:
     """Compose timestamp-gated Longhu depth with independent Tencent fallback."""
     from .intraday_price_priority import primary_order_books
@@ -2601,6 +2602,7 @@ async def intraday_tencent_surge_context(
         run_database=run_database_blocking,
         safe_error=safe_error_detail,
         handled_errors=(asyncio.TimeoutError, httpx.HTTPError, FreeProviderError, ValueError),
+        max_in_flight=settings.integer("INTRADAY_SURGE_MAX_IN_FLIGHT", minimum=1, maximum=32),
     )
 
 
@@ -3455,6 +3457,9 @@ async def intraday_surge_context(
             safe_error=safe_error_detail, handled_errors=(Exception,),
             provider_key="longhuvip", feature_source="longhuvip_minute",
             check_provider_circuit=False, fetch_minutes_batch=intraday_longhu_minutes_batch,
+            # Fallback to one-symbol calls must remain inside the licensed
+            # gateway ceiling even when the Tencent path is expanded.
+            max_in_flight=8,
         )
 
     # Independent providers: waiting for Longhu before starting Tencent used to

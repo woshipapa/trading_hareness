@@ -13,6 +13,7 @@ import uuid
 from .all_a_snapshot_sources import fallback_provenance, scan_snapshot_decision_eligible
 from .intraday_features import strongest_group_peer_context
 from .platform.strategy_data_needs import strategy_taxonomies
+from . import settings
 
 
 def quote_volume_anomaly_symbols(
@@ -219,7 +220,9 @@ async def _deliver_confirmed(
     concurrently cannot lose an alert; it only stops one slow Feishu call from
     delaying the others.  Failures are left to the outbox retry.
     """
-    gate = asyncio.Semaphore(4)
+    gate = asyncio.Semaphore(settings.integer(
+        "INTRADAY_ALERT_DELIVERY_MAX_IN_FLIGHT", minimum=1, maximum=16,
+    ))
 
     async def deliver(signal: dict[str, Any]) -> dict[str, Any]:
         async with gate:

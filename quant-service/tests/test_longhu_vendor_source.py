@@ -31,7 +31,8 @@ class LonghuVendorSourceTests(unittest.TestCase):
 
         config = LonghuVendorConfig(token="t", user_id="u", device_id="d", version="5.20.0.2", workers=12)
         source = LonghuVendorSource(config)
-        for configured_workers, expected in ((12, LICENSED_READ_MAX_IN_FLIGHT), (64, LICENSED_READ_MAX_IN_FLIGHT), (3, 4)):
+        for configured_workers, expected in ((12, LICENSED_READ_MAX_IN_FLIGHT), (64, LICENSED_READ_MAX_IN_FLIGHT),
+                                              (3, LICENSED_READ_MAX_IN_FLIGHT)):
             seen = []
             source.config = LonghuVendorConfig(token="t", user_id="u", device_id="d", version="5.20.0.2",
                                                workers=configured_workers)

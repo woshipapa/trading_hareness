@@ -63,7 +63,7 @@ def _number(value: Any) -> float | None:
 def gateway_workers(environ: Mapping[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ
     try:
-        return max(1, min(16, int(env.get("QUANT_LONGHU_GATEWAY_WORKERS", str(DEFAULT_WORKERS)))))
+        return max(1, min(32, int(env.get("QUANT_LONGHU_GATEWAY_WORKERS", str(DEFAULT_WORKERS)))))
     except (TypeError, ValueError):
         return DEFAULT_WORKERS
 

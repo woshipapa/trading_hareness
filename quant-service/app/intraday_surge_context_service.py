@@ -30,6 +30,7 @@ async def capture(
     feature_source: str = "tencent_free_minute",
     check_provider_circuit: bool = True,
     fetch_minutes_batch: Callable[[list[str]], Awaitable[dict[str, Any]]] | None = None,
+    max_in_flight: int = 8,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     """Capture a capped target/peer basket with a 45-second feature cache."""
     requested: list[str] = []
@@ -100,7 +101,10 @@ async def capture(
             "cache_ttl_seconds": cache_ttl_seconds, "provider_status": "circuit_open",
         }
 
-    semaphore = asyncio.Semaphore(8)
+    # The caller supplies the provider-specific ceiling.  In particular, the
+    # licensed Longhu path passes its gateway limit instead of inheriting the
+    # larger Tencent/public setting.
+    semaphore = asyncio.Semaphore(max(1, int(max_in_flight)))
 
     async def fetch_one(symbol: str) -> tuple[str, dict[str, Any] | None, str | None]:
         try:

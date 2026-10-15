@@ -426,15 +426,14 @@ def minute_batch_workers() -> int:
     The trend endpoint takes one ``StockID``.  An upgraded owner fans a basket
     out itself behind ``GET /licensed/longhu/minutes`` (one owner slot).  Until
     then a peer fans out single gateway calls, each occupying one slot of the
-    owner's blocking executor (4 workers + 8 queued by default); measured
-    throughput is flat above 4 in flight and more only turns into 503s that
-    also reject quote and auction reads.  Raise this together with the
-    owner's ``AKSHARE_MAX_WORKERS``.
+    owner's blocking executor.  The measured licensed gateway ceiling is eight
+    in flight; the local default now uses that ceiling while the provider
+    limiter still owns the final admission decision.
     """
     try:
-        return max(1, min(MAX_PAGE_SIZE, int(os.getenv("LONGHU_MINUTE_BATCH_WORKERS", "4"))))
+        return max(1, min(LICENSED_READ_MAX_IN_FLIGHT, int(os.getenv("LONGHU_MINUTE_BATCH_WORKERS", "8"))))
     except ValueError:
-        return 4
+        return LICENSED_READ_MAX_IN_FLIGHT
 
 
 def _minutes_batch(

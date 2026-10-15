@@ -37,8 +37,9 @@ the service's own public-source jobs.
   so a refusal cannot pass as an empty day.
 - Resumable by construction: what is on disk is not asked again.
 - A batch above 5,000 calls still needs the user's explicit consent (unchanged).
-- In-service settings (`LONGHU_MINUTE_BATCH_WORKERS`, `QUANT_LONGHU_GATEWAY_WORKERS`, `AKSHARE_MAX_WORKERS`) are not
-  touched: they serve the live session, which was not measured.
+- In-service settings (`LONGHU_MINUTE_BATCH_WORKERS`, `QUANT_LONGHU_GATEWAY_WORKERS`, `AKSHARE_MAX_WORKERS`) are
+  separate from this workstation batch tool.  The live Longhu minute fan-out now defaults to the measured 8-slot
+  licensed ceiling; the tool itself remains at six by default and refuses values above eight.
 
 ## The tool: `scripts/licensed_minute_history_fetch.py` (operator workstation)
 

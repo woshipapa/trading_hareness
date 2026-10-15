@@ -7,7 +7,7 @@ import importlib
 import inspect
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -17,7 +17,26 @@ from . import catalog
 from .contracts import CapabilityEvidence
 from .sources.tdx_protocol import TdxProtocolError
 
-_READ_SEMAPHORE = asyncio.Semaphore(2)
+RESEARCH_READ_MAX_IN_FLIGHT = 32
+
+
+def bounded_research_read_parallelism(environ: Mapping[str, str] | None = None) -> int:
+    """Return the process-local research-read ceiling.
+
+    The per-source/capability one-second limiter below remains the upstream
+    pacing boundary; this semaphore only prevents unrelated TDX reads from
+    serialising behind the old two-request software cap.
+    """
+    try:
+        raw = os.getenv("DATASOURCE_RESEARCH_READ_MAX_IN_FLIGHT", "8") if environ is None else environ.get(
+            "DATASOURCE_RESEARCH_READ_MAX_IN_FLIGHT", "8"
+        )
+        return max(1, min(RESEARCH_READ_MAX_IN_FLIGHT, int(raw)))
+    except (TypeError, ValueError):
+        return 8
+
+
+_READ_SEMAPHORE = asyncio.Semaphore(bounded_research_read_parallelism())
 _RATE_LOCK = asyncio.Lock()
 _LAST_READ: dict[tuple[str, str], float] = {}
 
@@ -187,4 +206,7 @@ async def read_adapter(source: str, capability: str, query: dict[str, list[str]]
     }
 
 
-__all__ = ["AdapterCallError", "parse_query", "read_adapter", "resolve_adapter"]
+__all__ = [
+    "AdapterCallError", "RESEARCH_READ_MAX_IN_FLIGHT", "bounded_research_read_parallelism",
+    "parse_query", "read_adapter", "resolve_adapter",
+]

@@ -44,9 +44,9 @@ def retention_days(environ: dict[str, str] | None = None) -> int:
 def max_symbols(environ: dict[str, str] | None = None) -> int:
     values = os.environ if environ is None else environ
     try:
-        return max(1, min(80, int(values.get("INTRADAY_ORDER_BOOK_MAX_SYMBOLS", "40"))))
+        return max(1, min(160, int(values.get("INTRADAY_ORDER_BOOK_MAX_SYMBOLS", "80"))))
     except ValueError:
-        return 40
+        return 80
 
 
 def provider_row_counts(rows: list[dict[str, Any]]) -> dict[str, int]:

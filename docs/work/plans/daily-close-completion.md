@@ -109,7 +109,7 @@ while readers that take what is known now (the teacher plan builder) see them.
    bar with limits per stock; the stored factor before and after D per stock), and
    `async complete(trade_date, *, db, run_public_blocking, run_database_blocking, persist_rows, read_source, now)`.
    The vendor requests run through the runner the close uses for the same call (`run_public_blocking`), in one
-   blocking call with at most six worker threads, as `longhu_settled_quotes.fetch` already does. Tests: every pure
+   blocking call with at most eight worker threads, matching the measured licensed gateway ceiling. Tests: every pure
    rule with each skip reason; a completion with fakes (filled, not traded, adjusted later, unverified, failed);
    the 99.5% refusal; idempotence; `partial` and `blocked`.
 3. Wiring, one entry point:

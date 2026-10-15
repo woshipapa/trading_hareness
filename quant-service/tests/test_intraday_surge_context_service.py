@@ -66,6 +66,36 @@ class IntradaySurgeContextServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(health), 1)
         self.assertEqual(health[0][0], 1)
 
+    async def test_single_symbol_fanout_honors_the_expanded_but_explicit_ceiling(self):
+        active = 0
+        peak = 0
+
+        async def fetch(_symbol: str):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0)
+            active -= 1
+            return [{"time": "10:00", "close": 1}]
+
+        async def open_capabilities(_provider, _capabilities):
+            return set()
+
+        async def run_database(action, *args, **_kwargs):
+            return action(*args)
+
+        features, evidence = await capture(
+            [{"symbol": f"00000{index}.SZ", "metadata": {}} for index in range(1, 5)],
+            mapped_peers=None, cache={}, max_symbols=lambda: 20,
+            open_capabilities=open_capabilities, capability="tencent_intraday_minute", fetch_minutes=fetch,
+            minute_features=lambda rows, **_kwargs: {"latest": rows[-1]}, persist_health=lambda *_args: None,
+            run_database=run_database, safe_error=lambda value, _limit: value,
+            handled_errors=(asyncio.TimeoutError, ValueError), max_in_flight=2,
+        )
+        self.assertEqual(len(features), 4)
+        self.assertEqual(evidence["provider_status"], "completed")
+        self.assertLessEqual(peak, 2)
+
     async def test_batch_fetch_uses_one_call_and_keeps_per_symbol_errors(self):
         single_calls: list[str] = []
         batch_calls: list[list[str]] = []

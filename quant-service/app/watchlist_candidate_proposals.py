@@ -1,12 +1,11 @@
 """Daily cross-strategy watchlist proposals, deliberately kept out of the live watchlist.
 
 The only real bridge between selection and timing in this codebase is manual:
-a human PUTs a symbol into ``intraday_watchlists`` via the API. That table
-also has a hard, previously-verified 40-symbol capacity bound tied to the
-Tencent batched-quote request size the live intraday scan can make in one
-call - a human-curated watchlist already uses most of it (37/40 at the time
-this module was written). Auto-writing candidates into that table would risk
-pushing the live scan over its capacity and starving real alerting.
+a human PUTs a symbol into ``intraday_watchlists`` via the API. The live
+scanner now admits a bounded multi-batch pool; provider request batches remain
+at their independently verified physical size. Auto-writing candidates into
+that table would still bypass the human review boundary and risk starving live
+alerting, so proposals remain read-only.
 
 This module instead materializes a separate, read-only daily proposal list
 from two independent producers, tagged by ``proposal_source``:

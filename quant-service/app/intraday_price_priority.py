@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Mapping
 
 from .intraday_quote_normalization import exchange_time_status
+
+
+# Tencent's order-book request accepts at most 80 symbols.  Larger logical
+# observation pools are split here so the caller can use the expanded pool
+# without weakening the upstream request contract.
+PUBLIC_ORDER_BOOK_BATCH_SIZE = 80
 
 
 def fresh_price_rows(
@@ -71,8 +78,27 @@ async def primary_order_books(
     missing = [s for s in selected if s not in present]
     if not missing:
         return primary
+
+    async def fallback_batches(wanted: list[str]) -> list[dict[str, Any]]:
+        batches = [wanted[index:index + PUBLIC_ORDER_BOOK_BATCH_SIZE]
+                   for index in range(0, len(wanted), PUBLIC_ORDER_BOOK_BATCH_SIZE)]
+        results = await asyncio.gather(
+            *(fallback(batch, max_symbols=len(batch)) for batch in batches),
+            return_exceptions=True,
+        )
+        rows: list[dict[str, Any]] = []
+        errors: list[BaseException] = []
+        for result in results:
+            if isinstance(result, BaseException):
+                errors.append(result)
+            else:
+                rows.extend(result)
+        if errors and not rows:
+            raise errors[0]
+        return rows
+
     try:
-        public = eligible(await fallback(missing, max_symbols=len(missing)), missing)
+        public = eligible(await fallback_batches(missing), missing)
     except Exception:
         if primary:
             return primary

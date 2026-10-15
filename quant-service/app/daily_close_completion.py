@@ -267,7 +267,7 @@ async def complete(trade_date: date, *, db: Any, run_public_blocking: Callable[.
     if request_symbols:
         try:
             quotes, health = await run_public_blocking(
-                fetch_classified, source, request_symbols, trade_date, workers=6,
+                fetch_classified, source, request_symbols, trade_date, workers=8,
                 deadline_seconds=240, timeout_seconds=300,
             )
         except Exception as error:

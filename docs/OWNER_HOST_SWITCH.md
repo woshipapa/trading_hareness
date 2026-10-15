@@ -147,18 +147,18 @@ scripts/release plan                                       # 能读到新主机
 （`docs/work/plans/peer-evening-stages.md:102`）。先在新主机上单独跑一次量峰值，再加进
 `quant-service/app/peer_close_research.py` 的阶段表，走纯代码发布。
 
-**7.3 数据库并发。** 主服务的阻塞线程 `QUANT_DB_BLOCKING_MAX_WORKERS` 是 8（已是代码上限，
-`quant-service/app/runtime_executors.py:131`），调度是 4（`deploy/shared-peer/compose.intraday-owner.yaml:46,149`），
-连接池上限 `QUANT_DB_POOL_MAX_SIZE` 12（上限 32，`quant-service/app/database.py:1863`）。瓶颈是往返延迟，
-加并发比加 CPU 有用；但**先问对方工作站上的库能承受多少连接**，再定数。放到 16 要改代码上限；compose 的默认值
-不改（改 compose 会让发布变成全量），改主机配置里的 `PEER_*` 键。
+**7.3 数据库并发。** 主服务默认的阻塞线程 `QUANT_DB_BLOCKING_MAX_WORKERS` 是 8，代码 ceiling 已提高到 16；调度仍是 4
+（`deploy/shared-peer/compose.intraday-owner.yaml:46,149`）。同步连接池默认 12、代码 ceiling 64，异步读池默认 16、代码
+ceiling 32。瓶颈仍是往返延迟和 Windows PostgreSQL 的实际连接/锁预算；**先量对方工作站的连接、锁等待和隧道速率**，再把
+`PEER_*` 配置向 ceiling 提高。compose 默认值的修改会进入完整 release，不能用本地测试代替线上验证。
 
 **7.4 晚间重计算移出盘中进程。** 两个容器各只有一个 Python 进程，战法总结、历史回放、风险分这些晚间计算和盘中
 采集抢同一把全局锁。4 核下把晚间计算放到单独的进程（或第三个容器），盘中采集不受影响。这一项要方案和审查。
 
-**7.5 公共数据源并发。** `MARKET_SNAPSHOT_PUBLIC_CONCURRENCY` 2、`REALTIME_VENDOR_MAX_WORKERS` 4、
-`LONGHU_MINUTE_BATCH_WORKERS` 4（`quant-service/app/settings.py`）。主要受各家限流约束，换机后按各源的限流
-逐个试；授权接口的批量读取仍守 6 个、最多 8 个并发、盘中不跑的规矩（F027）。
+**7.5 公共数据源并发。** 当前软件默认已把 `MARKET_SNAPSHOT_PUBLIC_CONCURRENCY` 提到 4、`REALTIME_VENDOR_MAX_WORKERS`
+提到 8；公开/Tencent 路径的 software ceiling 分别为 16/32。`LONGHU_MINUTE_BATCH_WORKERS` 默认提到 8，但仍受
+licensed read ceiling 约束；历史批量工具本身继续守 6 个默认、最多 8 个并发、盘中不跑的规矩（F027）。上游 provider 的
+拒绝率和 rate limiter 优先于本地 worker 数。
 
 **7.6 镜像构建。** 构建前的内存检查（可用不足 700 MB 拒绝）在 8 GB 上会通过；但主机上的依赖包目录
 （`~/wheelhouse`）是空的，要先定依赖从哪里来（B050），否则仍只能搬镜像。
