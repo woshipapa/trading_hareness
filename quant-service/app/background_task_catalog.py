@@ -21,6 +21,7 @@ def build_specs(*, interval_seconds: int, enabled: dict[str, bool], loops: dict[
             "auction_pool_capture",
             "public_evidence_capture", "post_close_public_archive",
             "storage_tiering_mover", "peer_close_research", "tactic_auction",
+            "intraday_evidence_replay",
     )
     # Keep the pure catalog helper backwards-compatible for external callers
     # that inject the pre-0076 loop set; the production composition supplies

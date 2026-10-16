@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import date, datetime
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
@@ -27,6 +28,7 @@ _CN_TZ = ZoneInfo("Asia/Shanghai")
 TAPE_PROVIDER = "quant_scan"
 TAPE_CAPABILITY = "watch_scan_tape"
 TAPE_VERSION = "watch-scan-tape-v1"
+LOGGER = logging.getLogger(__name__)
 
 
 class EvidenceThrottle:
@@ -106,8 +108,32 @@ def persist_scan_tape(connection: Any, *, scan_id: Any, observed_at: datetime,
             "rows": dict(rows), "provider_key": TAPE_PROVIDER, "capability": TAPE_CAPABILITY}
     # This write shares the scan's transaction: round-trip through JSON so no
     # value (a Decimal from a sector read, say) can make the insert fail.
-    serialized = json.dumps(body, ensure_ascii=False, sort_keys=True, default=str)
+    serialized = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     body = json.loads(serialized)
+    # The SSD route is explicit and default-off.  Strategy/event state remains
+    # in the scan transaction; only this high-frequency raw research tape is
+    # staged for the post-close replay.
+    from .settings import flag
+    if flag("INTRADAY_EVIDENCE_SPOOL_ENABLED"):
+        from .intraday_evidence_spool import SpoolConfig, shared_spool
+
+        observation = {
+            "schema_version": "evidence-record-v1", "target_stream": "raw_market_observations",
+            "batch_id": str(scan_id), "sequence": 0, "captured_at": observed_at,
+            "provider_key": TAPE_PROVIDER, "capability": TAPE_CAPABILITY, "market": "cn",
+            "symbol": "watch:scan", "effective_at": observed_at, "available_at": observed_at,
+            "payload_sha256": hashlib.sha256(serialized.encode()).hexdigest(),
+            "normalized": {key: body[key] for key in ("scan_id", "observed_at", "version", "provider_key", "capability")},
+            "payload": body,
+        }
+        try:
+            shared_spool(SpoolConfig.from_settings()).write(observation)
+            return True
+        except (OSError, ValueError) as error:
+            # SSD pressure or a malformed envelope must never silently lose
+            # research evidence. Fall back to the existing database insert;
+            # the scan's signal transaction remains unchanged.
+            LOGGER.warning("intraday evidence spool unavailable; using database fallback: %s", error)
     # ``payload`` holds the rows; ``normalized`` only a header, so the tape is
     # not stored twice in the hot database.
     header = {key: body[key] for key in ("scan_id", "observed_at", "version", "provider_key", "capability")}

@@ -128,6 +128,7 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - peer_quant_data:/var/lib/quant
+      - peer_intraday_spool:/var/lib/quant/intraday-spool
       - ${QUANT_HOTFIX_HOST_DIR:-./hotfix/quant-service}:/app/hotfix:ro
     command:
       - sh
@@ -187,4 +188,7 @@ services:
 volumes:
   peer_quant_data:
   peer_quant_research_data:
+  # Shared only by the intraday capture and research scheduler. It contains
+  # immutable staged evidence, never credentials or service state.
+  peer_intraday_spool:
   peer_n8n_data:

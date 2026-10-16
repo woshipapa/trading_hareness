@@ -87,6 +87,9 @@ services:
       QUANT_RUNTIME_MIN_FREE_BYTES: ${PEER_RUNTIME_MIN_FREE_BYTES:-2147483648}
       QUANT_RUNTIME_WARNING_FREE_BYTES: ${PEER_RUNTIME_WARNING_FREE_BYTES:-4294967296}
       QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED: "false"
+      INTRADAY_EVIDENCE_SPOOL_ENABLED: ${PEER_INTRADAY_EVIDENCE_SPOOL_ENABLED:-false}
+      INTRADAY_EVIDENCE_SPOOL_DIR: /var/lib/quant/intraday-spool
+      INTRADAY_EVIDENCE_SPOOL_REPLAY_ENABLED: "false"
 
   # Research/post-close worker.  It shares the owner database but has its own
   # runtime profile and durable leases, so it cannot acquire intraday_edge
@@ -186,10 +189,14 @@ services:
       QUANT_RUNTIME_MIN_FREE_BYTES: ${PEER_RESEARCH_MIN_FREE_BYTES:-2147483648}
       QUANT_RUNTIME_WARNING_FREE_BYTES: ${PEER_RESEARCH_WARNING_FREE_BYTES:-4294967296}
       QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED: "false"
+      INTRADAY_EVIDENCE_SPOOL_ENABLED: ${PEER_INTRADAY_EVIDENCE_SPOOL_ENABLED:-false}
+      INTRADAY_EVIDENCE_SPOOL_DIR: /var/lib/quant/intraday-spool
+      INTRADAY_EVIDENCE_SPOOL_REPLAY_ENABLED: ${PEER_INTRADAY_EVIDENCE_SPOOL_REPLAY_ENABLED:-false}
       NO_PROXY: "*"
       TZ: Asia/Shanghai
     volumes:
       - peer_quant_research_data:/var/lib/quant-research
+      - peer_intraday_spool:/var/lib/quant/intraday-spool
       - ${QUANT_HOTFIX_HOST_DIR:-./hotfix/quant-service}:/app/hotfix:ro
     command:
       - sh

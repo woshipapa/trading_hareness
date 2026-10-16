@@ -23,12 +23,17 @@ class RuntimeTaskContract:
 
 
 RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
+    "intraday_evidence_replay": RuntimeTaskContract(
+        "intraday_evidence_replay", "research", "continuous paced batches outside the intraday writer",
+        (), ("raw_market_observations",),
+        "slowly drain SSD-staged high-frequency evidence through the independent batch database lane", 300,
+    ),
     "intraday_monitor": RuntimeTaskContract(
         "intraday_monitor", "intraday_edge", "5s early session; 30s otherwise", ("order_book_quote", "a_share_prices_snapshot"),
         ("intraday_scan_runs", "intraday_signal_events"), "bounded watchlist scan and research alert writer", 90,
     ),
     "minute_profile_capture": RuntimeTaskContract(
-        "minute_profile_capture", "intraday_edge", "bounded market-session polling", ("intraday_minutes",),
+        "minute_profile_capture", "intraday_edge", "bounded market-session polling", ("intraday_minute_sessions",),
         ("intraday_minute_sessions",), "minute features and time-of-day profile evidence", 180,
     ),
     "tencent_order_book": RuntimeTaskContract(
@@ -77,7 +82,7 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
     ),
     "peer_close_research": RuntimeTaskContract(
         "peer_close_research", "research", "once per trading date after 16:15 (catch-up before 09:00)",
-        ("intraday_minutes",),
+        ("intraday_minute_sessions",),
         ("raw_market_observations", "xiaojie_leader_flow_observations", "automation_runs"),
         "the peer-owned close stages the owner's pipeline does not run: teacher plan roll (settle, promote, "
         "observe, retire), the next-day outcome review that replays what blocked each untriggered plan, "

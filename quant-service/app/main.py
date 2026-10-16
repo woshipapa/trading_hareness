@@ -709,6 +709,7 @@ from .runtime_executors import (
     runtime_executor_status, shutdown_runtime_executors,
 )
 from .raw_overflow_archive import RawOverflowConfig, acknowledge as acknowledge_raw_overflow, failure as record_raw_overflow_failure, next_batch as next_raw_overflow_batch, status as raw_overflow_status
+from .intraday_evidence_spool import run_paced_replay_loop
 from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_router
 from .routers.teacher_review import TeacherReviewRouterDependencies, build_teacher_review_router
 from .routers.watch_reviews import WatchReviewRouterDependencies, build_watch_review_router
@@ -3210,6 +3211,13 @@ async def storage_tiering_mover_loop() -> None:
     await run_mover_loop(db, safe_error=safe_error_detail)
 
 
+async def intraday_evidence_replay_loop() -> None:
+    """Paced SSD evidence drain owned by the research/batch database process."""
+    if not settings.flag("INTRADAY_EVIDENCE_SPOOL_REPLAY_ENABLED"):
+        return
+    await run_paced_replay_loop(db, run_database_blocking)
+
+
 async def peer_close_research_loop() -> None:
     """Teacher roll, watch review and 小杰 settlement - the peer's own close stages.
 
@@ -4295,6 +4303,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "public_evidence_capture": settings.flag("PUBLIC_EVIDENCE_CAPTURE_ENABLED"),
             "post_close_public_archive": settings.flag("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED"),
             "storage_tiering_mover": settings.flag("STORAGE_TIERING_MOVER_ENABLED"),
+            "intraday_evidence_replay": settings.flag("INTRADAY_EVIDENCE_SPOOL_REPLAY_ENABLED"),
             "peer_close_research": settings.flag("PEER_CLOSE_RESEARCH_ENABLED"),
             # Where the evening stage runs (see peer_close_research_loop): its reading is the stage's input.
             "tactic_auction": settings.flag("TACTIC_AUCTION_ENABLED") and longhu_vendor_configured(),
@@ -4315,6 +4324,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "public_evidence_capture": public_evidence_capture_loop,
             "post_close_public_archive": post_close_public_archive_loop,
             "storage_tiering_mover": storage_tiering_mover_loop,
+            "intraday_evidence_replay": intraday_evidence_replay_loop,
             "peer_close_research": peer_close_research_loop,
             "tactic_auction": tactic_auction_loop,
         },
