@@ -10,6 +10,7 @@ from fastapi import APIRouter
 
 from .. import market_result_read_model as read_model
 from .. import async_market_result_read_repository as async_read_model
+from ..async_keyed_memo import AsyncKeyedMemo
 from ..runtime_executors import run_database_blocking
 
 
@@ -26,32 +27,54 @@ def build_market_result_reads_router(
 ) -> APIRouter:
     router = APIRouter(tags=["market-result-reads"])
 
+    async def read_overview() -> dict[str, Any]:
+        if async_database:
+            if async_history_estimate_fn is None:
+                # The legacy history projection is synchronous, but the native
+                # overview read can still use the async pool at the same time.
+                history_task = asyncio.create_task(
+                    run_database_blocking(history_estimate_fn, timeout_seconds=15),
+                )
+            else:
+                history_task = asyncio.create_task(async_history_estimate_fn())
+            overview_task = asyncio.create_task(async_read_model.research_overview(async_database, {}))
+            tasks = (overview_task, history_task)
+            try:
+                overview_payload, history_estimate = await asyncio.wait_for(
+                    asyncio.gather(*tasks), timeout=15,
+                )
+            except BaseException:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+            overview_payload["history_estimate"] = history_estimate
+            return overview_payload
+
+        def read_sync_overview() -> dict[str, Any]:
+            return read_model.research_overview(
+                database, current_data_coverage_fn=current_data_coverage_fn,
+                feature_readiness_fn=feature_readiness_fn,
+                history_estimate_fn=history_estimate_fn,
+            )
+
+        return await run_database_blocking(read_sync_overview, timeout_seconds=15)
+
+    # Dashboard panels commonly request the same overview at once.  Share only
+    # the active read so a burst uses one bounded set of DB transactions; every
+    # later request still observes fresh data.
+    overview_inflight = AsyncKeyedMemo(
+        lambda _key: read_overview(), ttl_seconds=0, cacheable=lambda _value: False, max_entries=1,
+    )
+
     @router.get("/api/v1/providers/tushare/raw")
     async def raw(api_name: str, provider: str | None = None, limit: int = 100, offset: int = 0) -> dict[str, Any]:
         return await async_read_model.tushare_raw(async_database, api_name, provider, limit, offset, catalog) if async_database else read_model.tushare_raw(database, api_name, provider, limit, offset, catalog)
 
     @router.get("/api/v1/research/overview")
     async def overview() -> dict[str, Any]:
-        if async_database:
-            if async_history_estimate_fn is None:
-                history_estimate = await run_database_blocking(history_estimate_fn, timeout_seconds=15)
-                return await async_read_model.research_overview(async_database, history_estimate)
-            # These are independent read-only snapshots.  The old path waited
-            # for the four-query history estimate before opening the overview
-            # transaction, serializing two pool connections and all tunnel
-            # latency.  Keep both transactions isolated, as they already were,
-            # while allowing the async pool and CPU to overlap them.
-            history_task = asyncio.create_task(async_history_estimate_fn())
-            overview_task = asyncio.create_task(async_read_model.research_overview(async_database, {}))
-            overview_payload, history_estimate = await asyncio.wait_for(
-                asyncio.gather(overview_task, history_task), timeout=15,
-            )
-            overview_payload["history_estimate"] = history_estimate
-            return overview_payload
-        return read_model.research_overview(
-            database, current_data_coverage_fn=current_data_coverage_fn, feature_readiness_fn=feature_readiness_fn,
-            history_estimate_fn=history_estimate_fn,
-        )
+        return await overview_inflight.get("all")
 
     @router.get("/api/v1/market/snapshots")
     async def snapshots(limit: int = 20) -> dict[str, Any]:

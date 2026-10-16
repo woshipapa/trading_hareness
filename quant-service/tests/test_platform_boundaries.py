@@ -40,6 +40,65 @@ class PlatformBoundaryTests(unittest.TestCase):
         self.assertEqual(events[:2], ["history-start", ("overview-start", {})])
         self.assertEqual(set(events[2:]), {"history-end", "overview-end"})
 
+    def test_market_overview_shares_only_the_active_read(self):
+        calls = {"history": 0, "overview": 0}
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def history():
+            calls["history"] += 1
+            started.set()
+            await release.wait()
+            return {"estimate": calls["history"]}
+
+        async def overview(_database, history_estimate):
+            calls["overview"] += 1
+            started.set()
+            await release.wait()
+            return {"history_estimate": history_estimate}
+
+        router = build_market_result_reads_router(
+            object(), {"daily"}, lambda _connection: {}, lambda _connection: {}, lambda: {},
+            lambda: Path("/tmp/offline"), lambda _connection: {}, async_database=object(),
+            async_history_estimate_fn=history,
+        )
+        endpoint = next(route.endpoint for route in router.routes if route.path == "/api/v1/research/overview")
+
+        async def check():
+            with patch("app.routers.market_result_reads.async_read_model.research_overview", new=overview):
+                first = asyncio.create_task(endpoint())
+                await started.wait()
+                second = asyncio.create_task(endpoint())
+                await asyncio.sleep(0)
+                release.set()
+                results = await asyncio.gather(first, second)
+                later = await endpoint()
+            return results, later
+
+        results, later = asyncio.run(check())
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(calls, {"history": 2, "overview": 2})
+        self.assertEqual(later["history_estimate"], {"estimate": 2})
+
+    def test_market_overview_sync_fallback_uses_bounded_executor(self):
+        calls = []
+
+        async def bounded(action, *args, **kwargs):
+            calls.append((action, args, kwargs))
+            return {"runtime": "bounded"}
+
+        router = build_market_result_reads_router(
+            object(), {"daily"}, lambda _connection: {}, lambda _connection: {}, lambda: {},
+            lambda: Path("/tmp/offline"), lambda _connection: {},
+        )
+        endpoint = next(route.endpoint for route in router.routes if route.path == "/api/v1/research/overview")
+        with patch("app.routers.market_result_reads.run_database_blocking", new=bounded):
+            payload = asyncio.run(endpoint())
+
+        self.assertEqual(payload, {"runtime": "bounded"})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][2], {"timeout_seconds": 15})
+
     def test_post_close_refresh_orchestrator_continues_after_stage_failure_and_releases_lease(self):
         calls: list[str] = []
         lease = AsyncMock(side_effect=[True, True, True, True])

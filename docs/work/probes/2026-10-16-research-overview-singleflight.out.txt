@@ -1,0 +1,11 @@
+probe: docker compose source overlay
+path: /api/v1/research/overview
+implementation: server-side in-flight single-flight; no result TTL/cache; async history and overview overlap
+statuses: all 200
+pool_after_matrix: {"open": true, "min_size": 1, "max_size": 16, "pool_size": 8, "available": 8, "waiting": 0}
+results:
+  concurrency=1 p50_ms=1527.8 p95_ms=1527.8 max_ms=1527.8
+  concurrency=2 p50_ms=1059.2 p95_ms=1059.2 max_ms=1059.2
+  concurrency=4 p50_ms=887.1 p95_ms=887.5 max_ms=887.5
+  concurrency=8 p50_ms=1029.3 p95_ms=1029.6 max_ms=1029.6
+scope: local PostgreSQL/source overlay; read-only; no provider or owner tunnel access

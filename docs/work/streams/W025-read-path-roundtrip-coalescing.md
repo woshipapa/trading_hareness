@@ -64,6 +64,7 @@
 - 2026-10-16 09:08 Asia/Shanghai：开盘前冻结。状态快照、feature-readiness 并行读取、overview 索引和 0128--0130 迁移已完成本地验证；owner 仍在 `20261015_ow0122`，目标 `20261016_ow0130`，生产发布及线上 statement/锁等待/隧道速率复核未完成。
 - 2026-10-16 09:22 Asia/Shanghai：为 `/api/v1/data-readiness/features` 增加服务端 in-flight single-flight，只共享活动计算，不保留结果 TTL。源码 overlay 压测 1/2/4/8 并发全部 200；8 并发 p95 约 1,711.6 ms，较此前同一路径约 7,855 ms 的 p95 明显下降，连接池回到 `pool_size=9,waiting=0`。证据为 `docs/work/probes/2026-10-16-feature-readiness-singleflight.out.txt`；仍需 owner 发布后复测。
 - 2026-10-16 09:30 Asia/Shanghai：历史容量估算也按 `(years,include_minute,universe_symbols)` 做 in-flight single-flight；不同参数不会合并，已完成请求不进入缓存，sync fallback 经 bounded database executor 执行。扩展 focused overlay 97 项通过，生产发布和 owner 隧道复测仍未完成。
+- 2026-10-16：`/api/v1/research/overview` 也只共享活动中的同参数读取；历史估算和概览快照在 async pool 中重叠，sync fallback 经 bounded database executor 执行，完成后不保留结果。源码 overlay 压测 1/2/4/8 并发全部 200，p95 约 1,527.8/1,059.2/887.5/1,029.6 ms，池回到 `available=8,waiting=0`；证据为 `docs/work/probes/2026-10-16-research-overview-singleflight.py` / `.out.txt`，owner 发布后仍需复测真实隧道收益。
 
 ## Waiting on the user
 
