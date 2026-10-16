@@ -41,6 +41,7 @@
 - 2026-10-16 09:08 Asia/Shanghai：新增 intraday attribution 的 `fetchmany`/`executemany` adapter 已通过 focused overlay 84 项，代码和 ADR 尚未纳入发布；目标版本需要 `20261016_ow0130`，而当前发布计划要求先应用 0123--0130，并因 host-tree 路径判为 FULL。当前北京时间 08:30--11:30 禁止 owner 重启，故本次只记录待发布项，不执行 `--apply`。
 - 2026-10-16 09:10 Asia/Shanghai：本轮全量 release-path 运行 3327 项，唯一失败仍为共享工作树 `local_spool_fallback.py`/`local_spool_level1.py` 读取未在 `app/settings.py` 登记的环境变量；该失败与本线文件无关，故保留为发布前门禁待清理项。
 - 2026-10-16 09:15 Asia/Shanghai：结束状态核对仍未收敛：owner main/scheduler 运行 `bfd180e35a5b`、edge adapter hotfix base `861ecbfaa96e`，owner Alembic 仍为 `20261015_ow0122`；相对目标 `204f53b6` 共 5 项 provenance/source checks 失败。未执行任何 `--apply`。
+- 2026-10-16 09:16 Asia/Shanghai：最终 `release plan 242217eb` 仍判定 owner 必须 FULL release；发布脚本还要求目标提交已在 `origin/main` 且工作树干净，而当前目标尚未推送、工作树有其他会话 dirty 文件。该发布前置条件一并保留，不能在开盘前绕过。
 
 ## Waiting on the user
 
