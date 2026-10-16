@@ -4,10 +4,10 @@
 - holder: Codex 主会话，2026-10-15
 - goal: 在保持研究只读、幂等、点时边界和可用性的前提下，降低 owner quant scheduler 的慢事务、数据库往返和长事务风险，并为后续带宽与并发调优提供可复现实测基线
 - next: 在发布窗口内先完成 owner 0123--0130 schema gate，再执行当前目标所需的 FULL release；上线后按同一交易日回填线上慢事务与资源证据
-- updated: 2026-10-15
+- updated: 2026-10-16
 - plan: docs/work/plans/slow-transaction-optimization.md
 - branch: main
-- head: 79b5689d
+- head: 204f53b6
 - release: none
 
 ## Requirements
