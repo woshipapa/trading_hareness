@@ -221,6 +221,7 @@ from .feature_snapshot_repository import materialize_feature_snapshot
 from .feature_snapshot_runtime import FeatureSnapshotRuntime, FeatureSnapshotRuntimeDependencies
 from .intraday_limit_lift import intraday_limit_lift_pattern as pure_intraday_limit_lift_pattern
 from .intraday_attribution import signal_attribution as pure_signal_attribution
+from .intraday_attribution_repository import refresh_signal_attributions as refresh_signal_attributions_isolated
 from .intraday_breakout import eac_acceptance_assessment as pure_eac_acceptance_assessment
 from .intraday_breakout import upside_research_assessment as pure_upside_research_assessment
 from .intraday_signal_rules import signal_rules as pure_intraday_signal_rules
@@ -1143,30 +1144,12 @@ def refresh_intraday_signal_attributions(connection: Any, *, cutoff: datetime) -
     Rebuilding it in the same transaction as outcome settlement prevents old
     EAC labels from contaminating subsequent offline policy reviews.
     """
-    rows = connection.execute(
-        """SELECT signal_event_id,signal_key,signal_type,conditions,evidence
-             FROM quant.intraday_signal_events
-            WHERE state IN ('confirmed','alerted')
-              AND signal_type IN ('entry','watch','reduce','exit')
-              AND observed_at<=%s""",
-        (cutoff,),
-    ).fetchall()
-    changed = 0
-    for row in rows:
-        evidence = dict(row["evidence"] or {})
-        attribution = intraday_signal_attribution(
-            str(row["signal_key"]), str(row["signal_type"]),
-            dict(row["conditions"] or {}), evidence,
-        )
-        if evidence.get("attribution") == attribution:
-            continue
-        evidence["attribution"] = attribution
-        connection.execute(
-            "UPDATE quant.intraday_signal_events SET evidence=%s WHERE signal_event_id=%s",
-            (Json(strategy_json_safe(evidence)), row["signal_event_id"]),
-        )
-        changed += 1
-    return changed
+    return refresh_signal_attributions_isolated(
+        connection,
+        cutoff=cutoff,
+        attribution_fn=intraday_signal_attribution,
+        json_safe=strategy_json_safe,
+    )
 
 
 def recompute_intraday_signal_outcomes(as_of_date: date | None = None) -> dict[str, Any]:
