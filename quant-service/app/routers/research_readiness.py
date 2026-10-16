@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from ..request_models import HistoricalCoverageEstimateRequest
 from ..research_framework_readiness import enrich_framework_rows
+from ..async_keyed_memo import AsyncKeyedMemo
 from ..async_research_readiness_repository import (
     frameworks, feature_readiness as async_feature_readiness,
     replay_readiness as async_replay_readiness, historical_estimate as async_historical_estimate,
@@ -39,6 +40,22 @@ def build_research_readiness_router(
 ) -> APIRouter:
     """Build read-only routes with explicit repository/service dependencies."""
     router = APIRouter(tags=["research-readiness"])
+
+    async def read_feature_readiness() -> dict[str, Any]:
+        if async_database:
+            return await async_feature_readiness(async_database)
+        return await run_database_blocking(lambda: _sync_feature_readiness(database, feature_readiness_fn))
+
+    # A dashboard burst can arrive from several tabs or browser processes at
+    # once.  Share only the active computation: the result is deliberately not
+    # cached, so every burst after the first still observes the current read
+    # model and retains the existing fail-closed semantics.
+    feature_readiness_inflight = AsyncKeyedMemo(
+        lambda _key: read_feature_readiness(),
+        ttl_seconds=0,
+        cacheable=lambda _value: False,
+        max_entries=1,
+    )
 
     @router.get("/api/v1/research-frameworks")
     async def research_frameworks() -> dict[str, Any]:
@@ -73,9 +90,7 @@ def build_research_readiness_router(
 
     @router.get("/api/v1/data-readiness/features")
     async def feature_readiness() -> dict[str, Any]:
-        if async_database:
-            return await async_feature_readiness(async_database)
-        return await run_database_blocking(lambda: _sync_feature_readiness(database, feature_readiness_fn))
+        return await feature_readiness_inflight.get("all_a")
 
     @router.get("/api/v1/data-readiness/replay")
     async def replay_readiness() -> dict[str, Any]:

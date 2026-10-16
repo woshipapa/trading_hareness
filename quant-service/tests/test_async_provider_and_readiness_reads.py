@@ -320,6 +320,60 @@ class AsyncProviderAndReadinessReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(database.calls), len(feature_names) + 1)
         self.assertGreaterEqual(database.max_active, 2)
 
+    async def test_feature_readiness_router_shares_only_the_inflight_read(self) -> None:
+        feature_names = (
+            "daily_bars", "daily_basic", "trade_limits", "stock_flow",
+            "stk_factor_pro", "sector_flow", "announcements", "analyst_claims",
+        )
+
+        class Result:
+            def __init__(self, row): self.row = row
+            async def fetchone(self): return self.row
+
+        class Database:
+            def __init__(self):
+                self.calls = []
+                self.active = 0
+                self.max_active = 0
+
+            class Tx:
+                def __init__(self, database): self.database = database
+                async def __aenter__(self): return self
+                async def __aexit__(self, *_args): return False
+                async def execute(self, sql, _params=()):
+                    database = self.database
+                    database.calls.append(sql)
+                    database.active += 1
+                    database.max_active = max(database.max_active, database.active)
+                    await asyncio.sleep(0.01)
+                    database.active -= 1
+                    if "universe_members" in sql:
+                        return Result({"symbols": 100})
+                    feature = next(name for name in feature_names if f"'{name}' AS feature" in sql)
+                    return Result({"feature": feature, "symbols": 100, "rows": 10,
+                                   "latest_date": date(2026, 10, 15), "priority": "P0"})
+
+            def transaction(self): return self.Tx(self)
+
+        database = Database()
+        router = build_research_readiness_router(
+            object(), lambda _request: {}, lambda _database: {}, lambda _database: {},
+            async_database=database,
+        )
+        endpoint = next(route.endpoint for route in router.routes
+                        if route.path == "/api/v1/data-readiness/features")
+
+        first, second = await asyncio.gather(endpoint(), endpoint())
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(database.calls), len(feature_names) + 1)
+        self.assertGreaterEqual(database.max_active, 2)
+
+        # No result TTL: a later request starts a fresh read after the first
+        # computation has settled.
+        await endpoint()
+        self.assertEqual(len(database.calls), 2 * (len(feature_names) + 1))
+
     async def test_event_router_prefers_async_local_projection(self) -> None:
         async def announcements(*_args, **_kwargs):
             return {"items": [], "async": True}

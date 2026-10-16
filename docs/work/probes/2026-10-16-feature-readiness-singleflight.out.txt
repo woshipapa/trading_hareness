@@ -1,0 +1,12 @@
+probe: docker compose source overlay
+path: /api/v1/data-readiness/features
+implementation: server-side in-flight single-flight; no result TTL/cache
+statuses: all 200
+pool_after_matrix: {"open": true, "min_size": 1, "max_size": 16, "pool_size": 9, "available": 9, "waiting": 0}
+results:
+  concurrency=1 p50_ms=2779.6 p95_ms=2779.6 max_ms=2779.6
+  concurrency=2 p50_ms=3857.1 p95_ms=3857.1 max_ms=3857.1
+  concurrency=4 p50_ms=2686.8 p95_ms=2689.0 max_ms=2689.0
+  concurrency=8 p50_ms=1710.6 p95_ms=1711.6 max_ms=1711.6
+comparison: previous same-source stress probe recorded concurrency=8 p95 about 7855 ms
+scope: local PostgreSQL/source overlay; read-only; no provider or owner tunnel access
