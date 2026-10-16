@@ -1,0 +1,44 @@
+host   check                          observed                                                                                         result  expected                           
+edge   adapter /health                ok                                                                                               PASS    ok                                 
+edge   adapter git_sha                861ecbfaa96e5dc647f9e530ca9720b92089badc                                                         FAIL    a38d1bae00c8                       
+edge   adapter release                hotfix-hotfix-20261015T173007Z-861ecbfaa96e-25717                                                FAIL    pinned (not hotfix*)               
+edge   adapter runtime_source         source-overlay                                                                                   FAIL    not source-overlay                 
+edge   runtime.env image              ghcr.io/woshipapa/trading-hareness-feishu-adapter:f9db189e9287f78e65ea72329b30f2a677dc8922       FAIL    ...:a38d1bae00c8...                
+edge   runtime.env overlay            true                                                                                             FAIL    false/unset                        
+edge   larkagentx bridge              ok                                                                                               PASS    ok                                 
+edge   bridge release                 hotfix-20261015T173007Z-861ecbfaa96e-25717                                                       FAIL    pinned from a38d1bae00c8           
+edge   XHS collector /health          ok                                                                                               PASS    ok / Spider_XHS / cookie configured
+edge   XHS source commit              83132b3331d5d15bfcbc0092841c7faf576b5c75                                                         PASS    pinned external commit             
+edge   XHS source digest              c83f859682403587f098f74ab8aea182421b186fdccdcb347281c189e5c7d9a1                                 PASS    64-char SHA-256                    
+edge   XHS component manifest         edge-xhs                                                                                         PASS    edge-xhs / clean source            
+edge   retired quant-intraday-edge    inactive/not-found                                                                               PASS    inactive/disabled                  
+owner  ~/trading_hareness             /home/stockpeer/.local/share/trading-hareness/releases/owner-full-20261016-ssd/trading_hareness  PASS    release symlink                    
+owner  quant-research :15682 /health  ok                                                                                               PASS    ok                                 
+owner  quant-research :15682 git_sha  a38d1bae00c84a49ff6efee798b581379fc8e41f                                                         PASS    a38d1bae00c8                       
+owner  quant-research :15682 release  owner-full-20261016-ssd                                                                          PASS    non-empty source-overlay release   
+owner  scheduler :15683 /health       ok                                                                                               PASS    ok                                 
+owner  scheduler :15683 git_sha       a38d1bae00c84a49ff6efee798b581379fc8e41f                                                         PASS    a38d1bae00c8                       
+owner  scheduler :15683 release       owner-full-20261016-ssd                                                                          PASS    non-empty source-overlay release   
+owner  quant source-overlay           true                                                                                             PASS    true                               
+owner  main runtime profile           intraday_edge                                                                                    PASS    intraday_edge                      
+owner  alembic revision               20261016_ow0130                                                                                  PASS    20261016_ow0130                    
+owner  intraday-secrets.env           present                                                                                          PASS    present                            
+
+expected sha: a38d1bae00c84a49ff6efee798b581379fc8e41f
+6 CHECK(S) FAILED
+/trading-hareness-peer-quant-research-1 running healthy
+APP_GIT_SHA=a38d1bae00c84a49ff6efee798b581379fc8e41f
+APP_RELEASE=owner-full-20261016-ssd
+INTRADAY_EVIDENCE_SPOOL_DIR=/var/lib/quant/intraday-spool
+INTRADAY_EVIDENCE_SPOOL_ENABLED=true
+INTRADAY_EVIDENCE_SPOOL_REPLAY_ENABLED=false
+/trading-hareness-peer-quant-research-scheduler-1 running healthy
+APP_GIT_SHA=a38d1bae00c84a49ff6efee798b581379fc8e41f
+APP_RELEASE=owner-full-20261016-ssd
+INTRADAY_EVIDENCE_SPOOL_DIR=/var/lib/quant/intraday-spool
+INTRADAY_EVIDENCE_SPOOL_ENABLED=true
+INTRADAY_EVIDENCE_SPOOL_REPLAY_ENABLED=true
+port=15682 status=ok sha=a38d1bae00c84a49ff6efee798b581379fc8e41f release=owner-full-20261016-ssd slow_total=0 spool_bytes=0
+port=15683 status=ok sha=a38d1bae00c84a49ff6efee798b581379fc8e41f release=owner-full-20261016-ssd slow_total=2 spool_bytes=0
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/vda3        69G   23G   43G  35% /

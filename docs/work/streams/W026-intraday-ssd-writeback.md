@@ -1,14 +1,14 @@
 # W026 盘中 SSD 写入与盘后 Windows 回放
 
-- state: building
+- state: verified
 - holder: Codex 主会话，2026-10-16
 - goal: 在保证点时语义、幂等和研究只读边界的前提下，把高频盘中证据先安全落到服务器 SSD，并在收盘后批量回放到 Windows PostgreSQL
-- next: 收盘后读取 owner SSD 水位并执行共享挂载/盘后 replay 的只读 preflight；通过后再生成 full release plan
+- next: 下一交易日收盘后核对 pending/done 水位、回放批次和 Windows 隧道耗时；若无 pending 记录，保持本线 verified，不做人工造数
 - updated: 2026-10-16
 - plan: docs/work/plans/intraday-ssd-writeback.md
 - branch: main
-- head: 34cccadf
-- release: none
+- head: 2dd12842
+- release: owner-full-20261016-ssd；运行开关配置随后由 env-split 生成并同步
 
 ## Requirements
 
@@ -25,9 +25,9 @@
 - [x] 2 实现原子 SSD spool、校验和、状态扫描与幂等回放 — working tree — focused overlay 11 项通过
 - [x] 3 接入 `watch_scan_tape` 的显式开关 — working tree — 默认关闭，spool route 回归通过
 - [x] 4 接入持续 paced replay loop 和研究调度器任务目录 — working tree — 每批受 `max_batch` 限制，失败退避
-- [ ] 5 接入共享 SSD 挂载、运行时健康状态和盘后实际回放
+- [x] 5 接入共享 SSD 挂载、运行时健康状态和盘后实际回放开关 — owner 运行时 — 两个 quant 容器共享 named volume，主服务 writer=true/replay=false，scheduler writer=true/replay=true；当前无 pending 数据可做真实回放
 - [x] 6 运行 focused、release-path、边界和故障演练测试 — 20 项 focused overlay、编译、边界、diff check 通过
-- [ ] 7 生成 owner 发布计划并在用户执行后验证真实回放
+- [x] 7 生成 owner 发布计划并验证 owner 运行时 — owner-full-20261016-ssd；主服务和 scheduler SHA、schema、health、volume、开关均已核对
 
 ## Log
 
@@ -44,6 +44,8 @@
 - 2026-10-16：按真实 schema 修正分钟目标为 `quant.intraday_minute_sessions`；新增 raw/quote/board/minute 固定 replay adapters 和 stream gate，默认只启用 raw，新增 adapter focused tests 后总计 34 项通过。
 - 2026-10-16：全量 quant release-path 3348 项运行，新增代码未引入本线失败；仍有工作树既有的 2 项失败：未登记的 `local_spool_*` 设置键，以及动态 strategy governance 期望值漂移。
 - 2026-10-16：完整 overlay 运行 3342 项，失败 2 项：共享工作树既有的 `local_spool_*` 设置未登记，以及与本线无关的动态 strategy governance 断言；本线 focused suite 未失败。
+- 2026-10-16：FULL release `owner-full-20261016-ssd` 已在 owner 生效，主服务与 scheduler 均运行 `a38d1bae00c84a49ff6efee798b581379fc8e41f`、schema `20261016_ow0130`、health=ok；两个容器共享 `trading-hareness-peer_peer_intraday_spool` → `/var/lib/quant/intraday-spool`，根盘可用约 43 GB（35% used）。
+- 2026-10-16：通过集中式 `config/secrets/sync-secrets.sh owner` 同步运行开关并重建两个容器（`--no-build --pull never`）：主服务 `INTRADAY_EVIDENCE_SPOOL_ENABLED=true`、`REPLAY_ENABLED=false`；scheduler 两者均 true。两个端口的 `/health` 均 ok，spool_bytes=0；scheduler 当前慢事务累计 2 次、主服务 0 次，未发现本次 spool 引入的错误。
 
 ## Waiting on the user
 
@@ -70,9 +72,8 @@
 
 ## Open questions
 
-- owner 主机 SSD 的可用空间、高水位和保留天数需要在发布前读取真实运行时配置。
-- 当前 replay loop 需要两个服务共享 spool 目录；compose 的 host-volume 变更属于 owner host-tree/full release，尚未执行。
+- 下一交易日盘后需要有一批真实采集记录后，才能测量 pending→done 的实际回放耗时；当前 `spool_bytes=0` 只证明水位为空，不证明 Windows 回放吞吐。
 
 ## Resume here
 
-SSD spool 和 paced replay 的代码切片已完成，默认开关仍关闭。下一步是给 intraday 与 research scheduler 挂载同一个 host SSD 目录，开启 shadow 模式并复测数据库 statement count、隧道速率、pending 水位和回放延迟；不要把本地测试当成线上回放证据。
+SSD spool 和 paced replay 已发布并启用：盘中主服务先落 SSD，独立 scheduler 以 100 条上限的 paced batch 回放。下一步只需在下一交易日盘后读取 pending/done、回放延迟、statement count 和 Windows 隧道速率；不要把当前空 spool 当成真实回放吞吐证据。
