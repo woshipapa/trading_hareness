@@ -35,8 +35,24 @@ async def run_iteration(
     active, _ = await realtime_session()
     if not active:
         return pruned_on, interval
-    longhu_circuit_open = "order_book_quote" in await open_capabilities("longhuvip", ["order_book_quote"])
-    tencent_circuit_open = "order_book_quote" in await open_capabilities("tencent_free", ["order_book_quote"])
+    # These are independent local circuit reads.  Run them together after the
+    # session gate so an inactive market does not create needless DB work.
+    longhu_task = asyncio.create_task(
+        open_capabilities("longhuvip", ["order_book_quote"]), name="order-book-longhu-circuit",
+    )
+    tencent_task = asyncio.create_task(
+        open_capabilities("tencent_free", ["order_book_quote"]), name="order-book-tencent-circuit",
+    )
+    try:
+        longhu_open, tencent_open = await asyncio.gather(longhu_task, tencent_task)
+    except BaseException:
+        for task in (longhu_task, tencent_task):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(longhu_task, tencent_task, return_exceptions=True)
+        raise
+    longhu_circuit_open = "order_book_quote" in longhu_open
+    tencent_circuit_open = "order_book_quote" in tencent_open
     if longhu_circuit_open and tencent_circuit_open:
         # Only skip when both the Longhu primary and Tencent fallback are
         # unavailable.  A Tencent circuit must never suppress a healthy

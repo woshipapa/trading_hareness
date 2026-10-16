@@ -115,6 +115,49 @@ class IntradayOrderBookRunnerTests(unittest.TestCase):
         state = asyncio.run(check())
         self.assertEqual(state, (date(2026, 8, 21), 3.0))
 
+    def test_provider_circuit_checks_overlap_after_session_gate(self) -> None:
+        now = datetime(2026, 8, 21, 2, tzinfo=timezone.utc)
+
+        async def check():
+            providers: set[str] = set()
+            both_started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def realtime_session():
+                return True, "open"
+
+            async def open_capabilities(provider, _capabilities):
+                providers.add(provider)
+                if len(providers) == 2:
+                    both_started.set()
+                await release.wait()
+                return set()
+
+            async def load_symbols():
+                return []
+
+            async def prune_before(*_args):
+                return None
+
+            async def storage_allowed():
+                return False, {"state": "full"}
+
+            async def capture(_symbols):
+                raise AssertionError("storage guard should skip capture")
+
+            task = asyncio.create_task(run_iteration(
+                None, realtime_session=realtime_session, open_capabilities=open_capabilities,
+                load_symbols=load_symbols, prune_before=prune_before, storage_allowed=storage_allowed,
+                capture=capture, interval_seconds=lambda: 3.0, retention_days=lambda: 7, now_utc=lambda: now,
+            ))
+            try:
+                await asyncio.wait_for(both_started.wait(), timeout=1)
+            finally:
+                release.set()
+            return await task
+
+        self.assertEqual(asyncio.run(check()), (date(2026, 8, 21), 3.0))
+
     def test_runner_has_no_main_or_http_client_dependency(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "app" / "intraday_order_book_runner.py").read_text(encoding="utf-8")
         self.assertNotIn("from .main", source)

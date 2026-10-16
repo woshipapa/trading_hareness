@@ -46,6 +46,7 @@
 - 2026-10-16：扫描历史读模型同步/异步边界 focused overlay 85 项通过，前端 14 个测试文件、68 项通过，typecheck/build 和 `node scripts/verify-api-contract.mjs` 通过；全量 quant overlay 3324 项仍只剩共享工作树 `local_spool_*` settings 登记失败。
 - 2026-10-16：主扫描启用有界 prepare/evaluate/commit 两阶段协议。第一事务提交扫描 receipt、组合快照和点时输入并标记 `partial`；释放数据库连接后执行纯规则评估；第二事务重新读取事件状态、批量写入研究证据和信号，成功标记 `completed`，失败通过独立恢复事务标记 `failed`。轻量 replay/test adapter 继续使用原单事务回退；新增 5 项 focused overlay 回归。
 - 2026-10-16 09:08 Asia/Shanghai：开盘前发布冻结。两阶段 scan、影子轮换、批内 overlap、scan timing 和前端可视化已完成本地验证；线上仍是旧 runtime，待 owner schema gate、发布窗口和同交易日 partial/failed、scan_performance 回填，未执行 `--apply`。
+- 2026-10-16：order-book 运行器在会话已开启后并行读取 Longhu/Tencent 两个本地熔断状态；两次读取互不依赖，任一失败仍取消兄弟任务并沿用原失败路径，provider 请求、写入和熔断语义未放宽。`tests.test_intraday_order_book_runner` + runtime focused overlay 8 项通过；owner 发布后仍需观察池等待和 provider 拒绝率。
 
 ## Waiting on the user
 
