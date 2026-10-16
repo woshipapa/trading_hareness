@@ -46,6 +46,15 @@ def build_research_readiness_router(
             return await async_feature_readiness(async_database)
         return await run_database_blocking(lambda: _sync_feature_readiness(database, feature_readiness_fn))
 
+    async def read_historical_estimate(key: tuple[int, bool, int | None]) -> dict[str, Any]:
+        years, include_minute, universe_symbols = key
+        request = HistoricalCoverageEstimateRequest(
+            years=years, include_minute=include_minute, universe_symbols=universe_symbols,
+        )
+        if async_database:
+            return await async_historical_estimate(async_database, request)
+        return await run_database_blocking(lambda: historical_estimate_fn(request))
+
     # A dashboard burst can arrive from several tabs or browser processes at
     # once.  Share only the active computation: the result is deliberately not
     # cached, so every burst after the first still observes the current read
@@ -55,6 +64,12 @@ def build_research_readiness_router(
         ttl_seconds=0,
         cacheable=lambda _value: False,
         max_entries=1,
+    )
+    historical_estimate_inflight = AsyncKeyedMemo(
+        read_historical_estimate,
+        ttl_seconds=0,
+        cacheable=lambda _value: False,
+        max_entries=4,
     )
 
     @router.get("/api/v1/research-frameworks")
@@ -81,12 +96,7 @@ def build_research_readiness_router(
     async def historical_data_estimate(
         years: int = 3, include_minute: bool = False, universe_symbols: int | None = None,
     ) -> dict[str, Any]:
-        request = HistoricalCoverageEstimateRequest(
-            years=years, include_minute=include_minute, universe_symbols=universe_symbols,
-        )
-        if async_database:
-            return await async_historical_estimate(async_database, request)
-        return historical_estimate_fn(request)
+        return await historical_estimate_inflight.get((years, include_minute, universe_symbols))
 
     @router.get("/api/v1/data-readiness/features")
     async def feature_readiness() -> dict[str, Any]:

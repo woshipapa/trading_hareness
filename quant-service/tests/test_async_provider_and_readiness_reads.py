@@ -374,6 +374,55 @@ class AsyncProviderAndReadinessReadTests(unittest.IsolatedAsyncioTestCase):
         await endpoint()
         self.assertEqual(len(database.calls), 2 * (len(feature_names) + 1))
 
+    async def test_historical_estimate_router_shares_matching_requests_only(self) -> None:
+        class Result:
+            def __init__(self, row=None, rows=None): self.row, self.rows = row, rows or []
+            async def fetchone(self): return self.row
+            async def fetchall(self): return self.rows
+
+        class Database:
+            def __init__(self): self.calls = []
+
+            class Tx:
+                def __init__(self, database): self.database = database
+                async def __aenter__(self): return self
+                async def __aexit__(self, *_args): return False
+                async def execute(self, sql, _params=()):
+                    database = self.database
+                    database.calls.append(sql)
+                    await asyncio.sleep(0.01)
+                    if "quant.sectors" in sql: return Result({"total": 0})
+                    if "daily_fundamentals" in sql: return Result({"fundamental_symbols": 0})
+                    if "daily_trade_limits" in sql: return Result({"limit_symbols": 0})
+                    if "market_bars_minute" in sql: return Result({"minute_symbols": 0})
+                    if "canonical_bars_daily" in sql:
+                        return Result({"first_bar_date": None, "latest_bar_date": None,
+                                       "bar_days": 0, "full_cross_section_days": 0,
+                                       "max_symbols_on_day": 0})
+                    if "tushare_raw_records" in sql: return Result(rows=[])
+                    return Result({"symbols": 5500})
+
+            def transaction(self): return self.Tx(self)
+
+        database = Database()
+        router = build_research_readiness_router(
+            object(), lambda request: {"years": request.years}, lambda _database: {},
+            lambda _database: {}, async_database=database,
+        )
+        endpoint = next(route.endpoint for route in router.routes
+                        if route.path == "/api/v1/data-readiness/history-estimate")
+
+        first, second = await asyncio.gather(endpoint(), endpoint())
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(database.calls), 7)
+
+        # A different request key must not join the previous computation, and
+        # a settled request is never served from a result cache.
+        await endpoint(years=4)
+        await endpoint()
+        self.assertEqual(len(database.calls), 3 * 7)
+
     async def test_event_router_prefers_async_local_projection(self) -> None:
         async def announcements(*_args, **_kwargs):
             return {"items": [], "async": True}
