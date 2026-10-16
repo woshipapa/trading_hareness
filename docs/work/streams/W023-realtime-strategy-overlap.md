@@ -3,7 +3,7 @@
 - state: building
 - holder: Codex 主会话，2026-10-15
 - goal: 审查并在不改变点时语义、研究只读边界和 owner 单写规则的前提下，让实时行情采集、持久化和策略计算形成有界的异步流水线，减少等待数据库写入后才计算的空档
-- next: 完成本地发布路径回归并生成 owner code/config 计划；发布后按同一交易日核对两阶段事务耗时、partial/failed 计数和 scan_performance
+- next: 在发布窗口内按 owner schema gate 和独立 release unit 执行计划；发布后按同一交易日核对两阶段事务耗时、partial/failed 计数和 scan_performance
 - updated: 2026-10-16
 - plan: docs/work/plans/realtime-strategy-overlap.md
 - branch: main
@@ -45,6 +45,7 @@
 - 2026-10-16：最新扫描只读投影在原单条 SQL 内增加最多 30 条 `scan_performance` 历史，前端新增最近扫描总耗时趋势图；不改变信号/策略输入。local compose 五次中位约 6.315 ms → 7.166 ms，statement count 仍为 1，证据为 `docs/work/probes/2026-10-16-latest-scan-history.py` / `.out.txt`。
 - 2026-10-16：扫描历史读模型同步/异步边界 focused overlay 85 项通过，前端 14 个测试文件、68 项通过，typecheck/build 和 `node scripts/verify-api-contract.mjs` 通过；全量 quant overlay 3324 项仍只剩共享工作树 `local_spool_*` settings 登记失败。
 - 2026-10-16：主扫描启用有界 prepare/evaluate/commit 两阶段协议。第一事务提交扫描 receipt、组合快照和点时输入并标记 `partial`；释放数据库连接后执行纯规则评估；第二事务重新读取事件状态、批量写入研究证据和信号，成功标记 `completed`，失败通过独立恢复事务标记 `failed`。轻量 replay/test adapter 继续使用原单事务回退；新增 5 项 focused overlay 回归。
+- 2026-10-16 09:08 Asia/Shanghai：开盘前发布冻结。两阶段 scan、影子轮换、批内 overlap、scan timing 和前端可视化已完成本地验证；线上仍是旧 runtime，待 owner schema gate、发布窗口和同交易日 partial/failed、scan_performance 回填，未执行 `--apply`。
 
 ## Waiting on the user
 

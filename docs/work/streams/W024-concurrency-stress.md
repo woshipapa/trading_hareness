@@ -3,7 +3,7 @@
 - state: building
 - holder: Codex 主会话，2026-10-16
 - goal: 在 owner 4 核、约 7.3 GiB 内存和名义 200 Mbps 的资源约束下，用隔离压力测试区分当前配置、软件上限和可安全提高的并发值
-- next: 按 `docs/RELEASE_SYNC_47.md` 生成 owner code/config 发布计划；发布前补齐同交易日只读连接、锁等待、隧道速率和 provider 拒绝率证据
+- next: 按 `docs/RELEASE_SYNC_47.md` 在允许窗口生成并执行 owner FULL release；发布前后补齐同交易日只读连接、锁等待、隧道速率和 provider 拒绝率证据
 - updated: 2026-10-16
 - plan: docs/work/plans/concurrency-stress.md
 - branch: main
@@ -55,6 +55,7 @@
 - 2026-10-16 02:55 Asia/Shanghai：盘末分钟 capture 的 owner 写入再收敛：观察池 instrument 注册改为一次 `unnest` 批量 upsert，所有 symbol 的分钟参数合并为一次 `executemany`，历史 retention DELETE 也由逐票改为 `ANY(text[])`；这条路径的 200 只事务不再按 symbol 叠加 tunnel 往返，研究证据与幂等键不变。minute/provider overlay 78 项通过。
 - 2026-10-16 02:58 Asia/Shanghai：最新完整 overlay 运行 3298 项，仍只有工作区其他会话 `local_spool_*` 读取未登记环境变量的 `test_settings` 失败；本轮分钟 capture、scan overlap、盘口批次与 timing contract 无新增失败。
 - 2026-10-16：观察台新增 executor 容量、进程内存、磁盘和网络水位可视化；health payload 的异常或缺失值会显示为未知，不会推断出额外容量。前端 14 个测试文件、67 项通过，typecheck/build 通过，提交 `d3bb8b42`；未改变任何运行上限。
+- 2026-10-16 09:08 Asia/Shanghai：开盘前冻结。软件默认 ceiling、provider-aware batching 和合成压力档已完成并记录；生产仍保持 owner 默认档，licensed Longhu 8 路、Tencent 单批 80 和数据库/锁预算未越过。owner 配置未发布，需在窗口内结合 0123--0130 schema gate 后回填真实 CPU/RSS、连接等待、锁等待、隧道速率和 provider 拒绝率。
 
 ## Waiting on the user
 
