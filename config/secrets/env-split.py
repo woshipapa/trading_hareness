@@ -98,6 +98,10 @@ def build_owner(local: dict) -> str:
         f"PEER_RESEARCH_BOARD_BACKFILL_ENABLED=true",
         f"PEER_RESEARCH_THS_BACKFILL_ENABLED=true",
         f"PEER_FEISHU_DIRECT_ENABLED=true",
+        # 收盘后的 SSD evidence 回放由独立 research scheduler 承担；主采集进程
+        # 只写共享 spool，不执行 replay，避免盘中和 Windows PG 写入互相争用。
+        f"PEER_INTRADAY_EVIDENCE_SPOOL_ENABLED={get(local, 'OWNER_PEER_INTRADAY_EVIDENCE_SPOOL_ENABLED', 'true')}",
+        f"PEER_INTRADAY_EVIDENCE_SPOOL_REPLAY_ENABLED={get(local, 'OWNER_PEER_INTRADAY_EVIDENCE_SPOOL_REPLAY_ENABLED', 'true')}",
         "",
         "# ── 远端端口 ──",
         f"REMOTE_DB_PORT=15432",
