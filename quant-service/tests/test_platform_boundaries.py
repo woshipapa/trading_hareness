@@ -99,6 +99,43 @@ class PlatformBoundaryTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][2], {"timeout_seconds": 15})
 
+    def test_market_overview_overlaps_sync_history_fallback_with_async_snapshot(self):
+        events = []
+        history_started = asyncio.Event()
+        overview_started = asyncio.Event()
+
+        def history_sync():
+            events.append("history-sync")
+            return {"estimate": "sync"}
+
+        async def bounded(action, *args, **kwargs):
+            events.append("history-start")
+            history_started.set()
+            await overview_started.wait()
+            return action(*args)
+
+        async def overview(_database, history_estimate):
+            events.append(("overview-start", history_estimate))
+            overview_started.set()
+            await history_started.wait()
+            return {"history_estimate": history_estimate}
+
+        router = build_market_result_reads_router(
+            object(), {"daily"}, lambda _connection: {}, lambda _connection: {}, history_sync,
+            lambda: Path("/tmp/offline"), lambda _connection: {}, async_database=object(),
+        )
+        endpoint = next(route.endpoint for route in router.routes if route.path == "/api/v1/research/overview")
+
+        async def check():
+            with patch("app.routers.market_result_reads.run_database_blocking", new=bounded), \
+                    patch("app.routers.market_result_reads.async_read_model.research_overview", new=overview):
+                return await endpoint()
+
+        payload = asyncio.run(check())
+        self.assertEqual(payload["history_estimate"], {"estimate": "sync"})
+        self.assertEqual(events[:2], ["history-start", ("overview-start", {})])
+        self.assertEqual(events[-1], "history-sync")
+
     def test_post_close_refresh_orchestrator_continues_after_stage_failure_and_releases_lease(self):
         calls: list[str] = []
         lease = AsyncMock(side_effect=[True, True, True, True])
